@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { StoryValidationError, validateStoryDefinition } from '../src/story-schema.js';
+import {
+  loadStoryDefinition,
+  StoryValidationError,
+  validateStoryDefinition
+} from '../src/story-schema.js';
 
 const supportedActionTypes = new Set(['map.mode']);
 
@@ -69,4 +73,28 @@ test('malformed and unsupported content blocks are rejected', () => {
 test('malformed and unsupported action descriptors are rejected', () => {
   assertInvalid((story) => { story.states[0].map.enter[0] = {}; }, /action.*type/i);
   assertInvalid((story) => { story.states[0].map.enter[0] = { type: 'callback', name: 'anything' }; }, /unsupported action type.*callback/i);
+});
+
+test('story loader fetches JSON and validates it before returning', async () => {
+  const definition = validStory();
+  const loaded = await loadStoryDefinition('/story.json', {
+    supportedActionTypes,
+    fetchImpl: async (url) => ({
+      ok: true,
+      async json() {
+        assert.equal(url, '/story.json');
+        return definition;
+      }
+    })
+  });
+  assert.equal(loaded, definition);
+});
+
+test('story loader reports HTTP failures clearly', async () => {
+  await assert.rejects(
+    loadStoryDefinition('/missing.json', {
+      fetchImpl: async () => ({ ok: false, status: 404 })
+    }),
+    /could not load story.*404/i
+  );
 });

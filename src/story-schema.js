@@ -118,3 +118,15 @@ export function validateStoryDefinition(definition, { supportedActionTypes } = {
 
   return definition;
 }
+
+export async function loadStoryDefinition(url, {
+  fetchImpl = fetch,
+  supportedActionTypes
+} = {}) {
+  const response = await fetchImpl(url);
+  if (!response.ok) {
+    throw new Error(`Could not load story definition "${url}" (${response.status}).`);
+  }
+  const definition = await response.json();
+  return validateStoryDefinition(definition, { supportedActionTypes });
+}
