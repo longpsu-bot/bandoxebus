@@ -13,6 +13,7 @@ function entry(index, { ratio, top, bottom, intersecting = true }) {
 
 test('POC query gate requires the exact storyShell=poc value', () => {
   assert.equal(shell.isStoryShellPocEnabled('?storyShell=poc'), true);
+  assert.equal(shell.isStoryShellPocEnabled('?storyShell=poc&x=1'), true);
   assert.equal(shell.isStoryShellPocEnabled('?x=1&storyShell=poc'), true);
   assert.equal(shell.isStoryShellPocEnabled(''), false);
   assert.equal(shell.isStoryShellPocEnabled('?storyShell=legacy'), false);
