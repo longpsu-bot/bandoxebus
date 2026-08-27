@@ -18,8 +18,11 @@ Mở `http://localhost:8080`. Không mở trực tiếp bằng `file://`, vì tr
 - `src/comparison.js`: lớp biến đổi thuần dữ liệu, không phụ thuộc UI. Tuyến dùng ngưỡng hành lang 40 m để hấp thụ sai lệch lấy mẫu giữa hai KML; điểm dừng dùng ID ổn định trước, sau đó mới dùng ngưỡng 25 m.
 - `src/road-labels.js`: lọc các đối tượng `transportation_name` chạy song song với tuyến; đường cắt ngang và đường ngoài hành lang bị loại. Phép lọc nặng chạy một lần trong Web Worker, chuẩn bị sẵn cache cho từng chế độ để đổi chế độ không khóa giao diện.
 - `src/road-label-worker.js`: xử lý nhãn đường ngoài main thread và trả về cache hiện hữu / điều chỉnh / đối chiếu.
-- `src/presentation.js`: hằng số layout, reducer trạng thái và cấu hình camera thuần cho trình chiếu.
-- `src/presentation-content.js`: nội dung riêng của tuyến 61-2 gồm 7 slide, tách rõ `scene` và `content`.
+- `data/stories/route-61-2.story.json`: thứ tự, nội dung có cấu trúc và hành động bản đồ của 7 trạng thái Route 61-2.
+- `data/stories/story.schema.json`: hợp đồng JSON Schema V1 có thể dùng cho công cụ biên tập trong tương lai.
+- `src/story-schema.js`, `src/story-runtime.js`, `src/story-action-runner.js`: xác thực, vòng đời và điều phối hành động tổng quát, không mang ngữ nghĩa Route 61-2.
+- `src/route-61-2-story-actions.js`: adapter mỏng nối các action khai báo với khả năng bản đồ hiện có.
+- `src/presentation.js`: hằng số chế độ xem và cấu hình camera thuần cho trình chiếu.
 - `src/presentation-metrics.js`: chuẩn bị chỉ số runtime từ kết quả so sánh hiện có, đồng thời định dạng và liên kết metric theo khóa ngữ nghĩa.
 - `src/presentation-renderer.js`: renderer DOM an toàn cho một presentation shell dùng chung; không hiển thị `presenterNote`.
 - `src/app.js`: MapLibre, thứ tự lớp, camera, điều khiển, POI và mô phỏng xe buýt.
@@ -35,7 +38,7 @@ Hai tập điểm dừng nguồn hiện tại giống nhau và không có mã tr
 - `Chênh lệch` là mặc định: giữ lại / bổ sung / loại bỏ.
 - `Hiện hữu` và `Điều chỉnh` hiển thị từng tuyến riêng.
 - `Đối chiếu` dùng hai nét lệch nhẹ để xem đồng thời. True swipe được hoãn vì nền hiện tại chỉ có một MapLibre instance; thêm swipe sạch sẽ cần hai map được đồng bộ hoặc custom render pass.
-- Presentation Content V2 có 7 slide và 4 layout: `hero`, `metrics`, `narrative`, `map-focus`. Mỗi slide tách nội dung trình bày khỏi scene bản đồ; nút trước/sau, thanh tiến độ, phím `←`, `→`, `Escape`, camera transitions và `prefers-reduced-motion` vẫn được giữ.
+- Generic Story Runtime V1 đọc một story JSON có phiên bản. Bảy trạng thái và 4 layout (`hero`, `metrics`, `narrative`, `map-focus`) giữ nguyên; nút trước/sau, thanh tiến độ, phím `←`, `→`, `Escape`, camera transitions và `prefers-reduced-motion` vẫn được giữ. Đổi thứ tự hoặc nội dung JSON không cần sửa runtime JavaScript.
 - Slide 05 dùng dữ liệu tĩnh Overture Buildings làm lớp `fill-extrusion`. Nếu tệp Overture thiếu hoặc không hợp lệ, Morphology V2 được dùng làm dự phòng; các slide khác không bật bối cảnh công nghiệp.
 - Nền sản xuất là OpenFreeMap Dark được tinh giản tại runtime: bỏ lớp công trình nền, POI thương mại/tiện ích dư thừa, số nhà và lớp phủ dùng pattern. Tuyến, đường, nước, ranh và nhãn địa danh hữu ích vẫn được giữ.
 - Mô phỏng xe buýt giữ thời gian chuyển động liên tục nhưng giới hạn cập nhật DOM ở 30 Hz để tránh tranh chấp main thread với MapLibre.
