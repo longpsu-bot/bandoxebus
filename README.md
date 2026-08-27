@@ -38,6 +38,8 @@ Hai tập điểm dừng nguồn hiện tại giống nhau và không có mã tr
 - `Chênh lệch` là mặc định: giữ lại / bổ sung / loại bỏ.
 - `Hiện hữu` và `Điều chỉnh` hiển thị từng tuyến riêng.
 - `Đối chiếu` dùng hai nét lệch nhẹ để xem đồng thời. True swipe được hoãn vì nền hiện tại chỉ có một MapLibre instance; thêm swipe sạch sẽ cần hai map được đồng bộ hoặc custom render pass.
+- URL bình thường `/` mở ở chế độ Khám phá; nút `Bắt đầu câu chuyện` khởi chạy Story Shell như trải nghiệm kể chuyện có hướng dẫn tiêu chuẩn.
+- Fallback cũ chỉ được chọn rõ ràng bằng `/?storyShell=legacy`. Alias tương thích tạm thời `/?storyShell=poc` vẫn chọn Story Shell, nhưng không phải URL được khuyến nghị.
 - Generic Story Runtime V1 đọc một story JSON có phiên bản. Bảy trạng thái và 4 layout (`hero`, `metrics`, `narrative`, `map-focus`) giữ nguyên; nút trước/sau, thanh tiến độ, phím `←`, `→`, `Escape`, camera transitions và `prefers-reduced-motion` vẫn được giữ. Đổi thứ tự hoặc nội dung JSON không cần sửa runtime JavaScript.
 - Slide 05 dùng dữ liệu tĩnh Overture Buildings làm lớp `fill-extrusion`. Nếu tệp Overture thiếu hoặc không hợp lệ, Morphology V2 được dùng làm dự phòng; các slide khác không bật bối cảnh công nghiệp.
 - Nền sản xuất là OpenFreeMap Dark được tinh giản tại runtime: bỏ lớp công trình nền, POI thương mại/tiện ích dư thừa, số nhà và lớp phủ dùng pattern. Tuyến, đường, nước, ranh và nhãn địa danh hữu ích vẫn được giữ.
