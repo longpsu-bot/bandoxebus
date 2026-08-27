@@ -44,3 +44,21 @@ export function selectActiveStoryStep(entries, {
     });
   return candidates[0]?.index ?? null;
 }
+
+export function renderStorySteps({ container, states, metrics, renderContent, documentRef = document }) {
+  const sections = states.map((state, index) => {
+    const section = documentRef.createElement('section');
+    section.className = 'story-step';
+    section.dataset.storyStateId = state.id;
+    section.dataset.storyStateIndex = String(index);
+    section.setAttribute('aria-current', 'false');
+
+    const content = documentRef.createElement('article');
+    renderContent(content, state, metrics, documentRef);
+    content.classList.add('story-step__content');
+    section.append(content);
+    return section;
+  });
+  container.replaceChildren(...sections);
+  return sections;
+}
