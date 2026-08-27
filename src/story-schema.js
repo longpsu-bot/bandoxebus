@@ -65,15 +65,26 @@ function validateBlock(block, path) {
   }
 }
 
-function validateAction(action, path, supportedActionTypes) {
-  requireObject(action, path);
-  requireString(action.type, `${path} action.type`);
-  if (supportedActionTypes && !supportedActionTypes.has(action.type)) {
-    fail(`${path} has unsupported action type "${action.type}".`);
+function getActionContract(actionContracts, type) {
+  if (actionContracts instanceof Map) return actionContracts.get(type);
+  if (isObject(actionContracts) && Object.hasOwn(actionContracts, type)) {
+    return actionContracts[type];
   }
+  return undefined;
 }
 
-function validateState(state, index, supportedActionTypes) {
+function validateAction(action, path, actionContracts) {
+  requireObject(action, path);
+  requireString(action.type, `${path} action.type`);
+  const contract = getActionContract(actionContracts, action.type);
+  if (typeof contract !== 'function') {
+    fail(`${path} has unsupported action type "${action.type}".`);
+  }
+  const issue = contract(action, path);
+  if (issue) fail(issue);
+}
+
+function validateState(state, index, actionContracts) {
   const path = `states[${index}]`;
   requireObject(state, path);
   requireString(state.id, `${path}.id`);
@@ -91,12 +102,12 @@ function validateState(state, index, supportedActionTypes) {
   for (const phase of ['enter', 'exit']) {
     if (!Array.isArray(state.map[phase])) fail(`${path}.map.${phase} must be an array.`);
     state.map[phase].forEach((action, actionIndex) => (
-      validateAction(action, `${path}.map.${phase}[${actionIndex}]`, supportedActionTypes)
+      validateAction(action, `${path}.map.${phase}[${actionIndex}]`, actionContracts)
     ));
   }
 }
 
-export function validateStoryDefinition(definition, { supportedActionTypes } = {}) {
+export function validateStoryDefinition(definition, { actionContracts } = {}) {
   requireObject(definition, 'story');
   requireString(definition.schemaVersion, 'schemaVersion');
   if (definition.schemaVersion !== STORY_SCHEMA_VERSION) {
@@ -108,10 +119,9 @@ export function validateStoryDefinition(definition, { supportedActionTypes } = {
     fail('states must be a non-empty array.');
   }
 
-  const actionTypes = supportedActionTypes ? new Set(supportedActionTypes) : null;
   const ids = new Set();
   definition.states.forEach((state, index) => {
-    validateState(state, index, actionTypes);
+    validateState(state, index, actionContracts);
     if (ids.has(state.id)) fail(`Duplicate state ID "${state.id}".`);
     ids.add(state.id);
   });
@@ -121,12 +131,12 @@ export function validateStoryDefinition(definition, { supportedActionTypes } = {
 
 export async function loadStoryDefinition(url, {
   fetchImpl = fetch,
-  supportedActionTypes
+  actionContracts
 } = {}) {
   const response = await fetchImpl(url);
   if (!response.ok) {
     throw new Error(`Could not load story definition "${url}" (${response.status}).`);
   }
   const definition = await response.json();
-  return validateStoryDefinition(definition, { supportedActionTypes });
+  return validateStoryDefinition(definition, { actionContracts });
 }

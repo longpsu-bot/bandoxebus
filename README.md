@@ -21,7 +21,7 @@ Mở `http://localhost:8080`. Không mở trực tiếp bằng `file://`, vì tr
 - `data/stories/route-61-2.story.json`: thứ tự, nội dung có cấu trúc và hành động bản đồ của 7 trạng thái Route 61-2.
 - `data/stories/story.schema.json`: hợp đồng JSON Schema V1 có thể dùng cho công cụ biên tập trong tương lai.
 - `src/story-schema.js`, `src/story-runtime.js`, `src/story-action-runner.js`: xác thực, vòng đời và điều phối hành động tổng quát, không mang ngữ nghĩa Route 61-2.
-- `src/route-61-2-story-actions.js`: adapter mỏng nối các action khai báo với khả năng bản đồ hiện có.
+- `src/route-61-2-story-actions.js`: ranh giới hợp đồng dự án; xác thực chặt từng action Route 61-2 trước khi adapter mỏng gọi khả năng bản đồ hiện có.
 - `src/presentation.js`: hằng số chế độ xem và cấu hình camera thuần cho trình chiếu.
 - `src/presentation-metrics.js`: chuẩn bị chỉ số runtime từ kết quả so sánh hiện có, đồng thời định dạng và liên kết metric theo khóa ngữ nghĩa.
 - `src/presentation-renderer.js`: renderer DOM an toàn cho một presentation shell dùng chung; không hiển thị `presenterNote`.

@@ -27,6 +27,8 @@ State content declares one presentation `layout` and an ordered `blocks` array. 
 
 The generic runtime dispatches actions strictly by their declared `type`. It knows nothing about Route 61-2, MapLibre layers, POIs, industrial context, or route geometry. Unknown action types fail clearly.
 
+Validation has two deliberately separate layers. `data/stories/story.schema.json` is the generic structural Story V1 schema. At load time, `src/story-schema.js` delegates each action descriptor to an injected project action-contract registry. The Route 61-2 contracts live beside its handlers in `src/route-61-2-story-actions.js`, where required fields, supported values, primitive types, camera bounds, and unexpected properties are checked before the runtime can execute an action. A future project can supply different contracts without editing the generic validator.
+
 The Route 61-2 adapter registers the V1 action vocabulary:
 
 - `map.mode`
@@ -42,6 +44,10 @@ Handlers call existing project capabilities. The JSON contains data only: no fun
 The runtime validates a definition, exposes the current state/content, and supports activation, deactivation, next, previous, and direct navigation by index or ID. A transition runs the old state's exit actions before the new state's enter actions. Re-activating the current active state is a no-op; leaving and later re-entering a state runs one clean lifecycle each time.
 
 The existing presentation shell remains responsible for buttons, dots, keyboard/Escape behavior, animation classes, and responsive layout. Its count, labels, order, content, and map behavior come from the runtime and story definition.
+
+## Verification boundary
+
+GitHub Actions runs the authoritative dependency-free source/runtime/unit/config gate with `npm test`. Browser rendering, MapLibre/OpenFreeMap integration, Overture context, and visual/performance certification remain a targeted local browser gate; they are intentionally not reproduced in CI V1.
 
 ## Responsive and future-editor rules
 

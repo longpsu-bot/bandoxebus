@@ -29,7 +29,7 @@ import { createStoryRuntime } from './story-runtime.js';
 import {
   createRouteRevealController,
   createRoute612StoryActionHandlers,
-  ROUTE_612_STORY_ACTION_TYPES
+  ROUTE_612_STORY_ACTION_CONTRACTS
 } from './route-61-2-story-actions.js';
 import { createUrbanContextController } from './urban-context.js';
 import { prepareBasemapStyle, stripOpenFreeMapDarkStyle } from './basemap-style.js';
@@ -910,7 +910,7 @@ async function initialize() {
   try {
     const [storyDefinition, styleResponse, industrialZoneResponse, overtureBuildingResponse] = await Promise.all([
       loadStoryDefinition('./data/stories/route-61-2.story.json', {
-        supportedActionTypes: ROUTE_612_STORY_ACTION_TYPES
+        actionContracts: ROUTE_612_STORY_ACTION_CONTRACTS
       }),
       fetch('./style-openfreemap-dark.json'),
       fetch('./data/industrial-zone-poc.geojson'),

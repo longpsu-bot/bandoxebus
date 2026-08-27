@@ -6,7 +6,9 @@ import {
   validateStoryDefinition
 } from '../src/story-schema.js';
 
-const supportedActionTypes = new Set(['map.mode']);
+const actionContracts = Object.freeze({
+  'fixture.action': () => null
+});
 
 function validStory() {
   return {
@@ -28,7 +30,7 @@ function validStory() {
           ]
         },
         map: {
-          enter: [{ type: 'map.mode', mode: 'difference' }],
+          enter: [{ type: 'fixture.action', value: 'difference' }],
           exit: []
         }
       }
@@ -40,14 +42,14 @@ function assertInvalid(mutator, pattern) {
   const story = validStory();
   mutator(story);
   assert.throws(
-    () => validateStoryDefinition(story, { supportedActionTypes }),
+    () => validateStoryDefinition(story, { actionContracts }),
     (error) => error instanceof StoryValidationError && pattern.test(error.message)
   );
 }
 
 test('valid story definition is returned unchanged', () => {
   const story = validStory();
-  assert.equal(validateStoryDefinition(story, { supportedActionTypes }), story);
+  assert.equal(validateStoryDefinition(story, { actionContracts }), story);
 });
 
 test('missing and unsupported schema versions fail clearly', () => {
@@ -78,7 +80,7 @@ test('malformed and unsupported action descriptors are rejected', () => {
 test('story loader fetches JSON and validates it before returning', async () => {
   const definition = validStory();
   const loaded = await loadStoryDefinition('/story.json', {
-    supportedActionTypes,
+    actionContracts,
     fetchImpl: async (url) => ({
       ok: true,
       async json() {

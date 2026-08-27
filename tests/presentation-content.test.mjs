@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { validateStoryDefinition } from '../src/story-schema.js';
+import { ROUTE_612_STORY_ACTION_CONTRACTS } from '../src/route-61-2-story-actions.js';
 
 const STORY_URL = new URL('../data/stories/route-61-2.story.json', import.meta.url);
-const ACTION_TYPES = ['map.mode', 'map.focus', 'map.poi-emphasis', 'map.urban-context', 'route.reveal'];
 const EXPECTED_IDS = [
   'intro',
   'existing',
@@ -21,7 +21,9 @@ async function loadStory() {
 
 test('Route 61-2 JSON validates and exposes the seven canonical states in order', async () => {
   const story = await loadStory();
-  assert.equal(validateStoryDefinition(story, { supportedActionTypes: ACTION_TYPES }), story);
+  assert.equal(validateStoryDefinition(story, {
+    actionContracts: ROUTE_612_STORY_ACTION_CONTRACTS
+  }), story);
   assert.deepEqual(story.states.map(({ id }) => id), EXPECTED_IDS);
 });
 
