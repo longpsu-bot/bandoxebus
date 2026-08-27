@@ -32,50 +32,54 @@ function collectText(element) {
     .join(' ');
 }
 
-test('content renderer creates one metrics layout with resolved runtime values', () => {
-  const container = new TestElement('article');
-  const slide = {
-    id: 'route-changes',
-    step: '04',
+function fixtureState(heading = 'Các thay đổi chính') {
+  return {
+    id: 'arbitrary-id',
     content: {
       layout: 'metrics',
-      eyebrow: 'Phương án điều chỉnh',
-      title: 'Các thay đổi chính',
-      narrative: 'Dữ liệu so sánh hình học.',
-      metrics: [
-        { label: 'Bổ sung', metric: 'addedLengthMeters', format: 'signed-distance', tone: 'added' }
-      ],
-      callouts: [{ label: 'Lưu ý', text: 'Giá trị lấy từ kết quả so sánh.' }],
-      sourceNote: 'Nguồn hình học tuyến.',
-      presenterNote: 'Không hiển thị nội dung này.'
+      presenterNote: 'Không hiển thị nội dung này.',
+      blocks: [
+        { type: 'eyebrow', step: '04', text: 'Phương án điều chỉnh' },
+        { type: 'heading', text: heading, subtitle: 'Phụ đề', status: 'Trạng thái' },
+        { type: 'paragraph', text: 'Đoạn một.\n\nĐoạn hai.' },
+        { type: 'stat-group', items: [{ label: 'Bổ sung', metric: 'addedLengthMeters', format: 'signed-distance', tone: 'added' }] },
+        { type: 'callout', items: [{ label: 'Lưu ý', text: 'Giá trị lấy từ kết quả so sánh.' }] },
+        { type: 'disclosure', text: 'Nguồn hình học tuyến.' }
+      ]
     }
   };
+}
 
-  renderPresentationContent(container, slide, { addedLengthMeters: 400 }, testDocument);
+test('structured blocks render the existing presentation classes and runtime metric values', () => {
+  const container = new TestElement('article');
+  renderPresentationContent(container, fixtureState(), { addedLengthMeters: 400 }, testDocument);
 
   const text = collectText(container);
   assert.equal(container.className, 'presentation-content presentation-content--metrics');
-  assert.equal(container.dataset.slideId, 'route-changes');
+  assert.equal(container.dataset.slideId, 'arbitrary-id');
   assert.match(text, /04 · PHƯƠNG ÁN ĐIỀU CHỈNH/);
+  assert.match(text, /Các thay đổi chính/);
+  assert.match(text, /Phụ đề/);
+  assert.match(text, /Trạng thái/);
+  assert.match(text, /Đoạn một.*Đoạn hai/);
   assert.match(text, /\+0,4 km/);
+  assert.match(text, /Giá trị lấy từ kết quả so sánh/);
   assert.match(text, /Nguồn hình học tuyến/);
   assert.doesNotMatch(text, /Không hiển thị nội dung này/);
 });
 
-test('content renderer gracefully shows a missing bound metric without fabricating data', () => {
+test('changing only configured heading changes rendered content', () => {
+  const first = new TestElement('article');
+  const second = new TestElement('article');
+  renderPresentationContent(first, fixtureState('Heading A'), {}, testDocument);
+  renderPresentationContent(second, fixtureState('Heading B'), {}, testDocument);
+  assert.match(collectText(first), /Heading A/);
+  assert.match(collectText(second), /Heading B/);
+  assert.doesNotMatch(collectText(second), /Heading A/);
+});
+
+test('missing bound metric remains explicit instead of fabricating data', () => {
   const container = new TestElement('article');
-  const slide = {
-    id: 'existing',
-    step: '02',
-    content: {
-      layout: 'metrics',
-      eyebrow: 'Hiện trạng',
-      title: 'Tuyến hiện hữu',
-      metrics: [{ label: 'Cự ly hiện hữu', metric: 'missing', format: 'distance' }]
-    }
-  };
-
-  renderPresentationContent(container, slide, {}, testDocument);
-
-  assert.match(collectText(container), /Cự ly hiện hữu —/);
+  renderPresentationContent(container, fixtureState(), {}, testDocument);
+  assert.match(collectText(container), /Bổ sung —/);
 });

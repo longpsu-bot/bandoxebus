@@ -1,0 +1,172 @@
+{
+  "schemaVersion": "1.0",
+  "id": "route-61-2",
+  "title": "Tuyến 61-2",
+  "states": [
+    {
+      "id": "intro",
+      "content": {
+        "layout": "hero",
+        "blocks": [
+          { "type": "eyebrow", "step": "01", "text": "Giới thiệu" },
+          { "type": "heading", "text": "Tuyến 61-2", "subtitle": "Thủ Dầu Một ↔ Bến Cát", "status": "Phương án điều chỉnh lộ trình" },
+          { "type": "paragraph", "text": "So sánh trực quan tuyến hiện hữu và tuyến điều chỉnh, các đoạn giữ lại, bổ sung và loại bỏ." }
+        ],
+        "presenterNote": "Mở đầu bằng toàn cảnh chênh lệch để định vị hành lang tuyến."
+      },
+      "map": {
+        "enter": [
+          { "type": "map.mode", "mode": "difference" },
+          { "type": "map.poi-emphasis", "active": false },
+          { "type": "map.urban-context", "mode": "off" },
+          { "type": "map.focus", "target": "overview", "camera": { "pitch": 42, "bearing": -18, "maxZoom": 12.5 } }
+        ],
+        "exit": []
+      }
+    },
+    {
+      "id": "existing",
+      "content": {
+        "layout": "metrics",
+        "blocks": [
+          { "type": "eyebrow", "step": "02", "text": "Hiện trạng" },
+          { "type": "heading", "text": "Tuyến hiện hữu — đường cơ sở so sánh" },
+          { "type": "paragraph", "text": "Hình học và hệ thống điểm dừng hiện hữu được dùng làm đường cơ sở để nhận diện các thay đổi trong phương án điều chỉnh." },
+          { "type": "stat-group", "items": [
+            { "label": "Cự ly hiện hữu", "metric": "existingLengthMeters", "format": "distance", "tone": "existing" },
+            { "label": "Điểm dừng hiện hữu", "metric": "existingStopCount", "format": "integer", "tone": "existing" }
+          ] },
+          { "type": "disclosure", "text": "Cự ly được tính trực tiếp từ hình học tuyến trong ứng dụng." }
+        ]
+      },
+      "map": {
+        "enter": [
+          { "type": "map.mode", "mode": "existing" },
+          { "type": "map.poi-emphasis", "active": false },
+          { "type": "map.urban-context", "mode": "off" },
+          { "type": "map.focus", "target": "existing" }
+        ],
+        "exit": []
+      }
+    },
+    {
+      "id": "adjustment-context",
+      "content": {
+        "layout": "narrative",
+        "blocks": [
+          { "type": "eyebrow", "step": "03", "text": "Bối cảnh điều chỉnh" },
+          { "type": "heading", "text": "Cách đọc phương án trên bản đồ" },
+          { "type": "paragraph", "text": "Tuyến hiện hữu là đường cơ sở. Hình học đề xuất được đối chiếu theo ba nhóm: đoạn giữ lại, đoạn bổ sung và đoạn loại bỏ.\n\nCác điểm kết nối chính cung cấp thêm ngữ cảnh không gian cho hành lang tuyến." },
+          { "type": "callout", "items": [
+            { "label": "Giữ lại", "text": "Phần hành lang tương đồng giữa hai phương án.", "tone": "retained" },
+            { "label": "Thay đổi", "text": "Phần hình học được bổ sung hoặc không còn trong đề xuất.", "tone": "changed" }
+          ] }
+        ]
+      },
+      "map": {
+        "enter": [
+          { "type": "map.mode", "mode": "difference" },
+          { "type": "map.poi-emphasis", "active": false },
+          { "type": "map.urban-context", "mode": "off" },
+          { "type": "map.focus", "target": "overview", "camera": { "pitch": 44, "bearing": -16 } }
+        ],
+        "exit": []
+      }
+    },
+    {
+      "id": "route-changes",
+      "content": {
+        "layout": "metrics",
+        "blocks": [
+          { "type": "eyebrow", "step": "04", "text": "Phương án điều chỉnh" },
+          { "type": "heading", "text": "Các thay đổi chính trên lộ trình" },
+          { "type": "paragraph", "text": "Các giá trị dưới đây được lấy từ cùng kết quả so sánh hình học đang điều khiển các lớp chênh lệch trên bản đồ." },
+          { "type": "stat-group", "items": [
+            { "label": "Giữ lại", "metric": "retainedLengthMeters", "format": "distance", "tone": "retained" },
+            { "label": "Bổ sung", "metric": "addedLengthMeters", "format": "signed-distance", "tone": "added" },
+            { "label": "Loại bỏ", "metric": "removedLengthMeters", "format": "distance", "tone": "removed" },
+            { "label": "Cự ly điều chỉnh", "metric": "proposedLengthMeters", "format": "distance", "tone": "proposed" }
+          ] },
+          { "type": "disclosure", "text": "Phân loại hình học dùng ngưỡng hành lang tuyến hiện có của ứng dụng." }
+        ]
+      },
+      "map": {
+        "enter": [
+          { "type": "map.mode", "mode": "difference" },
+          { "type": "map.poi-emphasis", "active": false },
+          { "type": "map.urban-context", "mode": "off" },
+          { "type": "map.focus", "target": "changes", "camera": { "pitch": 50, "bearing": -18, "maxZoom": 12.8 } }
+        ],
+        "exit": []
+      }
+    },
+    {
+      "id": "service-area",
+      "content": {
+        "layout": "map-focus",
+        "blocks": [
+          { "type": "eyebrow", "step": "05", "text": "Không gian phục vụ" },
+          { "type": "heading", "text": "Bối cảnh công nghiệp gần tuyến" },
+          { "type": "paragraph", "text": "Khu công nghiệp Mỹ Phước 1 được dùng như hình học sử dụng đất theo ngữ cảnh, có nguồn gốc OSM, để đặt các khối công trình gần hành lang tuyến điều chỉnh." },
+          { "type": "disclosure", "text": "Dấu chân công trình Overture là dữ liệu tổng quát hóa từ nhiều nguồn; chiều cao thiếu dữ liệu được suy diễn minh họa và không phải khảo sát hiện trạng. Nếu dữ liệu này không tải được, ứng dụng dùng lại khối tích tổng hợp minh họa. Ranh khu công nghiệp là hình học sử dụng đất theo ngữ cảnh có nguồn gốc OSM, không phải ranh quy hoạch chính thức." }
+        ],
+        "presenterNote": "Ranh vùng là hình học sử dụng đất theo ngữ cảnh có nguồn gốc OSM, không phải ranh quy hoạch công nghiệp chính thức."
+      },
+      "map": {
+        "enter": [
+          { "type": "map.mode", "mode": "proposed" },
+          { "type": "map.poi-emphasis", "active": false },
+          { "type": "map.urban-context", "mode": "industrial-context" },
+          { "type": "map.focus", "target": "service-area", "camera": { "pitch": 52, "bearing": -10, "maxZoom": 13.6 } }
+        ],
+        "exit": [{ "type": "map.urban-context", "mode": "off" }]
+      }
+    },
+    {
+      "id": "connections",
+      "content": {
+        "layout": "map-focus",
+        "blocks": [
+          { "type": "eyebrow", "step": "06", "text": "Điểm kết nối" },
+          { "type": "heading", "text": "Ba mốc không gian chính" },
+          { "type": "paragraph", "text": "Tuyến điều chỉnh được đặt trong quan hệ với các địa điểm đã có trong dữ liệu." },
+          { "type": "callout", "items": [
+            { "text": "Trường Đại học Thủ Dầu Một cơ sở 2 (Thới Hòa)" },
+            { "text": "Trường Đại học Thủ Dầu Một (Phú Lợi)" },
+            { "text": "Bến xe khách tỉnh Bình Dương" }
+          ] }
+        ]
+      },
+      "map": {
+        "enter": [
+          { "type": "map.mode", "mode": "proposed" },
+          { "type": "map.poi-emphasis", "active": true },
+          { "type": "map.urban-context", "mode": "off" },
+          { "type": "map.focus", "target": "connections", "camera": { "pitch": 48, "bearing": -8, "maxZoom": 12.2 } }
+        ],
+        "exit": [{ "type": "map.poi-emphasis", "active": false }]
+      }
+    },
+    {
+      "id": "final-proposal",
+      "content": {
+        "layout": "hero",
+        "blocks": [
+          { "type": "eyebrow", "step": "07", "text": "Phương án hoàn chỉnh" },
+          { "type": "heading", "text": "Toàn tuyến 61-2 điều chỉnh", "subtitle": "Thủ Dầu Một ↔ Bến Cát" },
+          { "type": "paragraph", "text": "Khép lại bằng toàn bộ hướng tuyến đề xuất như kết luận trực quan của phần trình bày." }
+        ]
+      },
+      "map": {
+        "enter": [
+          { "type": "map.mode", "mode": "proposed" },
+          { "type": "map.poi-emphasis", "active": false },
+          { "type": "map.urban-context", "mode": "off" },
+          { "type": "map.focus", "target": "proposed", "camera": { "pitch": 44, "bearing": -16, "maxZoom": 12.5 } },
+          { "type": "route.reveal", "active": true, "delayMs": 280 }
+        ],
+        "exit": [{ "type": "route.reveal", "active": false }]
+      }
+    }
+  ]
+}
