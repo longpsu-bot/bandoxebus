@@ -107,6 +107,8 @@ The selection algorithm is shell-owned and fixed for V1:
 5. If distances are equal, choose the lowest document/config index.
 6. Return `null` when no candidate intersects.
 
+The controller owns a `visibleEntries` map keyed by section element because an `IntersectionObserver` callback contains only entries whose observed intersection changed, not a snapshot of every currently visible section. On every callback, intersecting positive-ratio entries are inserted/replaced, non-intersecting or zero-ratio entries are deleted, and `selectActiveStoryStep` receives all values remaining in `visibleEntries`. The cache is cleared on `exit()` and never enters story configuration or Story Schema V1.
+
 The 45% line is slightly above viewport center so the next card becomes active after it is clearly readable without waiting for it to pass halfway down the viewport. The ratio-first policy remains stable for cards of different heights; the line and index tie-breakers make fast flings deterministic. These constants stay in shell code, not JSON or Story Schema V1.
 
 ---
@@ -168,7 +170,7 @@ test('effectively tied ratios use center distance to the 45 percent activation l
     entry(0, { ratio: 0.605, top: 100, bottom: 500 }),
     entry(1, { ratio: 0.60, top: 300, bottom: 700 })
   ], { viewportHeight: 1000 });
-  assert.equal(selected, 0);
+  assert.equal(selected, 1);
 });
 
 test('an exact tie uses deterministic configuration order and ignores non-intersections', () => {
@@ -769,7 +771,7 @@ git commit -m "feat: add accessible story shell keyboard navigation"
 
 **Interfaces:**
 - Consumes: native/injected `observerFactory(callback, { threshold })`, Task 1 `selectActiveStoryStep`, and Task 3 `activateStoryState`.
-- Produces: exactly one observer during an active lifecycle; `enter()` and `exit()` are idempotent; observer callbacks update one cached entry per section and discretely activate the latest selected index.
+- Produces: exactly one observer during an active lifecycle; `enter()` and `exit()` are idempotent; observer callbacks upsert/delete a shell-owned `visibleEntries: Map<Element, IntersectionObserverEntry>`, select over all currently visible cached entries, and discretely activate the latest selected index.
 
 - [ ] **Step 1: Write failing observer, fast-fling, and repeated lifecycle tests**
 
@@ -811,6 +813,29 @@ test('observer selection activates the generic runtime path once per changed ind
   fixture.observers[0].emit([observerEntry(fixture.sections[2], 0.8, 320, 720)]);
   fixture.observers[0].emit([observerEntry(fixture.sections[2], 0.9, 300, 700)]);
   assert.deepEqual(fixture.runtimeCalls, [0, 2]);
+});
+
+test('observer selection retains other visible sections across callback batches', () => {
+  const fixture = controllerFixture(['a', 'b', 'c']);
+  fixture.controller.enter();
+  fixture.observers[0].emit([
+    observerEntry(fixture.sections[0], 0.45, 100, 500),
+    observerEntry(fixture.sections[1], 0.80, 300, 700)
+  ]);
+  assert.equal(fixture.runtime.currentIndex, 1);
+
+  fixture.observers[0].emit([
+    observerEntry(fixture.sections[0], 0.55, 150, 550)
+  ]);
+  assert.equal(fixture.runtime.currentIndex, 1);
+  assert.deepEqual(fixture.runtimeCalls, [0, 1]);
+
+  fixture.observers[0].emit([
+    observerEntry(fixture.sections[1], 0, -500, -100),
+    observerEntry(fixture.sections[2], 0.70, 280, 680)
+  ]);
+  assert.equal(fixture.runtime.currentIndex, 2);
+  assert.deepEqual(fixture.runtimeCalls, [0, 1, 2]);
 });
 
 test('rapid observer progression is latest-state-wins', () => {
@@ -859,11 +884,27 @@ Expected: FAIL because the observer factory is not invoked.
 
 - [ ] **Step 3: Implement one observer per active entry**
 
-In `enter()`, after rendering sections, create a `Map` named `observedEntries`. Create one observer with thresholds `[0, 0.25, 0.5, 0.75, 1]`; observe every section. Its callback must update the map for the changed targets, call `selectActiveStoryStep([...observedEntries.values()], { viewportHeight: windowRef.innerHeight })`, and call `activateStoryState(selectedIndex)` only when the result is non-null.
+In `enter()`, after rendering sections, create a `Map` named `visibleEntries`. Create one observer with thresholds `[0, 0.25, 0.5, 0.75, 1]`; observe every section. Its callback must process only the changed entries without treating that batch as the complete visible set:
+
+```js
+for (const entry of entries) {
+  if (entry.isIntersecting && entry.intersectionRatio > 0) {
+    visibleEntries.set(entry.target, entry);
+  } else {
+    visibleEntries.delete(entry.target);
+  }
+}
+const selectedIndex = selectActiveStoryStep([...visibleEntries.values()], {
+  viewportHeight: windowRef.innerHeight
+});
+if (selectedIndex !== null) activateStoryState(selectedIndex);
+```
+
+This ensures a callback containing only an update for A or C still compares that entry with a previously visible B. Same-index activation remains the Task 3 no-op guard.
 
 Do not add a `scroll` listener, timer, animation frame, or source/map call.
 
-In `exit()`, call `observer.disconnect()` once, set the observer reference to `null`, and clear cached entries before removing listeners/deactivating runtime. Guard both lifecycle methods with one `active` boolean so duplicate calls have no effect.
+In `exit()`, call `observer.disconnect()` once, set the observer reference to `null`, and call `visibleEntries.clear()` before removing listeners/deactivating runtime. Guard both lifecycle methods with one `active` boolean so duplicate calls have no effect.
 
 - [ ] **Step 4: Verify GREEN and delayed-action regression**
 
@@ -1551,7 +1592,8 @@ Expected: GitHub Actions `test` check PASS. Record the actual run URL and result
 - [ ] Every production behavior starts with a focused failing test and an expected RED reason.
 - [ ] Every task names exact files, interfaces, GREEN command, regression command, and commit boundary.
 - [ ] `activateStoryState` is the sole shell navigation path and only Generic Story Runtime executes map actions.
-- [ ] Selection uses ratio -> 45% activation-line distance -> index with a 0.01 ratio tie tolerance.
+- [ ] Selection uses ratio -> 45% activation-line distance -> index with a 0.01 ratio tie tolerance, and the numeric test expectations agree with that order.
+- [ ] Observer selection runs over a shell-owned cross-callback visible-entry cache that deletes non-visible entries and clears on exit.
 - [ ] Observer/keyboard/button/listener ownership is idempotent across repeated entry/exit.
 - [ ] The shell contains no Route 61-2 IDs, fixed count, content, or action semantics.
 - [ ] Mobile/projector behavior comes from one DOM, one story JSON, measured layout, and responsive CSS.
