@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-08-27T02:21:31.967571+00:00",
+  "dataset": {
+    "path": "data/context/my-phuoc-1-buildings.geojson",
+    "sha256": "dcfccb4f793faf8d08308d976ee120cfd9ce0eb12530b314b53b75be7257f0f4",
+    "featureCount": 1299,
+    "bytes": 1014641
+  },
+  "overture": {
+    "theme": "buildings",
+    "type": "building",
+    "release": "2026-08-19.0",
+    "package": "overturemaps",
+    "packageVersion": "0.20.0"
+  },
+  "aoi": {
+    "authoritativePath": "data/industrial-zone-poc.geojson",
+    "sha256": "0a50beab4de3aa2d7728b24130a37511288a457c06e8c2471b2678f1584cf69b",
+    "featureId": "osm-industrial-759187612",
+    "industrialPolygonAuthoritative": true,
+    "derivedBbox": [
+      106.5877666,
+      11.117435600000002,
+      106.6037689,
+      11.1414241
+    ]
+  },
+  "statistics": {
+    "featureCount": 1299,
+    "aoiAreaM2": 2803680.46,
+    "aoiCoveredAreaM2": 1170280.34,
+    "aoiCoverageRatio": 0.417409,
+    "heightSourceCounts": {
+      "source-height": 0,
+      "floors-derived": 0,
+      "illustrative-height": 1299
+    },
+    "heightSourcePercentages": {
+      "source-height": 0.0,
+      "floors-derived": 0.0,
+      "illustrative-height": 100.0
+    },
+    "geometryTypeCounts": {
+      "Polygon": 1299
+    },
+    "footprintAreaM2": {
+      "min": 9.95,
+      "median": 95.01,
+      "max": 44699.61
+    },
+    "rejected": {
+      "malformed": 0,
+      "degenerate": 0,
+      "underground": 0,
+      "outsideAoi": 0
+    }
+  },
+  "heightDerivation": {
+    "policyVersion": "route61-2-overture-height-v1",
+    "policy": "source height; else num_floors × 3.5 m; else deterministic footprint-area quantile class",
+    "illustrativeThresholdsM2": {
+      "smallMaxM2": 34.44,
+      "mediumMaxM2": 153.67,
+      "largeMaxM2": 858.96
+    }
+  },
+  "provenance": {
+    "featureCounts": {
+      "Google Open Buildings": 905,
+      "Microsoft ML Buildings": 370,
+      "OpenStreetMap": 24
+    }
+  },
+  "preprocessing": {
+    "script": "scripts/prepare-overture-buildings.py",
+    "scriptSha256": "0a932736e5dc1510a17cf925b75ec9310e7464253a4ab4065da80a9183813cd8",
+    "heightPolicyVersion": "route61-2-overture-height-v1",
+    "selectionRule": "building intersects AOI; complete source footprint retained",
+    "coverageRule": "area(union(building intersection AOI)) / area(AOI)"
+  }
+}

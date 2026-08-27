@@ -1,0 +1,11 @@
+{
+  "name": "route61-2-storytelling-v1",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "serve": "python -m http.server 8080",
+    "prepare:overture": "python scripts/prepare-overture-buildings.py"
+  }
+}

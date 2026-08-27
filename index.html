@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07101c">
+  <title>Tuyến 61-2 · Route Storytelling V1</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#control-panel">Chuyển đến bảng điều khiển</a>
+  <main id="map" aria-label="Bản đồ so sánh tuyến xe buýt 61-2"></main>
+
+  <aside id="control-panel" class="panel" aria-label="Bảng điều khiển tuyến 61-2">
+    <header class="panel__header">
+      <p class="eyebrow">Hành lang giao thông công cộng</p>
+      <div class="title-row">
+        <div>
+          <h1>Tuyến 61-2</h1>
+          <p class="subtitle">Thủ Dầu Một ↔ Bến Cát</p>
+        </div>
+        <span class="status-badge">Điều chỉnh</span>
+      </div>
+    </header>
+
+    <button id="presentation-open" class="presentation-button" type="button">
+      <span aria-hidden="true">▶</span> Trình chiếu
+    </button>
+
+    <div class="tabs" role="tablist" aria-label="Nội dung bảng điều khiển">
+      <button id="tab-overview" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-overview" data-tab="overview">Tổng quan</button>
+      <button id="tab-comparison" class="tab is-active" type="button" role="tab" aria-selected="true" aria-controls="panel-comparison" data-tab="comparison">So sánh</button>
+      <button id="tab-analysis" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-analysis" data-tab="analysis">Phân tích</button>
+    </div>
+
+    <section id="panel-overview" class="tab-panel" role="tabpanel" aria-labelledby="tab-overview" hidden>
+      <div class="metric-grid" aria-label="Chỉ số hình học tuyến">
+        <article class="metric"><span>Hiện hữu</span><strong id="metric-existing">—</strong></article>
+        <article class="metric"><span>Điều chỉnh</span><strong id="metric-proposed">—</strong></article>
+        <article class="metric"><span>Đoạn thêm</span><strong id="metric-added">—</strong></article>
+        <article class="metric"><span>Đoạn bỏ</span><strong id="metric-removed">—</strong></article>
+      </div>
+      <p id="overview-note" class="panel-note"></p>
+    </section>
+
+    <section id="panel-comparison" class="tab-panel" role="tabpanel" aria-labelledby="tab-comparison">
+      <fieldset class="control-group">
+        <legend>Chế độ bản đồ</legend>
+        <div class="segmented-control" id="mode-control">
+          <button class="mode-button is-active" type="button" data-mode="difference" aria-pressed="true">Chênh lệch</button>
+          <button class="mode-button" type="button" data-mode="existing" aria-pressed="false">Hiện hữu</button>
+          <button class="mode-button" type="button" data-mode="proposed" aria-pressed="false">Điều chỉnh</button>
+          <button class="mode-button" type="button" data-mode="compare" aria-pressed="false">Đối chiếu</button>
+        </div>
+      </fieldset>
+
+      <div id="difference-legend" class="legend" aria-label="Chú giải chênh lệch tuyến">
+        <div><span class="legend-line retained"></span><span>Giữ lại</span><output id="count-retained-stops"></output></div>
+        <div><span class="legend-line added"></span><span>Bổ sung</span><output id="count-added-stops"></output></div>
+        <div><span class="legend-line removed"></span><span>Loại bỏ</span><output id="count-removed-stops"></output></div>
+      </div>
+
+      <fieldset class="control-group compact-controls">
+        <legend>Lớp thông tin</legend>
+        <label class="switch-row"><input id="toggle-stops" type="checkbox" checked><span>Điểm dừng</span><output id="stop-total">—</output></label>
+        <label class="switch-row"><input id="toggle-pois" type="checkbox" checked><span>Điểm kết nối</span><output>3</output></label>
+        <label class="switch-row"><input id="toggle-arrows" type="checkbox" checked><span>Mũi tên hướng tuyến</span></label>
+      </fieldset>
+    </section>
+
+    <section id="panel-analysis" class="tab-panel" role="tabpanel" aria-labelledby="tab-analysis" hidden>
+      <fieldset class="control-group simulation-controls">
+        <legend>Mô phỏng xe buýt</legend>
+        <div class="simulation-row">
+          <label class="switch-row" for="toggle-bus-existing"><input id="toggle-bus-existing" type="checkbox"><span><i class="bus-key existing"></i>Hiện hữu</span></label>
+          <label class="speed-row" for="speed-bus-existing"><span>Tốc độ</span><input id="speed-bus-existing" type="range" min="0.25" max="3" step="0.25" value="0.75"><output id="speed-bus-existing-value">0.75×</output></label>
+        </div>
+        <div class="simulation-row">
+          <label class="switch-row" for="toggle-bus-proposed"><input id="toggle-bus-proposed" type="checkbox" checked><span><i class="bus-key proposed"></i>Điều chỉnh</span></label>
+          <label class="speed-row" for="speed-bus-proposed"><span>Tốc độ</span><input id="speed-bus-proposed" type="range" min="0.25" max="3" step="0.25" value="0.75"><output id="speed-bus-proposed-value">0.75×</output></label>
+        </div>
+      </fieldset>
+      <p class="panel-note">Điểm dừng đổi sang màu hổ phách một lần khi xe đi vào bán kính kích hoạt trong mỗi vòng chạy.</p>
+    </section>
+
+    <footer class="panel__footer">
+      <span id="map-status" role="status" aria-live="polite">Đang tải bản đồ…</span>
+    </footer>
+  </aside>
+
+  <section id="presentation" class="presentation" aria-label="Trình chiếu tuyến 61-2" hidden>
+    <button id="presentation-close" class="presentation__close" type="button" aria-label="Thoát trình chiếu">×</button>
+    <article id="presentation-content" class="presentation-content" aria-live="polite"></article>
+    <nav class="chapter-nav" aria-label="Điều hướng chương">
+      <button id="chapter-previous" type="button" aria-label="Chương trước">←</button>
+      <div id="chapter-dots" class="chapter-dots"></div>
+      <button id="chapter-next" type="button" aria-label="Chương tiếp theo">→</button>
+    </nav>
+  </section>
+
+  <noscript>Ứng dụng cần JavaScript để hiển thị bản đồ tương tác.</noscript>
+  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
