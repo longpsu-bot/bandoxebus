@@ -46,9 +46,10 @@
 ## GitHub
 
 - Implementation commit: `0a91c68`.
-- Draft PR: pending.
-- PR head at certification: pending.
-- GitHub Actions run: pending.
+- Draft PR: [#3](https://github.com/longpsu-bot/bandoxebus/pull/3).
+- PR head at certification: `e89ff8af826739721d0b37dfeeb47577baa46120`.
+- GitHub Actions: PASS.
+- GitHub Actions run: [33060659759](https://github.com/longpsu-bot/bandoxebus/actions/runs/33060659759).
 
 The immutable final PR head and its CI URL will also be recorded in the PR because a tracked report cannot contain the SHA of its own commit.
 
