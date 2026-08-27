@@ -19,6 +19,7 @@ import {
 } from './road-labels.js';
 import {
   buildPresentationCameraOptions,
+  buildStoryLayoutPadding,
   VIEW_MODES
 } from './presentation.js';
 import { buildPresentationMetrics } from './presentation-metrics.js';
@@ -26,6 +27,8 @@ import { findStoryContentBlock, renderPresentationContent } from './presentation
 import { loadStoryDefinition } from './story-schema.js';
 import { createStoryActionRunner } from './story-action-runner.js';
 import { createStoryRuntime } from './story-runtime.js';
+import { createStoryShell, isStoryShellPocEnabled } from './story-shell.js';
+import { createGuidedMapInteractionPolicy } from './story-map-interactions.js';
 import {
   createRouteRevealController,
   createRoute612StoryActionHandlers,
@@ -44,6 +47,7 @@ const PROPOSED_REVEAL_DURATION_MS = 2_200;
 const BUS_ANIMATION_INTERVAL_MS = 1_000 / 30;
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const compactView = window.innerWidth <= 760;
+const storyShellPocEnabled = isStoryShellPocEnabled(window.location.search);
 
 const toLngLat = (coordinates) => coordinates.map(([lat, lng]) => [lng, lat]);
 const existingCoordinates = toLngLat(existingRouteLatLng);
@@ -133,6 +137,7 @@ const uiState = {
   showArrows: true
 };
 let storyRuntime = null;
+let storyShell = null;
 let map;
 let revealToken = 0;
 let mapReady = false;
@@ -699,7 +704,7 @@ function targetCoordinates(target) {
   }
 }
 
-function fitTarget(target, presentationActive, camera = {}) {
+function fitTarget(target, presentationActive, camera = {}, layoutPadding) {
   const coordinates = targetCoordinates(target);
   if (!coordinates.length) return;
   const bounds = coordinates.reduce((result, coordinate) => result.extend(coordinate), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
@@ -708,8 +713,18 @@ function fitTarget(target, presentationActive, camera = {}) {
     presentationActive,
     compactView,
     reducedMotion: prefersReducedMotion,
-    camera
+    camera,
+    layoutPadding
   }));
+}
+
+function currentStoryLayoutPadding() {
+  if (!storyShell?.active) return undefined;
+  const mapRect = document.getElementById('map').getBoundingClientRect();
+  const selector = `[data-story-state-index="${storyRuntime.currentIndex}"] .story-step__content`;
+  const storyRect = document.querySelector(selector).getBoundingClientRect();
+  const stacked = window.matchMedia('(max-width: 760px), (max-height: 640px)').matches;
+  return buildStoryLayoutPadding({ mapRect, storyRect, stacked });
 }
 
 function emphasizePois(active) {
@@ -826,6 +841,39 @@ function bindPresentation() {
   });
 }
 
+function bindStoryShell() {
+  storyShell = createStoryShell({
+    runtime: storyRuntime,
+    elements: {
+      root: document.getElementById('story-shell'),
+      steps: document.getElementById('story-shell-steps'),
+      progressCurrent: document.getElementById('story-progress-current'),
+      progressTotal: document.getElementById('story-progress-total'),
+      previousButton: document.getElementById('story-previous'),
+      nextButton: document.getElementById('story-next'),
+      exitButton: document.getElementById('story-explore')
+    },
+    renderContent: renderPresentationContent,
+    metrics: presentationMetrics,
+    interactionPolicy: createGuidedMapInteractionPolicy(map),
+    reducedMotion: prefersReducedMotion,
+    onActivate({ state, index, total }) {
+      const heading = findStoryContentBlock(state, 'heading');
+      setStatus(`Câu chuyện ${index + 1}/${total}: ${heading?.text ?? state.id}.`);
+    },
+    onExit() {
+      applyMode(VIEW_MODES.DIFFERENCE, { announce: false });
+      emphasizePois(false);
+      urbanContextController?.setMode('off');
+      fitTarget('overview', false);
+      setStatus('Sẵn sàng · Chế độ Chênh lệch.');
+    }
+  });
+  const openButton = document.getElementById('presentation-open');
+  openButton.textContent = 'Bắt đầu câu chuyện';
+  openButton.addEventListener('click', () => storyShell.enter());
+}
+
 function bindControls() {
   document.querySelectorAll('.mode-button').forEach((button) => {
     button.addEventListener('click', () => {
@@ -927,7 +975,7 @@ async function initialize() {
     industrialZoneFeature = industrialZoneCollection.features[0];
     const storyActionRunner = createStoryActionRunner(createRoute612StoryActionHandlers({
       setMode: (mode) => applyMode(mode, { announce: false }),
-      focus: (target, camera) => fitTarget(target, true, camera),
+      focus: (target, camera) => fitTarget(target, true, camera, currentStoryLayoutPadding()),
       setPoiEmphasis: emphasizePois,
       setUrbanContext: (mode) => urbanContextController?.setMode(mode),
       setRouteReveal: routeRevealController.setActive
@@ -979,7 +1027,7 @@ async function initialize() {
         reducedMotion: prefersReducedMotion
       });
       mapReady = true;
-      bindPresentation();
+      storyShellPocEnabled ? bindStoryShell() : bindPresentation();
       map.once('idle', primeRouteRoadLabels);
       applyMode(VIEW_MODES.DIFFERENCE, { announce: false });
       bindMapInteractions();
