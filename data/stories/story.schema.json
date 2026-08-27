@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bandoxebus.local/schemas/story-v1.json",
+  "title": "Generic Story Runtime V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "title", "states"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "id": { "$ref": "#/$defs/nonEmptyString" },
+    "title": { "$ref": "#/$defs/nonEmptyString" },
+    "states": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/state" }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "action": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "$ref": "#/$defs/nonEmptyString" } },
+      "additionalProperties": true
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "metric", "format"],
+      "properties": {
+        "label": { "$ref": "#/$defs/nonEmptyString" },
+        "metric": { "$ref": "#/$defs/nonEmptyString" },
+        "format": { "$ref": "#/$defs/nonEmptyString" },
+        "tone": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "calloutItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "label": { "$ref": "#/$defs/nonEmptyString" },
+        "text": { "$ref": "#/$defs/nonEmptyString" },
+        "tone": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "block": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "eyebrow" },
+            "text": { "$ref": "#/$defs/nonEmptyString" },
+            "step": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "heading" },
+            "text": { "$ref": "#/$defs/nonEmptyString" },
+            "subtitle": { "$ref": "#/$defs/nonEmptyString" },
+            "status": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "enum": ["paragraph", "disclosure"] },
+            "text": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "items"],
+          "properties": {
+            "type": { "const": "stat-group" },
+            "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/metric" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "items"],
+          "properties": {
+            "type": { "const": "callout" },
+            "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/calloutItem" } }
+          }
+        }
+      ]
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "content", "map"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "content": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["layout", "blocks"],
+          "properties": {
+            "layout": { "enum": ["hero", "metrics", "narrative", "map-focus"] },
+            "blocks": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/block" } },
+            "presenterNote": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "map": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enter", "exit"],
+          "properties": {
+            "enter": { "type": "array", "items": { "$ref": "#/$defs/action" } },
+            "exit": { "type": "array", "items": { "$ref": "#/$defs/action" } }
+          }
+        }
+      }
+    }
+  }
+}
