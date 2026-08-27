@@ -25,3 +25,11 @@ test('POC CSS uses responsive capability queries and reduced motion without user
   assert.match(css, /min-height:\s*44px/);
   assert.doesNotMatch(css, /iPhone|Android|Windows Phone/i);
 });
+
+test('story step positioning overrides follow the shared presentation renderer rules', async () => {
+  const css = await readFile(cssUrl, 'utf8');
+  assert.ok(
+    css.lastIndexOf('.story-step__content {') > css.lastIndexOf('.presentation-content {'),
+    'the shell positioning override must win over the shared renderer absolute positioning'
+  );
+});
