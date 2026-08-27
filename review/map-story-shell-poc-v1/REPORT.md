@@ -84,9 +84,9 @@ Tests:
 - git diff --check: pass
 
 CI:
-- PR #2 head SHA: pending push
-- GitHub Actions: pending
-- CI run URL: pending
+- PR #2 head SHA: `01249226749fcce2e645f164690f61500c556c95`
+- GitHub Actions: PASS
+- CI run URL: https://github.com/longpsu-bot/bandoxebus/actions/runs/33048337123/job/98437520243
 
 Files added:
 - `src/story-shell.js`
