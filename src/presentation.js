@@ -10,7 +10,8 @@ export function buildPresentationCameraOptions({
   presentationActive,
   compactView,
   reducedMotion,
-  camera = {}
+  camera = {},
+  layoutPadding
 }) {
   const defaults = {
     padding: {
@@ -26,5 +27,22 @@ export function buildPresentationCameraOptions({
     essential: false
   };
 
-  return { ...defaults, ...camera, padding: defaults.padding };
+  return { ...defaults, ...camera, padding: layoutPadding ?? defaults.padding };
+}
+
+export function buildStoryLayoutPadding({ mapRect, storyRect, stacked }) {
+  if (stacked) {
+    return {
+      top: 32,
+      right: 24,
+      bottom: Math.max(64, Math.ceil(mapRect.bottom - storyRect.top + 24)),
+      left: 24
+    };
+  }
+  return {
+    top: 48,
+    right: 48,
+    bottom: 64,
+    left: Math.max(60, Math.ceil(storyRect.right - mapRect.left + 32))
+  };
 }
