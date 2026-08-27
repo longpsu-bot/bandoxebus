@@ -194,7 +194,7 @@ button:focus-visible, input:focus-visible, .maplibregl-ctrl button:focus-visible
 
 body.is-story-shell { overflow-y: auto; overflow-x: hidden; }
 body.is-story-shell #map { position: fixed; inset: 0; }
-body.is-story-shell .panel,
+body.is-story-shell .panel { display: none; }
 body.is-story-shell #presentation { opacity: 0; pointer-events: none; }
 
 .story-shell { position: relative; z-index: 7; min-height: 100svh; pointer-events: none; }

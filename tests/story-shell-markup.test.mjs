@@ -33,3 +33,8 @@ test('story step positioning overrides follow the shared presentation renderer r
     'the shell positioning override must win over the shared renderer absolute positioning'
   );
 });
+
+test('active story mode removes the hidden legacy panel from overflow layout', async () => {
+  const css = await readFile(cssUrl, 'utf8');
+  assert.match(css, /body\.is-story-shell \.panel\s*\{[^}]*display:\s*none/);
+});
