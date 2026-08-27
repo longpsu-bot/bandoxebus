@@ -114,7 +114,10 @@ Tests:
 - git diff --check: pass
 
 CI:
-- final certification metadata is recorded after the diagnostic/report commit is pushed and its GitHub Actions run completes
+- certification evidence SHA: `bef8b6887040bd450180a8528a770c0638051e20`
+- GitHub Actions: PASS
+- CI run URL: https://github.com/longpsu-bot/bandoxebus/actions/runs/33050628866/job/98444972279
+- note: the immutable final PR head and its CI URL are recorded in the PR body after the last tracked report commit, because a tracked report cannot contain its own commit SHA
 
 Files added:
 - `src/story-shell.js`
