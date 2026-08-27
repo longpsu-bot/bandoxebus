@@ -2,8 +2,9 @@ export const STORY_ACTIVATION_LINE_RATIO = 0.45;
 export const STORY_RATIO_TIE_EPSILON = 0.01;
 const INTERACTIVE_STORY_SELECTOR = 'input, textarea, select, button, a, [contenteditable]';
 
-export function isStoryShellPocEnabled(search = '') {
-  return new URLSearchParams(search).get('storyShell') === 'poc';
+export function resolveStoryExperience(search = '') {
+  const mode = new URLSearchParams(search).get('storyShell');
+  return mode === 'legacy' ? 'legacy' : 'story';
 }
 
 export function normalizeStoryIndex(index, stateCount) {

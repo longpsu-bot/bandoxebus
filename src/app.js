@@ -27,7 +27,7 @@ import { findStoryContentBlock, renderPresentationContent } from './presentation
 import { loadStoryDefinition } from './story-schema.js';
 import { createStoryActionRunner } from './story-action-runner.js';
 import { createStoryRuntime } from './story-runtime.js';
-import { createStoryShell, isStoryShellPocEnabled } from './story-shell.js';
+import { createStoryShell, resolveStoryExperience } from './story-shell.js';
 import { createGuidedMapInteractionPolicy } from './story-map-interactions.js';
 import {
   createRouteRevealController,
@@ -47,7 +47,7 @@ const PROPOSED_REVEAL_DURATION_MS = 2_200;
 const BUS_ANIMATION_INTERVAL_MS = 1_000 / 30;
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const compactView = window.innerWidth <= 760;
-const storyShellPocEnabled = isStoryShellPocEnabled(window.location.search);
+const storyExperience = resolveStoryExperience(window.location.search);
 
 const toLngLat = (coordinates) => coordinates.map(([lat, lng]) => [lng, lat]);
 const existingCoordinates = toLngLat(existingRouteLatLng);
@@ -1027,7 +1027,7 @@ async function initialize() {
         reducedMotion: prefersReducedMotion
       });
       mapReady = true;
-      storyShellPocEnabled ? bindStoryShell() : bindPresentation();
+      storyExperience === 'legacy' ? bindPresentation() : bindStoryShell();
       map.once('idle', primeRouteRoadLabels);
       applyMode(VIEW_MODES.DIFFERENCE, { announce: false });
       bindMapInteractions();
