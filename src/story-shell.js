@@ -62,3 +62,96 @@ export function renderStorySteps({ container, states, metrics, renderContent, do
   container.replaceChildren(...sections);
   return sections;
 }
+
+export function createStoryShell({
+  runtime,
+  elements,
+  renderContent,
+  metrics,
+  documentRef = document,
+  windowRef = window,
+  interactionPolicy = { enter() {}, exit() {} },
+  onActivate = () => {},
+  onExit = () => {},
+  reducedMotion = false
+}) {
+  let active = false;
+  let sections = [];
+
+  function updateUi(index) {
+    sections.forEach((section, sectionIndex) => {
+      const current = sectionIndex === index;
+      section.classList.toggle('is-active', current);
+      section.setAttribute('aria-current', current ? 'step' : 'false');
+    });
+    elements.progressCurrent.textContent = String(index + 1);
+    elements.progressTotal.textContent = String(runtime.definition.states.length);
+    elements.previousButton.disabled = index === 0;
+    elements.nextButton.disabled = index === runtime.definition.states.length - 1;
+  }
+
+  function activateStoryState(index, { scroll = false } = {}) {
+    const nextIndex = normalizeStoryIndex(index, runtime.definition.states.length);
+    if (runtime.active && runtime.currentIndex === nextIndex) return runtime.currentState;
+    const state = runtime.goTo(nextIndex);
+    updateUi(nextIndex);
+    if (scroll) sections[nextIndex].scrollIntoView({
+      behavior: reducedMotion ? 'auto' : 'smooth',
+      block: 'center'
+    });
+    onActivate({ state, index: nextIndex, total: runtime.definition.states.length });
+    return state;
+  }
+
+  function handlePrevious() {
+    activateStoryState(adjacentStoryIndex(runtime.currentIndex, -1, runtime.definition.states.length), {
+      scroll: true
+    });
+  }
+
+  function handleNext() {
+    activateStoryState(adjacentStoryIndex(runtime.currentIndex, 1, runtime.definition.states.length), {
+      scroll: true
+    });
+  }
+
+  function exit() {
+    if (!active) return;
+    active = false;
+    elements.previousButton.removeEventListener('click', handlePrevious);
+    elements.nextButton.removeEventListener('click', handleNext);
+    elements.exitButton.removeEventListener('click', exit);
+    runtime.deactivate();
+    interactionPolicy.exit();
+    documentRef.body.classList.remove('is-story-shell');
+    elements.root.hidden = true;
+    onExit();
+  }
+
+  function enter() {
+    if (active) return;
+    active = true;
+    elements.root.hidden = false;
+    documentRef.body.classList.add('is-story-shell');
+    sections = renderStorySteps({
+      container: elements.steps,
+      states: runtime.definition.states,
+      metrics,
+      renderContent,
+      documentRef
+    });
+    elements.previousButton.addEventListener('click', handlePrevious);
+    elements.nextButton.addEventListener('click', handleNext);
+    elements.exitButton.addEventListener('click', exit);
+    interactionPolicy.enter();
+    activateStoryState(0);
+  }
+
+  return {
+    get active() { return active; },
+    get sections() { return sections; },
+    enter,
+    exit,
+    activateStoryState
+  };
+}
