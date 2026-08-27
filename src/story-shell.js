@@ -82,6 +82,7 @@ export function createStoryShell({
   metrics,
   documentRef = document,
   windowRef = window,
+  observerFactory = (callback, options) => new IntersectionObserver(callback, options),
   interactionPolicy = { enter() {}, exit() {} },
   onActivate = () => {},
   onExit = () => {},
@@ -89,6 +90,8 @@ export function createStoryShell({
 }) {
   let active = false;
   let sections = [];
+  let observer = null;
+  const visibleEntries = new Map();
 
   function updateUi(index) {
     sections.forEach((section, sectionIndex) => {
@@ -145,6 +148,9 @@ export function createStoryShell({
   function exit() {
     if (!active) return;
     active = false;
+    observer?.disconnect();
+    observer = null;
+    visibleEntries.clear();
     elements.previousButton.removeEventListener('click', handlePrevious);
     elements.nextButton.removeEventListener('click', handleNext);
     elements.exitButton.removeEventListener('click', exit);
@@ -168,6 +174,20 @@ export function createStoryShell({
       renderContent,
       documentRef
     });
+    observer = observerFactory((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && entry.intersectionRatio > 0) {
+          visibleEntries.set(entry.target, entry);
+        } else {
+          visibleEntries.delete(entry.target);
+        }
+      }
+      const selectedIndex = selectActiveStoryStep([...visibleEntries.values()], {
+        viewportHeight: windowRef.innerHeight
+      });
+      if (selectedIndex !== null) activateStoryState(selectedIndex);
+    }, { threshold: [0, 0.25, 0.5, 0.75, 1] });
+    sections.forEach((section) => observer.observe(section));
     elements.previousButton.addEventListener('click', handlePrevious);
     elements.nextButton.addEventListener('click', handleNext);
     elements.exitButton.addEventListener('click', exit);

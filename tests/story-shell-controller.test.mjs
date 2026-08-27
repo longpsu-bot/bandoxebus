@@ -74,6 +74,31 @@ function createWindowRef() {
   };
 }
 
+function observerEntry(target, intersectionRatio, top, bottom) {
+  return {
+    target,
+    intersectionRatio,
+    isIntersecting: intersectionRatio > 0,
+    boundingClientRect: { top, bottom, height: bottom - top }
+  };
+}
+
+function createObserverFactory(observers) {
+  return (callback, options) => {
+    const instance = {
+      callback,
+      options,
+      observed: [],
+      disconnectCount: 0,
+      observe(target) { this.observed.push(target); },
+      disconnect() { this.disconnectCount += 1; },
+      emit(entries) { callback(entries, this); }
+    };
+    observers.push(instance);
+    return instance;
+  };
+}
+
 function controllerFixture(ids) {
   const { calls: runtimeCalls, runtime } = runtimeFixture(ids);
   const elements = {
@@ -90,6 +115,7 @@ function controllerFixture(ids) {
   const windowRef = createWindowRef();
   const activationCalls = [];
   const interactionCalls = [];
+  const observers = [];
   const controller = shell.createStoryShell({
     runtime,
     elements,
@@ -97,6 +123,7 @@ function controllerFixture(ids) {
     metrics: {},
     documentRef,
     windowRef,
+    observerFactory: createObserverFactory(observers),
     interactionPolicy: {
       enter() { interactionCalls.push('enter'); },
       exit() { interactionCalls.push('exit'); }
@@ -105,7 +132,7 @@ function controllerFixture(ids) {
   });
   return {
     activationCalls, controller, documentRef, elements, interactionCalls,
-    runtime, runtimeCalls, windowRef,
+    observers, runtime, runtimeCalls, windowRef,
     get sections() { return controller.sections; }
   };
 }
@@ -158,4 +185,70 @@ test('keyboard ignores events from interactive targets', () => {
   fixture.controller.enter();
   fixture.windowRef.keydown('ArrowRight', { closest: () => ({}) });
   assert.deepEqual(fixture.runtimeCalls, [0]);
+});
+
+test('observer selection activates the generic runtime path once per changed index', () => {
+  const fixture = controllerFixture();
+  fixture.controller.enter();
+  fixture.observers[0].emit([observerEntry(fixture.sections[2], 0.8, 320, 720)]);
+  fixture.observers[0].emit([observerEntry(fixture.sections[2], 0.9, 300, 700)]);
+  assert.deepEqual(fixture.runtimeCalls, [0, 2]);
+});
+
+test('observer selection retains other visible sections across callback batches', () => {
+  const fixture = controllerFixture(['a', 'b', 'c']);
+  fixture.controller.enter();
+  fixture.observers[0].emit([
+    observerEntry(fixture.sections[0], 0.45, 100, 500),
+    observerEntry(fixture.sections[1], 0.80, 300, 700)
+  ]);
+  assert.equal(fixture.runtime.currentIndex, 1);
+
+  fixture.observers[0].emit([
+    observerEntry(fixture.sections[0], 0.55, 150, 550)
+  ]);
+  assert.equal(fixture.runtime.currentIndex, 1);
+  assert.deepEqual(fixture.runtimeCalls, [0, 1]);
+
+  fixture.observers[0].emit([
+    observerEntry(fixture.sections[1], 0, -500, -100),
+    observerEntry(fixture.sections[2], 0.70, 280, 680)
+  ]);
+  assert.equal(fixture.runtime.currentIndex, 2);
+  assert.deepEqual(fixture.runtimeCalls, [0, 1, 2]);
+});
+
+test('rapid observer progression is latest-state-wins', () => {
+  const fixture = controllerFixture(['a', 'b', 'c', 'd']);
+  fixture.controller.enter();
+  let previous = 0;
+  for (const index of [1, 2, 3]) {
+    fixture.observers[0].emit([
+      observerEntry(fixture.sections[previous], 0, -400, -100),
+      observerEntry(fixture.sections[index], 0.9, 250, 650)
+    ]);
+    previous = index;
+  }
+  assert.deepEqual(fixture.runtimeCalls, [0, 1, 2, 3]);
+  assert.equal(fixture.runtime.currentIndex, 3);
+});
+
+test('enter exit re-entry owns one observer and one key listener at a time', () => {
+  const fixture = controllerFixture();
+  fixture.controller.enter();
+  fixture.controller.enter();
+  assert.equal(fixture.observers.length, 1);
+  assert.equal(fixture.windowRef.listenerCount('keydown'), 1);
+  fixture.controller.exit();
+  fixture.controller.exit();
+  assert.equal(fixture.observers[0].disconnectCount, 1);
+  assert.equal(fixture.windowRef.listenerCount('keydown'), 0);
+  fixture.controller.enter();
+  fixture.controller.exit();
+  fixture.controller.enter();
+  fixture.controller.exit();
+  assert.equal(fixture.observers.length, 3);
+  assert.equal(fixture.observers.every(({ disconnectCount }) => disconnectCount === 1), true);
+  assert.equal(fixture.interactionCalls.filter((value) => value === 'enter').length, 3);
+  assert.equal(fixture.interactionCalls.filter((value) => value === 'exit').length, 3);
 });
