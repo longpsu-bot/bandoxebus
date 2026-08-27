@@ -62,15 +62,45 @@ Map regression:
 Performance:
 
 1920×1080 settled:
-- typical FPS: unavailable — the permitted Chrome control surface cannot inject main-world instrumentation
-- sustained low: unavailable — the permitted Chrome control surface cannot inject main-world instrumentation
-- recurring MapLibre renders: unavailable — exact render counting could not be instrumented
-- recurring triggerRepaint: unavailable — exact call counting could not be instrumented
-- recurring source mutations: unavailable — exact call counting could not be instrumented
+- run 1: 59.9 typical FPS; 59.5 sustained-low FPS; 60.0 average FPS; 16.80 ms p95; 16.90 ms maximum; 0 frames >33 ms; 0 frames >50 ms; 0 MapLibre renders; 0 `triggerRepaint()` calls; `sourceSetData: {}`
+- run 2: 59.9 typical FPS; 59.5 sustained-low FPS; 60.0 average FPS; 16.80 ms p95; 16.90 ms maximum; 0 frames >33 ms; 0 frames >50 ms; 0 MapLibre renders; 0 `triggerRepaint()` calls; `sourceSetData: {}`
+- run 3: 59.9 typical FPS; 59.5 sustained-low FPS; 60.0 average FPS; 16.80 ms p95; 17.00 ms maximum; 0 frames >33 ms; 0 frames >50 ms; 0 MapLibre renders; 0 `triggerRepaint()` calls; `sourceSetData: {}`
+- typical FPS range: 59.9–59.9
+- sustained-low FPS range: 59.5–59.5
+- average FPS range: 60.0–60.0
+- moving-bus marker updates: 359–361 per 15-second run
 
 1366×768 settled:
-- typical FPS: unavailable — the permitted Chrome control surface cannot inject main-world instrumentation
-- sustained low: unavailable — the permitted Chrome control surface cannot inject main-world instrumentation
+- run 1: 59.9 typical FPS; 59.5 sustained-low FPS; 60.0 average FPS; 16.80 ms p95; 16.90 ms maximum; 0 frames >33 ms; 0 frames >50 ms; 0 MapLibre renders; 0 `triggerRepaint()` calls; `sourceSetData: {}`
+- run 2: 59.9 typical FPS; 59.5 sustained-low FPS; 60.0 average FPS; 16.80 ms p95; 16.90 ms maximum; 0 frames >33 ms; 0 frames >50 ms; 0 MapLibre renders; 0 `triggerRepaint()` calls; `sourceSetData: {}`
+- run 3: 59.9 typical FPS; 59.5 sustained-low FPS; 60.0 average FPS; 16.80 ms p95; 17.30 ms maximum; 0 frames >33 ms; 0 frames >50 ms; 0 MapLibre renders; 0 `triggerRepaint()` calls; `sourceSetData: {}`
+- typical FPS range: 59.9–59.9
+- sustained-low FPS range: 59.5–59.5
+- average FPS range: 60.0–60.0
+- moving-bus marker updates: 354–365 per 15-second run
+
+Lifecycle control:
+- sequence: Story state 4 → Explore → Story → state 4 → settle → 15-second sample
+- result: 59.9 typical FPS; 59.5 sustained-low FPS; 60.0 average FPS; 16.80 ms p95; 18.20 ms maximum; 0 frames >33 ms; 0 frames >50 ms
+- counters: 0 MapLibre renders; 0 `triggerRepaint()` calls; `sourceSetData: {}`
+- map instances: 1
+- rendered Story steps after re-entry: 7
+- duplicated rendering work observed: no
+
+Method and settled-state evidence:
+- browser: headed Microsoft Edge 151.0.4129.107 with a dedicated temporary CDP profile on port 9222
+- URL: `http://127.0.0.1:8080/?storyShell=poc`
+- sampling: `requestAnimationFrame` frame intervals; typical FPS = reciprocal median; sustained-low FPS = reciprocal p95; average FPS = frame count / elapsed time
+- duration and repetitions: 15 seconds × 3 per viewport
+- entry path: real Story launcher and successive Story Shell Next controls to state index 4 / `service-area`
+- settle gate: camera stopped, shell scroll stable, urban context active, Overture loaded with 1,299 buildings, then 1.5 seconds with no source mutation before counter reset
+- warm-up behavior: one-time `route-road-labels` cache application occurred before samples (12 calls at 1920×1080; 9 calls at 1366×768); all measured windows had `sourceSetData: {}`
+- runtime state: one MapLibre instance, one visible moving production bus, Overture buildings visible, Story Shell DOM active, clean console
+- diagnostic harness: `scripts/performance-root-cause-v1.mjs story-shell-benchmark`; historical commands remain available
+- sustained >=30 FPS: yes
+- recurring settled source mutation: no
+- runaway MapLibre render/repaint loop: no
+- regression versus certified baseline: no
 
 Mobile:
 - scroll responsiveness: pass at 390×844; swipe changed state 4 → 5 and advanced document scroll
@@ -84,9 +114,7 @@ Tests:
 - git diff --check: pass
 
 CI:
-- PR #2 head SHA: `01249226749fcce2e645f164690f61500c556c95`
-- GitHub Actions: PASS
-- CI run URL: https://github.com/longpsu-bot/bandoxebus/actions/runs/33048337123/job/98437520243
+- final certification metadata is recorded after the diagnostic/report commit is pushed and its GitHub Actions run completes
 
 Files added:
 - `src/story-shell.js`
@@ -106,6 +134,7 @@ Files changed:
 - `src/app.js`
 - `src/presentation.js`
 - `tests/presentation.test.mjs`
+- `scripts/performance-root-cause-v1.mjs` (CDP Story Shell certification command only)
 
 Frozen contract changes:
 - story JSON: none
@@ -118,7 +147,9 @@ Legacy presentation retained:
 
 Recommendation:
 
-The shell behavior and responsive browser checks pass, but the required settled FPS and exact render/repaint/source-mutation measurements could not be collected through the permitted browser control surface. Certification therefore remains conservative.
+The Story Shell matches the certified stationary baseline at both required viewports. Buses remain active while the settled MapLibre canvas performs no recurring render, repaint, or GeoJSON source-mutation work. The re-entry control produces the same result with one MapLibre instance and no duplicated rendering work.
 
 MAP_STORY_SHELL_POC_V1_RESULT:
-REVISE
+PASS
+
+PROMOTE_STORY_SHELL

@@ -83,6 +83,7 @@ const PRELOAD = String.raw`(() => {
     suppressStopPulseUpdates: false,
     markerSetLngLat: 0,
     sourceSetData: {},
+    mapInstances: 0,
     layersAdded: 0,
     sourcesAdded: 0,
     console: [],
@@ -135,6 +136,7 @@ const PRELOAD = String.raw`(() => {
         constructor(...args) {
           super(...args);
           const instance = this;
+          perf.mapInstances += 1;
           window.__routeMap = instance;
           instance.on('render', () => { perf.mapRenders += 1; });
 
@@ -353,6 +355,113 @@ async function goToSlide(client, index) {
   await sleep(300);
 }
 
+async function waitForStoryShellSettled(client, expectedIndex = 4) {
+  return evaluate(client, `(async () => {
+    const expectedIndex = ${expectedIndex};
+    const map = window.__routeMap;
+    const perf = window.__routePerf;
+    const started = performance.now();
+    let stableSince = 0;
+    let lastScrollY = window.scrollY;
+    let lastMutationTotal = Object.values(perf.sourceSetData).reduce((sum, count) => sum + count, 0);
+    while (performance.now() - started < 45000) {
+      const activeStep = document.querySelector('.story-step[aria-current="step"]');
+      const activeIndex = Number(activeStep?.dataset.storyStateIndex);
+      const mutationTotal = Object.values(perf.sourceSetData).reduce((sum, count) => sum + count, 0);
+      const scrollStable = Math.abs(window.scrollY - lastScrollY) < 0.5;
+      const mutationsStable = mutationTotal === lastMutationTotal;
+      const ready = document.body.classList.contains('is-story-shell')
+        && activeIndex === expectedIndex
+        && activeStep?.dataset.storyStateId === 'service-area'
+        && !map.isMoving()
+        && scrollStable
+        && mutationsStable
+        && document.getElementById('map').dataset.urbanContextState === 'active'
+        && document.getElementById('map').dataset.urbanOvertureDataState === 'loaded'
+        && document.getElementById('map').dataset.urbanOvertureCount === '1299';
+      if (ready) {
+        if (!stableSince) stableSince = performance.now();
+        if (performance.now() - stableSince >= 1500) {
+          return {
+            activeIndex,
+            activeStateId: activeStep.dataset.storyStateId,
+            cameraMoving: map.isMoving(),
+            scrollY: window.scrollY,
+            urbanState: document.getElementById('map').dataset.urbanContextState,
+            overtureState: document.getElementById('map').dataset.urbanOvertureDataState,
+            overtureCount: document.getElementById('map').dataset.urbanOvertureCount,
+            warmupSourceSetData: { ...perf.sourceSetData }
+          };
+        }
+      } else {
+        stableSince = 0;
+      }
+      lastScrollY = window.scrollY;
+      lastMutationTotal = mutationTotal;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error('Timed out waiting for settled Story Shell service-area state');
+  })()`);
+}
+
+async function waitForStoryNavigation(client, expectedIndex) {
+  return evaluate(client, `(async () => {
+    const expectedIndex = ${expectedIndex};
+    const map = window.__routeMap;
+    const started = performance.now();
+    let stableSince = 0;
+    let lastScrollY = window.scrollY;
+    while (performance.now() - started < 15000) {
+      const activeIndex = Number(document.querySelector('.story-step[aria-current="step"]')?.dataset.storyStateIndex);
+      const scrollStable = Math.abs(window.scrollY - lastScrollY) < 0.5;
+      if (activeIndex === expectedIndex && !map.isMoving() && scrollStable) {
+        if (!stableSince) stableSince = performance.now();
+        if (performance.now() - stableSince >= 500) return true;
+      } else {
+        stableSince = 0;
+      }
+      lastScrollY = window.scrollY;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('Timed out settling Story Shell navigation at state ' + expectedIndex);
+  })()`);
+}
+
+async function enterStoryShellServiceArea(client) {
+  await evaluate(client, `(() => {
+    if (!document.body.classList.contains('is-story-shell')) {
+      document.getElementById('presentation-open').click();
+    }
+    return true;
+  })()`);
+  await waitForStoryNavigation(client, 0);
+  for (let index = 1; index <= 4; index += 1) {
+    await evaluate(client, `document.getElementById('story-next').click()`);
+    await waitForStoryNavigation(client, index);
+  }
+  return waitForStoryShellSettled(client);
+}
+
+async function storyShellSetup(client, width, height) {
+  await installAndReload(client, width, height);
+  const settled = await enterStoryShellServiceArea(client);
+  const setup = await evaluate(client, `(() => ({
+    viewport: [innerWidth, innerHeight],
+    storyShellActive: document.body.classList.contains('is-story-shell'),
+    activeStateId: document.querySelector('.story-step[aria-current="step"]')?.dataset.storyStateId,
+    mapInstances: window.__routePerf.mapInstances,
+    provider: document.getElementById('map').dataset.urbanContextProvider,
+    urbanState: document.getElementById('map').dataset.urbanContextState,
+    overtureCount: document.getElementById('map').dataset.urbanOvertureCount,
+    overtureDataState: document.getElementById('map').dataset.urbanOvertureDataState,
+    busMarkers: document.querySelectorAll('.bus-marker').length,
+    visibleBusMarkers: [...document.querySelectorAll('.bus-marker')]
+      .filter((element) => getComputedStyle(element).display !== 'none').length,
+    console: window.__routePerf.console
+  }))()`);
+  return { ...setup, settled };
+}
+
 async function sample(client, label, durationMs) {
   const before = await client.send('Performance.getMetrics');
   const result = await evaluate(client, `(${SAMPLE})(${JSON.stringify({ durationMs, label })})`);
@@ -512,6 +621,53 @@ async function main() {
       await sleep(1000);
       const after = await sample(client, 'after-slide-05-transition', 10000);
       console.log(JSON.stringify({ before, during, after }, null, 2));
+      return;
+    }
+
+    if (command === 'story-shell-benchmark') {
+      const width = Number(process.argv[3] || 1920);
+      const height = Number(process.argv[4] || 1080);
+      const durationMs = Number(process.env.SAMPLE_MS || 15000);
+      const repetitions = Number(process.env.REPETITIONS || 3);
+      const setup = await storyShellSetup(client, width, height);
+      console.log(JSON.stringify({ setup }, null, 2));
+      console.log(JSON.stringify({ benchmarkConfig: { durationMs, repetitions } }));
+      const results = [];
+      for (let run = 1; run <= repetitions; run += 1) {
+        const settled = await waitForStoryShellSettled(client);
+        const result = await sample(client, `story-shell-${width}x${height}-${run}`, durationMs);
+        results.push({ ...result, settled });
+        console.log(JSON.stringify(results.at(-1)));
+        await sleep(500);
+      }
+      console.log(JSON.stringify({ setup, results }, null, 2));
+      return;
+    }
+
+    if (command === 'story-shell-lifecycle') {
+      const durationMs = Number(process.env.SAMPLE_MS || 15000);
+      const setup = await storyShellSetup(client, 1920, 1080);
+      await evaluate(client, `document.getElementById('story-explore').click()`);
+      await evaluate(client, `new Promise((resolve, reject) => {
+        const started = performance.now();
+        const timer = setInterval(() => {
+          if (!document.body.classList.contains('is-story-shell')
+            && document.getElementById('map').dataset.urbanContextState === 'off') {
+            clearInterval(timer); resolve(true);
+          } else if (performance.now() - started > 10000) {
+            clearInterval(timer); reject(new Error('Timed out exiting Story Shell'));
+          }
+        }, 50);
+      })`);
+      const settled = await enterStoryShellServiceArea(client);
+      const reentry = await sample(client, 'story-shell-reentry-1920x1080', durationMs);
+      const lifecycle = await evaluate(client, `(() => ({
+        mapInstances: window.__routePerf.mapInstances,
+        activeStateId: document.querySelector('.story-step[aria-current="step"]')?.dataset.storyStateId,
+        storyStepCount: document.querySelectorAll('.story-step').length,
+        console: window.__routePerf.console
+      }))()`);
+      console.log(JSON.stringify({ setup, settled, reentry, lifecycle }, null, 2));
       return;
     }
 
