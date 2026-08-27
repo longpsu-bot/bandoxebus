@@ -19,13 +19,18 @@ import {
 } from './road-labels.js';
 import {
   buildPresentationCameraOptions,
-  initialPresentationState,
-  presentationReducer,
   VIEW_MODES
 } from './presentation.js';
-import { PRESENTATION_SLIDES } from './presentation-content.js';
 import { buildPresentationMetrics } from './presentation-metrics.js';
-import { renderPresentationContent } from './presentation-renderer.js';
+import { findStoryContentBlock, renderPresentationContent } from './presentation-renderer.js';
+import { loadStoryDefinition } from './story-schema.js';
+import { createStoryActionRunner } from './story-action-runner.js';
+import { createStoryRuntime } from './story-runtime.js';
+import {
+  createRouteRevealController,
+  createRoute612StoryActionHandlers,
+  ROUTE_612_STORY_ACTION_CONTRACTS
+} from './route-61-2-story-actions.js';
 import { createUrbanContextController } from './urban-context.js';
 import { prepareBasemapStyle, stripOpenFreeMapDarkStyle } from './basemap-style.js';
 import { OVERTURE_BUILDINGS_DATA_URL } from './overture-buildings.js';
@@ -127,7 +132,7 @@ const uiState = {
   showPois: true,
   showArrows: true
 };
-let presentationState = { ...initialPresentationState };
+let storyRuntime = null;
 let map;
 let revealToken = 0;
 let mapReady = false;
@@ -739,47 +744,65 @@ function revealProposedRoute() {
   requestAnimationFrame(frame);
 }
 
-function renderPresentation({ camera = true } = {}) {
-  const slide = PRESENTATION_SLIDES[presentationState.slideIndex];
-  const scene = slide.scene;
-  document.body.classList.toggle('is-presenting', presentationState.active);
-  document.getElementById('presentation').hidden = !presentationState.active;
-  emphasizePois(Boolean(presentationState.active && scene.emphasizePois));
-  applyMode(presentationState.active ? scene.mode : presentationState.mode, { announce: false });
-  urbanContextController?.setMode(presentationState.active ? scene.urbanContext : 'off');
+const routeRevealController = createRouteRevealController({
+  start: revealProposedRoute,
+  cancel: resetProposedGradient,
+  schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clear: (timerId) => window.clearTimeout(timerId),
+  reducedMotion: prefersReducedMotion
+});
 
-  if (!presentationState.active) return;
+function renderPresentation() {
+  document.body.classList.toggle('is-presenting', storyRuntime.active);
+  document.getElementById('presentation').hidden = !storyRuntime.active;
+  if (!storyRuntime.active) return;
+
+  const state = storyRuntime.currentState;
   const contentShell = document.getElementById('presentation-content');
-  renderPresentationContent(contentShell, slide, presentationMetrics);
+  renderPresentationContent(contentShell, state, presentationMetrics);
   if (!prefersReducedMotion) {
     contentShell.classList.add('is-changing');
     void contentShell.offsetWidth;
     requestAnimationFrame(() => contentShell.classList.remove('is-changing'));
   }
-  document.getElementById('chapter-previous').disabled = presentationState.slideIndex === 0;
-  document.getElementById('chapter-next').disabled = presentationState.slideIndex === PRESENTATION_SLIDES.length - 1;
+  document.getElementById('chapter-previous').disabled = storyRuntime.currentIndex === 0;
+  document.getElementById('chapter-next').disabled = storyRuntime.currentIndex === storyRuntime.definition.states.length - 1;
   document.querySelectorAll('.chapter-dot').forEach((dot, index) => {
-    const active = index === presentationState.slideIndex;
+    const active = index === storyRuntime.currentIndex;
     dot.classList.toggle('is-active', active);
     dot.setAttribute('aria-current', active ? 'step' : 'false');
   });
-  if (camera) fitTarget(scene.target, true, scene.camera);
-  if (scene.revealProposed) window.setTimeout(revealProposedRoute, prefersReducedMotion ? 0 : 280);
-  setStatus(`Trình chiếu ${slide.step}: ${slide.content.title}.`);
+  const eyebrow = findStoryContentBlock(state, 'eyebrow');
+  const heading = findStoryContentBlock(state, 'heading');
+  setStatus(`Trình chiếu ${eyebrow?.step ?? storyRuntime.currentIndex + 1}: ${heading?.text ?? state.id}.`);
 }
 
 function dispatchPresentation(action) {
-  presentationState = presentationReducer(presentationState, action);
+  switch (action.type) {
+    case 'OPEN': storyRuntime.activate(0); break;
+    case 'CLOSE':
+      storyRuntime.deactivate();
+      applyMode(VIEW_MODES.DIFFERENCE, { announce: false });
+      emphasizePois(false);
+      urbanContextController?.setMode('off');
+      break;
+    case 'NEXT': storyRuntime.next(); break;
+    case 'PREVIOUS': storyRuntime.previous(); break;
+    case 'GOTO': storyRuntime.goTo(action.index); break;
+    default: return;
+  }
   renderPresentation();
 }
 
 function bindPresentation() {
   const dots = document.getElementById('chapter-dots');
-  PRESENTATION_SLIDES.forEach((slide, index) => {
+  storyRuntime.definition.states.forEach((state, index) => {
+    const eyebrow = findStoryContentBlock(state, 'eyebrow');
+    const heading = findStoryContentBlock(state, 'heading');
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'chapter-dot';
-    button.setAttribute('aria-label', `${slide.step}. ${slide.content.title}`);
+    button.setAttribute('aria-label', `${eyebrow?.step ?? index + 1}. ${heading?.text ?? state.id}`);
     button.addEventListener('click', () => dispatchPresentation({ type: 'GOTO', index }));
     dots.appendChild(button);
   });
@@ -792,7 +815,7 @@ function bindPresentation() {
   document.getElementById('chapter-next').addEventListener('click', () => dispatchPresentation({ type: 'NEXT' }));
   window.addEventListener('keydown', (event) => {
     const interactive = event.target.closest?.('input, textarea, select, [contenteditable="true"]');
-    if (!presentationState.active || interactive) return;
+    if (!storyRuntime.active || interactive) return;
     if (event.key === 'ArrowRight') { event.preventDefault(); dispatchPresentation({ type: 'NEXT' }); }
     if (event.key === 'ArrowLeft') { event.preventDefault(); dispatchPresentation({ type: 'PREVIOUS' }); }
     if (event.key === 'Escape') {
@@ -806,7 +829,6 @@ function bindPresentation() {
 function bindControls() {
   document.querySelectorAll('.mode-button').forEach((button) => {
     button.addEventListener('click', () => {
-      presentationState = presentationReducer(presentationState, { type: 'SET_MODE', mode: button.dataset.mode });
       applyMode(button.dataset.mode);
     });
   });
@@ -883,11 +905,13 @@ function bindMapInteractions() {
 async function initialize() {
   renderMetrics();
   bindTabs();
-  bindPresentation();
   bindControls();
 
   try {
-    const [styleResponse, industrialZoneResponse, overtureBuildingResponse] = await Promise.all([
+    const [storyDefinition, styleResponse, industrialZoneResponse, overtureBuildingResponse] = await Promise.all([
+      loadStoryDefinition('./data/stories/route-61-2.story.json', {
+        actionContracts: ROUTE_612_STORY_ACTION_CONTRACTS
+      }),
       fetch('./style-openfreemap-dark.json'),
       fetch('./data/industrial-zone-poc.geojson'),
       fetch(OVERTURE_BUILDINGS_DATA_URL).catch(() => null)
@@ -901,6 +925,14 @@ async function initialize() {
       throw new TypeError('Dữ liệu vùng công nghiệp phải chứa đúng một Polygon.');
     }
     industrialZoneFeature = industrialZoneCollection.features[0];
+    const storyActionRunner = createStoryActionRunner(createRoute612StoryActionHandlers({
+      setMode: (mode) => applyMode(mode, { announce: false }),
+      focus: (target, camera) => fitTarget(target, true, camera),
+      setPoiEmphasis: emphasizePois,
+      setUrbanContext: (mode) => urbanContextController?.setMode(mode),
+      setRouteReveal: routeRevealController.setActive
+    }));
+    storyRuntime = createStoryRuntime({ definition: storyDefinition, actionRunner: storyActionRunner });
     if (overtureBuildingResponse?.ok) {
       try {
         overtureBuildingCollection = await overtureBuildingResponse.json();
@@ -947,6 +979,7 @@ async function initialize() {
         reducedMotion: prefersReducedMotion
       });
       mapReady = true;
+      bindPresentation();
       map.once('idle', primeRouteRoadLabels);
       applyMode(VIEW_MODES.DIFFERENCE, { announce: false });
       bindMapInteractions();

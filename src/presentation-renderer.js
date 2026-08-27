@@ -7,21 +7,35 @@ function textElement(documentRef, tagName, className, text) {
   return element;
 }
 
-function appendNarrative(container, narrative, documentRef) {
-  if (!narrative) return;
+function appendEyebrow(container, block, _metrics, documentRef) {
+  const prefix = block.step ? `${block.step} · ` : '';
+  container.append(textElement(
+    documentRef,
+    'p',
+    'presentation-content__eyebrow',
+    `${prefix}${block.text.toLocaleUpperCase('vi-VN')}`
+  ));
+}
+
+function appendHeading(container, block, _metrics, documentRef) {
+  container.append(textElement(documentRef, 'h2', 'presentation-content__title', block.text));
+  if (block.subtitle) container.append(textElement(documentRef, 'p', 'presentation-content__subtitle', block.subtitle));
+  if (block.status) container.append(textElement(documentRef, 'p', 'presentation-content__status', block.status));
+}
+
+function appendParagraph(container, block, _metrics, documentRef) {
   const wrapper = documentRef.createElement('div');
   wrapper.className = 'presentation-content__narrative';
-  narrative.split(/\n\s*\n/).filter(Boolean).forEach((paragraph) => {
+  block.text.split(/\n\s*\n/).filter(Boolean).forEach((paragraph) => {
     wrapper.append(textElement(documentRef, 'p', '', paragraph));
   });
   container.append(wrapper);
 }
 
-function appendMetrics(container, bindings, metrics, documentRef) {
-  if (!bindings?.length) return;
+function appendStats(container, block, metrics, documentRef) {
   const grid = documentRef.createElement('div');
   grid.className = 'presentation-metrics';
-  bindings.forEach((binding) => {
+  block.items.forEach((binding) => {
     const card = documentRef.createElement('article');
     card.className = `presentation-metric presentation-metric--${binding.tone ?? 'neutral'}`;
     card.append(
@@ -33,11 +47,10 @@ function appendMetrics(container, bindings, metrics, documentRef) {
   container.append(grid);
 }
 
-function appendCallouts(container, callouts, documentRef) {
-  if (!callouts?.length) return;
+function appendCallouts(container, block, _metrics, documentRef) {
   const list = documentRef.createElement('ul');
   list.className = 'presentation-callouts';
-  callouts.forEach((callout) => {
+  block.items.forEach((callout) => {
     const item = documentRef.createElement('li');
     item.className = `presentation-callout presentation-callout--${callout.tone ?? 'neutral'}`;
     if (callout.label) item.append(textElement(documentRef, 'strong', '', callout.label));
@@ -47,25 +60,27 @@ function appendCallouts(container, callouts, documentRef) {
   container.append(list);
 }
 
-export function renderPresentationContent(container, slide, metrics, documentRef = document) {
-  const { content } = slide;
-  container.className = `presentation-content presentation-content--${content.layout}`;
-  container.dataset.slideId = slide.id;
+const BLOCK_RENDERERS = Object.freeze({
+  eyebrow: appendEyebrow,
+  heading: appendHeading,
+  paragraph: appendParagraph,
+  'stat-group': appendStats,
+  callout: appendCallouts,
+  disclosure(container, block, _metrics, documentRef) {
+    container.append(textElement(documentRef, 'small', 'presentation-content__source', block.text));
+  }
+});
+
+export function findStoryContentBlock(state, type) {
+  return state.content.blocks.find((block) => block.type === type);
+}
+
+export function renderPresentationContent(container, state, metrics, documentRef = document) {
+  container.className = `presentation-content presentation-content--${state.content.layout}`;
+  container.dataset.slideId = state.id;
   container.replaceChildren();
 
-  container.append(textElement(
-    documentRef,
-    'p',
-    'presentation-content__eyebrow',
-    `${slide.step} · ${content.eyebrow.toLocaleUpperCase('vi-VN')}`
-  ));
-  container.append(textElement(documentRef, 'h2', 'presentation-content__title', content.title));
-  if (content.subtitle) container.append(textElement(documentRef, 'p', 'presentation-content__subtitle', content.subtitle));
-  if (content.status) container.append(textElement(documentRef, 'p', 'presentation-content__status', content.status));
-  appendNarrative(container, content.narrative, documentRef);
-  appendMetrics(container, content.metrics, metrics, documentRef);
-  appendCallouts(container, content.callouts, documentRef);
-  if (content.sourceNote) {
-    container.append(textElement(documentRef, 'small', 'presentation-content__source', content.sourceNote));
-  }
+  state.content.blocks.forEach((block) => {
+    BLOCK_RENDERERS[block.type](container, block, metrics, documentRef);
+  });
 }

@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PRESENTATION_LAYOUTS } from '../src/presentation.js';
-import { PRESENTATION_SLIDES } from '../src/presentation-content.js';
+import { readFile } from 'node:fs/promises';
+import { validateStoryDefinition } from '../src/story-schema.js';
+import { ROUTE_612_STORY_ACTION_CONTRACTS } from '../src/route-61-2-story-actions.js';
 
+const STORY_URL = new URL('../data/stories/route-61-2.story.json', import.meta.url);
 const EXPECTED_IDS = [
   'intro',
   'existing',
@@ -13,46 +15,51 @@ const EXPECTED_IDS = [
   'final-proposal'
 ];
 
-test('61-2 presentation exposes the seven canonical slides in order', () => {
-  assert.equal(PRESENTATION_SLIDES.length, 7);
-  assert.deepEqual(PRESENTATION_SLIDES.map(({ id }) => id), EXPECTED_IDS);
+async function loadStory() {
+  return JSON.parse(await readFile(STORY_URL, 'utf8'));
+}
+
+test('Route 61-2 JSON validates and exposes the seven canonical states in order', async () => {
+  const story = await loadStory();
+  assert.equal(validateStoryDefinition(story, {
+    actionContracts: ROUTE_612_STORY_ACTION_CONTRACTS
+  }), story);
+  assert.deepEqual(story.states.map(({ id }) => id), EXPECTED_IDS);
 });
 
-test('61-2 presentation slide IDs are stable and unique', () => {
-  assert.equal(new Set(PRESENTATION_SLIDES.map(({ id }) => id)).size, 7);
-});
-
-test('every slide separates a supported content layout from its map scene', () => {
-  const supportedLayouts = new Set(Object.values(PRESENTATION_LAYOUTS));
-
-  PRESENTATION_SLIDES.forEach((slide) => {
-    assert.ok(slide.scene, `${slide.id} must define a scene`);
-    assert.ok(slide.content, `${slide.id} must define content`);
-    assert.ok(slide.scene.mode, `${slide.id} scene must define a mode`);
-    assert.ok(slide.scene.target, `${slide.id} scene must define a target`);
-    assert.ok(supportedLayouts.has(slide.content.layout), `${slide.id} must use a supported layout`);
-    assert.ok(slide.content.title, `${slide.id} content must define a title`);
-    assert.equal('title' in slide.scene, false, `${slide.id} scene must not contain presentation prose`);
-    assert.equal('mode' in slide.content, false, `${slide.id} content must not contain map configuration`);
+test('story definition is pure serializable data with structured content blocks', async () => {
+  const story = await loadStory();
+  assert.deepEqual(JSON.parse(JSON.stringify(story)), story);
+  story.states.forEach((state) => {
+    assert.ok(state.content.blocks.some(({ type }) => type === 'heading'));
+    assert.equal(state.content.blocks.some(({ type }) => type === 'html'), false);
+    assert.ok(Array.isArray(state.map.enter));
+    assert.ok(Array.isArray(state.map.exit));
   });
 });
 
-test('production industrial context is active only on Slide 05 and keeps its disclosure visible', () => {
-  const serviceArea = PRESENTATION_SLIDES.find(({ id }) => id === 'service-area');
-  assert.equal(serviceArea.scene.urbanContext, 'industrial-context');
-  assert.equal(serviceArea.scene.target, 'service-area');
-  assert.match(serviceArea.content.sourceNote, /Overture/i);
-  assert.match(serviceArea.content.sourceNote, /tổng quát hóa/i);
-  assert.match(serviceArea.content.sourceNote, /minh họa/i);
-  assert.match(serviceArea.content.sourceNote, /ranh.*không phải.*quy hoạch.*chính thức/i);
-  PRESENTATION_SLIDES.filter(({ id }) => id !== 'service-area').forEach((slide) => {
-    assert.equal(slide.scene.urbanContext, 'off');
-  });
-  assert.equal(PRESENTATION_SLIDES.some((slide) => slide.scene.urbanContext === 'future-infill'), false);
+test('production industrial context is activated declaratively only for the service-area state', async () => {
+  const story = await loadStory();
+  const urbanActions = story.states.map((state) => ({
+    id: state.id,
+    action: state.map.enter.find(({ type }) => type === 'map.urban-context')
+  }));
+  assert.deepEqual(
+    urbanActions.filter(({ action }) => action.mode === 'industrial-context').map(({ id }) => id),
+    ['service-area']
+  );
+  assert.equal(urbanActions.filter(({ id }) => id !== 'service-area').every(({ action }) => action.mode === 'off'), true);
+
+  const disclosure = story.states.find(({ id }) => id === 'service-area').content.blocks
+    .find(({ type }) => type === 'disclosure').text;
+  assert.match(disclosure, /Overture/i);
+  assert.match(disclosure, /tổng quát hóa/i);
+  assert.match(disclosure, /minh họa/i);
+  assert.match(disclosure, /ranh.*không phải.*quy hoạch.*chính thức/i);
 });
 
-test('presenter notes remain authoring metadata and are available to future tooling', () => {
-  const slideWithPresenterNote = PRESENTATION_SLIDES.find(({ content }) => content.presenterNote);
-  assert.ok(slideWithPresenterNote);
-  assert.equal(typeof slideWithPresenterNote.content.presenterNote, 'string');
+test('presenter notes remain non-rendered authoring metadata', async () => {
+  const story = await loadStory();
+  const state = story.states.find(({ content }) => content.presenterNote);
+  assert.equal(typeof state.content.presenterNote, 'string');
 });
