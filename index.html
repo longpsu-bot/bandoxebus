@@ -103,6 +103,20 @@
     </nav>
   </section>
 
+  <section id="story-shell" class="story-shell" aria-label="Câu chuyện bản đồ" hidden>
+    <header class="story-shell__toolbar">
+      <p class="story-shell__progress" aria-live="polite">
+        <span id="story-progress-current">1</span> / <span id="story-progress-total">1</span>
+      </p>
+      <button id="story-explore" type="button">Khám phá bản đồ</button>
+    </header>
+    <div id="story-shell-steps" class="story-shell__steps" aria-label="Các trạng thái câu chuyện"></div>
+    <nav class="story-shell__navigation" aria-label="Điều hướng câu chuyện">
+      <button id="story-previous" type="button">← Trước</button>
+      <button id="story-next" type="button">Tiếp →</button>
+    </nav>
+  </section>
+
   <noscript>Ứng dụng cần JavaScript để hiển thị bản đồ tương tác.</noscript>
   <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
   <script type="module" src="./src/app.js"></script>
