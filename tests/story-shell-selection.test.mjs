@@ -11,12 +11,19 @@ function entry(index, { ratio, top, bottom, intersecting = true }) {
   };
 }
 
-test('POC query gate requires the exact storyShell=poc value', () => {
-  assert.equal(shell.isStoryShellPocEnabled('?storyShell=poc'), true);
-  assert.equal(shell.isStoryShellPocEnabled('?storyShell=poc&x=1'), true);
-  assert.equal(shell.isStoryShellPocEnabled('?x=1&storyShell=poc'), true);
-  assert.equal(shell.isStoryShellPocEnabled(''), false);
-  assert.equal(shell.isStoryShellPocEnabled('?storyShell=legacy'), false);
+test('story experience defaults to Story Shell unless legacy is explicit', () => {
+  const cases = [
+    ['', 'story'],
+    ['?storyShell=poc', 'story'],
+    ['?storyShell=legacy', 'legacy'],
+    ['?storyShell=anything', 'story'],
+    ['?foo=bar', 'story'],
+    ['?x=1&storyShell=legacy', 'legacy']
+  ];
+
+  for (const [search, expected] of cases) {
+    assert.equal(shell.resolveStoryExperience?.(search), expected, search || 'empty query');
+  }
 });
 
 test('story indices clamp without knowing state IDs', () => {
