@@ -1,5 +1,6 @@
 export const STORY_ACTIVATION_LINE_RATIO = 0.45;
 export const STORY_RATIO_TIE_EPSILON = 0.01;
+const INTERACTIVE_STORY_SELECTOR = 'input, textarea, select, button, a, [contenteditable]';
 
 export function isStoryShellPocEnabled(search = '') {
   return new URLSearchParams(search).get('storyShell') === 'poc';
@@ -16,6 +17,17 @@ export function normalizeStoryIndex(index, stateCount) {
 
 export function adjacentStoryIndex(index, direction, stateCount) {
   return normalizeStoryIndex(normalizeStoryIndex(index, stateCount) + Math.sign(direction), stateCount);
+}
+
+export function isInteractiveStoryTarget(target) {
+  return Boolean(target?.closest?.(INTERACTIVE_STORY_SELECTOR));
+}
+
+export function storyNavigationIntent({ key }) {
+  if (['ArrowRight', 'ArrowDown', ' '].includes(key)) return 'next';
+  if (['ArrowLeft', 'ArrowUp'].includes(key)) return 'previous';
+  if (key === 'Escape') return 'exit';
+  return null;
 }
 
 export function selectActiveStoryStep(entries, {
@@ -115,12 +127,28 @@ export function createStoryShell({
     });
   }
 
+  function handleKeydown(event) {
+    if (!active || isInteractiveStoryTarget(event.target)) return;
+    const intent = storyNavigationIntent(event);
+    if (!intent) return;
+    event.preventDefault();
+    if (intent === 'exit') {
+      exit();
+      return;
+    }
+    const direction = intent === 'next' ? 1 : -1;
+    activateStoryState(adjacentStoryIndex(runtime.currentIndex, direction, runtime.definition.states.length), {
+      scroll: true
+    });
+  }
+
   function exit() {
     if (!active) return;
     active = false;
     elements.previousButton.removeEventListener('click', handlePrevious);
     elements.nextButton.removeEventListener('click', handleNext);
     elements.exitButton.removeEventListener('click', exit);
+    windowRef.removeEventListener('keydown', handleKeydown);
     runtime.deactivate();
     interactionPolicy.exit();
     documentRef.body.classList.remove('is-story-shell');
@@ -143,6 +171,7 @@ export function createStoryShell({
     elements.previousButton.addEventListener('click', handlePrevious);
     elements.nextButton.addEventListener('click', handleNext);
     elements.exitButton.addEventListener('click', exit);
+    windowRef.addEventListener('keydown', handleKeydown);
     interactionPolicy.enter();
     activateStoryState(0);
   }

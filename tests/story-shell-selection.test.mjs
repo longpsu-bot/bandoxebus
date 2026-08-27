@@ -52,3 +52,21 @@ test('an exact tie uses deterministic configuration order and ignores non-inters
   assert.equal(selected, 1);
   assert.equal(shell.selectActiveStoryStep([], { viewportHeight: 1000 }), null);
 });
+
+test('keyboard intent maps arrows and Space without story semantics', () => {
+  for (const key of ['ArrowRight', 'ArrowDown', ' ']) {
+    assert.equal(shell.storyNavigationIntent({ key }), 'next');
+  }
+  for (const key of ['ArrowLeft', 'ArrowUp']) {
+    assert.equal(shell.storyNavigationIntent({ key }), 'previous');
+  }
+  assert.equal(shell.storyNavigationIntent({ key: 'Escape' }), 'exit');
+  assert.equal(shell.storyNavigationIntent({ key: 'Enter' }), null);
+});
+
+test('editable and interactive targets are excluded', () => {
+  for (const selector of ['input', 'textarea', 'select', 'button', 'a', '[contenteditable]']) {
+    assert.equal(shell.isInteractiveStoryTarget({ closest: (value) => value.includes(selector) ? {} : null }), true);
+  }
+  assert.equal(shell.isInteractiveStoryTarget({ closest: () => null }), false);
+});

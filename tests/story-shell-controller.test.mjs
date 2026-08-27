@@ -141,3 +141,21 @@ test('same active index is a shell no-op instead of reactivating runtime actions
   fixture.controller.activateStoryState(0);
   assert.deepEqual(fixture.runtimeCalls, [0]);
 });
+
+test('keyboard next previous and Escape use activation and exit lifecycle', () => {
+  const fixture = controllerFixture();
+  fixture.controller.enter();
+  fixture.windowRef.keydown('ArrowDown');
+  fixture.windowRef.keydown(' ');
+  fixture.windowRef.keydown('ArrowUp');
+  fixture.windowRef.keydown('Escape');
+  assert.deepEqual(fixture.runtimeCalls, [0, 1, 2, 1, 'deactivate']);
+  assert.equal(fixture.elements.root.hidden, true);
+});
+
+test('keyboard ignores events from interactive targets', () => {
+  const fixture = controllerFixture();
+  fixture.controller.enter();
+  fixture.windowRef.keydown('ArrowRight', { closest: () => ({}) });
+  assert.deepEqual(fixture.runtimeCalls, [0]);
+});
