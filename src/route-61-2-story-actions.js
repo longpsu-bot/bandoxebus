@@ -6,6 +6,33 @@ export const ROUTE_612_STORY_ACTION_TYPES = Object.freeze([
   'route.reveal'
 ]);
 
+export function createRouteRevealController({
+  start,
+  cancel,
+  schedule,
+  clear,
+  reducedMotion
+}) {
+  let timerId = null;
+
+  return Object.freeze({
+    setActive(active, delayMs = 0) {
+      if (timerId !== null) {
+        clear(timerId);
+        timerId = null;
+      }
+      if (!active) {
+        cancel();
+        return;
+      }
+      timerId = schedule(() => {
+        timerId = null;
+        start();
+      }, reducedMotion ? 0 : delayMs);
+    }
+  });
+}
+
 export function createRoute612StoryActionHandlers({
   setMode,
   focus,

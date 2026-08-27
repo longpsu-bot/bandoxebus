@@ -1,9 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  createRouteRevealController,
   createRoute612StoryActionHandlers,
   ROUTE_612_STORY_ACTION_TYPES
 } from '../src/route-61-2-story-actions.js';
+
+test('cancelling a delayed reveal prevents its stale callback from starting', () => {
+  const events = [];
+  const scheduled = new Map();
+  let nextTimerId = 1;
+  const controller = createRouteRevealController({
+    start: () => events.push('start'),
+    cancel: () => events.push('cancel'),
+    schedule(callback, delayMs) {
+      const id = nextTimerId++;
+      scheduled.set(id, { callback, delayMs });
+      return id;
+    },
+    clear(timerId) {
+      scheduled.delete(timerId);
+    },
+    reducedMotion: false
+  });
+
+  controller.setActive(true, 280);
+  assert.equal([...scheduled.values()][0].delayMs, 280);
+  controller.setActive(false);
+  assert.equal(scheduled.size, 0);
+  assert.deepEqual(events, ['cancel']);
+});
 
 function createRecorder() {
   const calls = [];

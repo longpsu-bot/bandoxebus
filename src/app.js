@@ -27,6 +27,7 @@ import { loadStoryDefinition } from './story-schema.js';
 import { createStoryActionRunner } from './story-action-runner.js';
 import { createStoryRuntime } from './story-runtime.js';
 import {
+  createRouteRevealController,
   createRoute612StoryActionHandlers,
   ROUTE_612_STORY_ACTION_TYPES
 } from './route-61-2-story-actions.js';
@@ -743,13 +744,13 @@ function revealProposedRoute() {
   requestAnimationFrame(frame);
 }
 
-function setRouteReveal(active, delayMs = 0) {
-  if (!active) {
-    resetProposedGradient();
-    return;
-  }
-  window.setTimeout(revealProposedRoute, prefersReducedMotion ? 0 : delayMs);
-}
+const routeRevealController = createRouteRevealController({
+  start: revealProposedRoute,
+  cancel: resetProposedGradient,
+  schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clear: (timerId) => window.clearTimeout(timerId),
+  reducedMotion: prefersReducedMotion
+});
 
 function renderPresentation() {
   document.body.classList.toggle('is-presenting', storyRuntime.active);
@@ -929,7 +930,7 @@ async function initialize() {
       focus: (target, camera) => fitTarget(target, true, camera),
       setPoiEmphasis: emphasizePois,
       setUrbanContext: (mode) => urbanContextController?.setMode(mode),
-      setRouteReveal
+      setRouteReveal: routeRevealController.setActive
     }));
     storyRuntime = createStoryRuntime({ definition: storyDefinition, actionRunner: storyActionRunner });
     if (overtureBuildingResponse?.ok) {

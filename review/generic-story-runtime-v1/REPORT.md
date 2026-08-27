@@ -50,7 +50,7 @@
 ## Regression
 
 - tests before: 75/75
-- tests after: 94/94
+- tests after: 95/95
 - console errors: 0
 - console warnings introduced: 0
 - seven-state smoke: pass; `intro → existing → adjustment-context → route-changes → service-area → connections → final-proposal`
