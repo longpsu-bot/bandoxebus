@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0",
+  "id": "example-project",
+  "title": "Example map story",
+  "subtitle": "A safe static package",
+  "description": "Contract fixture for a portable project.",
+  "locale": "en-US",
+  "organization": "Example authority",
+  "author": "Planning team",
+  "projectDate": "2026-08-28",
+  "projectVersion": "1.0",
+  "stories": {
+    "primary": "main",
+    "items": [
+      {
+        "id": "main",
+        "src": "./stories/main.story.json"
+      }
+    ]
+  },
+  "map": {
+    "basemap": "openfreemap-dark",
+    "initialView": {
+      "center": [106.63, 11.06],
+      "zoom": 10.7,
+      "pitch": 46,
+      "bearing": -18
+    },
+    "minZoom": 8,
+    "maxZoom": 18
+  },
+  "datasets": {},
+  "assets": {},
+  "focusTargets": {},
+  "metrics": {
+    "src": "./data/metrics.json"
+  },
+  "capabilities": [
+    {
+      "id": "route-comparison-v1",
+      "settings": {}
+    }
+  ],
+  "attribution": {}
+}

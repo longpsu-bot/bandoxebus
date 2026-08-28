@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.0",
+  "id": "example-project",
+  "title": "Example map story",
+  "locale": "en-US",
+  "stories": {
+    "primary": "main",
+    "items": [
+      {
+        "id": "main",
+        "src": "./stories/main.story.json"
+      }
+    ]
+  },
+  "map": {
+    "basemap": "openfreemap-dark",
+    "initialView": {
+      "center": [106.63, 11.06],
+      "zoom": 10.7,
+      "pitch": 46,
+      "bearing": -18
+    }
+  },
+  "datasets": {},
+  "assets": {},
+  "focusTargets": {},
+  "capabilities": [
+    {
+      "id": "route-comparison-v1",
+      "module": "./project-code.js"
+    }
+  ],
+  "attribution": {}
+}
