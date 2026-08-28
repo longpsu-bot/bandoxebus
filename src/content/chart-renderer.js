@@ -13,7 +13,7 @@ export function createChartRenderer({ Chart, documentRef = document, reducedMoti
   return Object.freeze({
     render(block, context) {
       const wrapper = element(documentRef, 'figure', 'content-chart');
-      const canvas = element(documentRef, 'canvas'); canvas.setAttribute('role', 'img');
+      const canvas = element(documentRef, 'canvas'); canvas.style.maxHeight = '220px'; canvas.setAttribute('role', 'img');
       const description = block.description ?? `Chart with ${context.table.rows.length} data rows.`;
       canvas.setAttribute('aria-label', `${block.title}. ${description}`); wrapper.append(canvas);
       const config = buildChartConfig(block, { table: context.table, formatter, reducedMotion });
