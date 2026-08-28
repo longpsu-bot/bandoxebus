@@ -1,6 +1,7 @@
 import manifestSchema from '../../data/schemas/project-manifest-v1.schema.json' with { type: 'json' };
 import { validateSchema } from '../contracts/schema-validator.js';
 import { projectError } from './project-error.js';
+import { validateManifestResourcePaths } from './path-resolver.js';
 
 const RESERVED_CAPABILITIES = new Set(['core-content-v1', 'core-map-v1']);
 
@@ -58,5 +59,10 @@ export function validateProjectManifest(manifest) {
   validateStoryIds(manifest.stories.items);
   validateReservedCapabilities(manifest.capabilities);
   validateInitialView(manifest.map);
+  try {
+    validateManifestResourcePaths(manifest);
+  } catch (error) {
+    fail(error.path, `Unsafe package-relative resource path: ${error.message}`);
+  }
   return manifest;
 }
