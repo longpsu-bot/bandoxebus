@@ -93,7 +93,9 @@ function resolvedResources(manifest, urls, values) {
 }
 
 function storyNormalizers(capabilities, focusTargets) {
-  const byType = { ...capabilities.legacyNormalizers };
+  const byType = Object.fromEntries(capabilities.ordered
+    .flatMap((entry) => entry.story10Normalizers ?? [])
+    .map((normalizer) => [normalizer.legacyType, normalizer]));
   for (const normalizer of createCoreMap10Normalizers({ focusTargets })) {
     byType[normalizer.legacyType] = normalizer;
   }

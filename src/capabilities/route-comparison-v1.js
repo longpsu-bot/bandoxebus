@@ -56,7 +56,11 @@ export const ROUTE_COMPARISON_V1_DESCRIPTOR = deepFreeze({
   settingsSchema: {
     type: 'object',
     additionalProperties: false,
-    properties: {}
+    properties: {
+      adapter: { type: 'string', enum: ['route-61-2-current'] },
+      proposedRouteTarget: TARGET,
+      poiTarget: TARGET
+    }
   },
   gui: { group: 'Route comparison' }
 });

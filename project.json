@@ -1,0 +1,98 @@
+{
+  "schemaVersion": "1.0",
+  "id": "route-61-2",
+  "title": "Tuyến 61-2",
+  "subtitle": "Thủ Dầu Một ↔ Bến Cát",
+  "description": "So sánh tuyến xe buýt 61-2 hiện hữu và phương án điều chỉnh.",
+  "locale": "vi-VN",
+  "organization": "Dự án Route 61-2",
+  "projectDate": "2026-08-28",
+  "projectVersion": "1.0",
+  "stories": {
+    "primary": "route-61-2",
+    "items": [
+      { "id": "route-61-2", "src": "./data/stories/route-61-2.story.json" }
+    ]
+  },
+  "map": {
+    "basemap": "openfreemap-dark",
+    "initialView": {
+      "center": [106.63, 11.06],
+      "zoom": 10.7,
+      "pitch": 46,
+      "bearing": -18
+    }
+  },
+  "datasets": {
+    "existing-route": {
+      "type": "geojson",
+      "geometry": "line",
+      "src": "./data/route-61-2/existing-route.geojson",
+      "role": "route.existing",
+      "label": "Tuyến 61-2 hiện hữu",
+      "attribution": ["route-61-2-source"]
+    },
+    "proposed-route": {
+      "type": "geojson",
+      "geometry": "line",
+      "src": "./data/route-61-2/proposed-route.geojson",
+      "role": "route.proposed",
+      "label": "Tuyến 61-2 điều chỉnh",
+      "attribution": ["route-61-2-source"]
+    },
+    "existing-stops": {
+      "type": "geojson",
+      "geometry": "point",
+      "src": "./data/route-61-2/existing-stops.geojson",
+      "role": "stops.existing",
+      "label": "Điểm dừng hiện hữu",
+      "attribution": ["route-61-2-source"]
+    },
+    "proposed-stops": {
+      "type": "geojson",
+      "geometry": "point",
+      "src": "./data/route-61-2/proposed-stops.geojson",
+      "role": "stops.proposed",
+      "label": "Điểm dừng điều chỉnh",
+      "attribution": ["route-61-2-source"]
+    },
+    "industrial-zone": {
+      "type": "geojson",
+      "geometry": "polygon",
+      "src": "./data/industrial-zone-poc.geojson",
+      "role": "context.area",
+      "label": "Khu công nghiệp Mỹ Phước 1",
+      "attribution": ["route-61-2-source"]
+    }
+  },
+  "assets": {},
+  "focusTargets": {
+    "overview": { "type": "bounds", "bounds": [[106.5922313, 10.9651676], [106.67443, 11.1564203]] },
+    "existing": { "type": "bounds", "bounds": [[106.5922313, 10.9651676], [106.6686562, 11.1559576]] },
+    "proposed": { "type": "bounds", "bounds": [[106.5923685, 10.965321], [106.668559, 11.1564203]] },
+    "changes": { "type": "bounds", "bounds": [[106.5986582, 11.0904884], [106.62572, 11.111813]] },
+    "service-area": { "type": "bounds", "bounds": [[106.5877666, 11.117435600000002], [106.6037689, 11.1414241]] },
+    "connections": { "type": "bounds", "bounds": [[106.59759765625, 10.96611], [106.67443, 11.08911]] }
+  },
+  "capabilities": [
+    {
+      "id": "route-comparison-v1",
+      "settings": {
+        "adapter": "route-61-2-current",
+        "proposedRouteTarget": "proposed-route",
+        "poiTarget": "connection-pois"
+      }
+    },
+    {
+      "id": "urban-context-v1",
+      "settings": { "adapter": "route-61-2-current" }
+    }
+  ],
+  "attribution": {
+    "route-61-2-source": {
+      "name": "Dữ liệu dự án Tuyến 61-2",
+      "updated": "2026-08-28",
+      "notes": "Hình học và điểm dừng được giữ nguyên từ gói sản xuất hiện tại."
+    }
+  }
+}
