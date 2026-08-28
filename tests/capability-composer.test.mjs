@@ -31,7 +31,11 @@ function entry(capabilityDescriptor, onCreate = () => undefined) {
     descriptor: capabilityDescriptor,
     createCapability() {
       onCreate();
-      return {};
+      return {
+        datasetRoles: Object.fromEntries(
+          capabilityDescriptor.datasetRoles.map(({ role }) => [role, true])
+        )
+      };
     }
   };
 }

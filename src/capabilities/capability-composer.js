@@ -171,6 +171,92 @@ function createCatalog(ordered, ownership) {
   });
 }
 
+function implementationMap(implementation, field) {
+  const value = implementation[field] ?? {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value;
+}
+
+function assertKeys(entry, implementation, field, expected) {
+  const actualMap = implementationMap(implementation, field);
+  const actual = actualMap ? Object.keys(actualMap).sort() : [];
+  const wanted = [...expected].sort();
+  const validFunctions = actualMap && actual.every((key) => (
+    field === 'datasetRoles' || typeof actualMap[key] === 'function'
+  ));
+  if (!validFunctions || actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+    fail(
+      'CAPABILITY_IMPLEMENTATION_MISMATCH',
+      `$.capabilities.${entry.descriptor.id}.${field}`,
+      `${entry.descriptor.id} ${field} must exactly match its descriptor.`
+    );
+  }
+}
+
+function validateImplementation(entry, implementation) {
+  if (!implementation || typeof implementation !== 'object' || Array.isArray(implementation)) {
+    fail('CAPABILITY_IMPLEMENTATION_MISMATCH', `$.capabilities.${entry.descriptor.id}`, 'Capability factory must return an implementation object.');
+  }
+  assertKeys(entry, implementation, 'handlers', entry.descriptor.actions.map(({ type }) => type));
+  assertKeys(entry, implementation, 'renderers', entry.descriptor.content.map(({ type }) => type));
+  assertKeys(entry, implementation, 'metricProviders', entry.descriptor.metrics.map(({ id }) => id));
+  assertKeys(entry, implementation, 'datasetRoles', entry.descriptor.datasetRoles.map(({ role }) => role));
+  for (const lifecycle of entry.descriptor.lifecycle) {
+    if (typeof implementation[lifecycle] !== 'function') {
+      fail(
+        'CAPABILITY_IMPLEMENTATION_MISMATCH',
+        `$.capabilities.${entry.descriptor.id}.${lifecycle}`,
+        `${entry.descriptor.id} must implement declared lifecycle ${lifecycle}.`
+      );
+    }
+  }
+  return true;
+}
+
+export function assertCapabilityImplementationParity(entry) {
+  const implementation = entry.createCapability({});
+  return validateImplementation(entry, implementation);
+}
+
+function instantiateCapabilities(ordered, settings, datasets) {
+  const handlers = {};
+  const renderers = {};
+  const metricProviders = {};
+  const datasetRoleProviders = {};
+  const instances = [];
+
+  for (const entry of ordered) {
+    const implementation = entry.createCapability({
+      settings: settings[entry.descriptor.id],
+      datasets
+    });
+    validateImplementation(entry, implementation);
+    instances.push(Object.freeze({ entry, implementation }));
+    Object.assign(handlers, implementation.handlers ?? {});
+    Object.assign(renderers, implementation.renderers ?? {});
+    Object.assign(metricProviders, implementation.metricProviders ?? {});
+    Object.assign(datasetRoleProviders, implementation.datasetRoles ?? {});
+  }
+
+  return {
+    handlers: Object.freeze(handlers),
+    renderers: Object.freeze(renderers),
+    metricProviders: Object.freeze(metricProviders),
+    datasetRoleProviders: Object.freeze(datasetRoleProviders),
+    instances: Object.freeze(instances)
+  };
+}
+
+function createActionValidator(actionDescriptors) {
+  return (action, { path = '$' } = {}) => {
+    const descriptor = actionDescriptors[action?.type];
+    if (!descriptor) fail('CAPABILITY_ACTION_UNKNOWN', `${path}.type`, `Unknown canonical action type: ${action?.type ?? ''}.`);
+    const issues = validateSchema(action, descriptor.parameters, { path });
+    if (issues.length) fail('CAPABILITY_ACTION_INVALID', issues[0].path, issues[0].message);
+    return action;
+  };
+}
+
 export function composeCapabilities({ registry, declarations = [], datasets = {} }) {
   const declarationsById = validateDeclarations(registry, declarations);
   const selected = resolveSelectedEntries(registry, declarationsById);
@@ -178,6 +264,7 @@ export function composeCapabilities({ registry, declarations = [], datasets = {}
   const settings = validateSettings(ordered, declarationsById);
   const datasetRoles = validateDatasetRoles(ordered, datasets);
   const ownership = collectOwnership(ordered);
+  const runtime = instantiateCapabilities(ordered, settings, datasets);
 
   return deepFreeze({
     ordered,
@@ -185,6 +272,8 @@ export function composeCapabilities({ registry, declarations = [], datasets = {}
     settings,
     datasetRoles,
     ...ownership,
-    catalog: createCatalog(ordered, ownership)
+    ...runtime,
+    catalog: createCatalog(ordered, ownership),
+    validateAction: createActionValidator(ownership.actionDescriptors)
   });
 }
