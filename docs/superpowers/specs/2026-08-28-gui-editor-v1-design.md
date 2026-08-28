@@ -27,7 +27,7 @@ The editor writes the same production resources that the application already con
 
 There is one project model, one validation authority, one descriptor catalog, and one preview runtime. The editor must not introduce a GUI-only schema, translate an editor model into production data, duplicate Story semantics, or simulate production rendering.
 
-V1 succeeds when all seven acceptance scenarios in section 25 can be completed and every exported package is accepted directly by `loadProject(...)` and the normal production bootstrap without editor code.
+V1 succeeds when all seven acceptance scenarios in section 25 can be completed and every exported project package is accepted directly by `loadProject(...)` when mounted into the unchanged production runtime. The export is authored project content, not a copy of the runtime or complete hosted site.
 
 ## 2. Explicit non-goals
 
@@ -60,7 +60,7 @@ The following invariants are architectural gates:
 - Authored draft values are plain serializable production values. No class instance, function, DOM node, file handle, or editor metadata may enter saved JSON.
 - Production validators and `loadProject(...)` remain authoritative. Editor navigation metadata may map a production error path to a control, but may not define a second validation rule.
 - The trusted installed capability registry is the only source of optional capability implementations.
-- The exported directory or ZIP is a normal static production package. Removing `/editor/` must not affect it.
+- The exported directory or ZIP is a normal authored project package that the unchanged production runtime can mount and load. It contains neither editor code nor a bundled copy of the runtime/site.
 - Stable public IDs are used for references. Private MapLibre source and layer IDs never appear in author controls.
 
 ## 4. Primary user workflow
@@ -72,7 +72,7 @@ New/Open project
   → edit project metadata and map defaults
   → add datasets, tables, metrics, and images
   → define focus targets
-  → enable and bind trusted optional capabilities
+  → add explicitly GUI-addable trusted capabilities or edit existing declarations
   → create and order Story states
   → create and order content blocks and map actions
   → preview with the production runtime
@@ -88,7 +88,7 @@ The editor is non-modal for ordinary work. Selecting an item in the hierarchy ch
 
 The editor uses a structured four-region shell, not a free-form canvas:
 
-- **Top bar:** New, Open Folder, Import ZIP, Save, Export ZIP, Validate, preview status, and a dirty-state indicator. Save is relabeled or disabled when the active storage adapter cannot write in place.
+- **Top bar:** New, Open Folder, Import ZIP, Save, Export Project ZIP, Validate, preview status, and a dirty-state indicator. Save is relabeled or disabled when the active storage adapter cannot write in place.
 - **Left navigation:** Project, datasets, assets, metrics, focus targets, capabilities, Stories, and the ordered state list for the selected Story. Sections show item counts and error badges.
 - **Center preview:** a persistent isolated preview with Story/Explore mode, desktop/mobile viewport presets, restart, current state, and validation status.
 - **Right inspector:** tailored controls for the selected project entity, state, block, action, or capability.
@@ -158,15 +158,17 @@ EditorPackage
   root project.json
   managed JSON entries referenced by project.json
   managed image entries referenced by project.json
-  unknown/pass-through entries
+  unknown safe ZIP pass-through entries (ZIP origins only)
   storage origin and per-entry dirty/write metadata (editor-only memory)
 ```
 
-Each entry has a normalized package-relative path, original bytes, current bytes or serializable JSON value, media kind, and managed/pass-through status. The file handle, ZIP object, dirty flags, parse diagnostics, and original-byte hashes are editor state around the entry; they are not serialized into project resources.
+Each loaded entry has a normalized package-relative path, original bytes, current bytes or serializable JSON value, media kind, and managed/pass-through status. The file handle, ZIP object, dirty flags, parse diagnostics, and original-byte hashes are editor state around the entry; they are not serialized into project resources. Folder origins load only managed declared entries. ZIP origins may additionally hold safe pass-through entries because the selected ZIP is itself a bounded package.
 
 ### 8.1 Opening
 
-Opening first enumerates the whole selected folder or ZIP and retains every safe relative file. It then locates root `project.json`, parses known JSON resources, follows its declared Story/dataset/metric/asset paths, and marks those entries as managed. Unknown files remain opaque byte entries.
+**Folder Open does not recursively enumerate the selected folder.** It reads root `project.json`, applies the production path rules, then resolves and reads only declared Story, dataset, metric, and asset resources. Files not declared by the project remain unknown to the editor and untouched on disk.
+
+**ZIP Import treats the selected ZIP as the bounded package.** It indexes safe normalized ZIP entries, reads `project.json` and its declared resources as managed entries, and retains other safe ZIP entries as opaque pass-through bytes. Unsafe, duplicate-normalized, absolute, traversal, or executable referenced paths are rejected or quarantined according to the existing production boundary.
 
 An invalid manifest or broken reference does not reject the package. Parseable values enter the authored draft and production diagnostics place the editor in repair mode. A syntactically invalid known JSON file keeps its original text and a parse diagnostic; tailored controls for that file are unavailable until it parses, and a small source-repair view may edit that production file text directly. This escape hatch does not create a new schema and is not the ordinary authoring surface.
 
@@ -174,7 +176,7 @@ Unsafe package paths, duplicate normalized paths, absolute paths, path traversal
 
 ### 8.2 Preservation
 
-Unmanaged files are copied byte-for-byte on ZIP export and left untouched on folder save. Managed files that the user did not edit preserve their original bytes, including Story 1.0. Managed JSON is reserialized only after a user mutation to that file. Removed declared resources are not automatically deleted from disk in V1; the declaration is removed and the now-unmanaged file is preserved unless the user explicitly chooses a separately confirmed delete operation.
+Safe pass-through entries from a ZIP origin are copied byte-for-byte on subsequent ZIP export. Unknown folder files are never loaded, copied, rewritten, or deleted. Managed files that the user did not edit preserve their original bytes, including Story 1.0. Managed JSON is reserialized only after a user mutation to that file. Removed declared resources are not automatically deleted from a folder in V1; the declaration is removed and the file remains untouched unless the user explicitly chooses a separately confirmed delete operation. In a ZIP-backed package, a removed declaration leaves the original safe entry preserved as pass-through unless explicitly removed.
 
 This conservative rule prevents the editor from erasing custom documentation, hosting files, or resources it does not understand.
 
@@ -196,7 +198,7 @@ Platform references: [WICG File System Access specification](https://wicg.github
 
 Storage adapters implement a small behavior contract:
 
-- `open()` returns package-relative entries and storage capabilities;
+- `open()` returns the root manifest and only its resolved declared entries for folder origins, or the bounded ZIP entry set for ZIP origins, plus storage capabilities;
 - `read(path)` returns bytes;
 - `writeChanges(changeSet)` writes only explicitly changed managed entries when supported;
 - `export(entries)` creates a ZIP or folder selection; and
@@ -208,9 +210,11 @@ The draft store has no knowledge of directory handles or ZIP libraries. Folder, 
 
 - **New Project** creates a minimal valid production `project.json`, one Story 1.1 file with one initial state, empty registries, and no editor metadata. It is initially memory-backed.
 - **Save** writes changed managed files back through the folder adapter. On unsupported browsers or ZIP origins, Save becomes “Export ZIP”. A new in-memory package may choose a folder on supported browsers or export ZIP.
-- **Export ZIP** stages a full package snapshot, validates it through production, and is disabled while fatal diagnostics remain.
+- **Export Project ZIP** stages `project.json`, every declared authored Story/data/metric/asset resource, newly authored managed entries, and safe pass-through entries inherited from a ZIP origin. Folder-origin exports do not sweep in undeclared folder files. Export is disabled while fatal diagnostics remain.
 
-Save and Export have different policies. Save protects ongoing author work and may persist an invalid draft after a clear confirmation; it never claims the package is deployable. Export produces a deployable production package and is blocked by fatal validation errors. Warnings do not block either operation.
+Save and Export have different policies. Save protects ongoing author work and may persist an invalid draft after a clear confirmation; it never claims the package is production-valid. Export produces a production-valid authored project package and is blocked by fatal validation errors. It does not produce a standalone deployable site. Warnings do not block either operation.
+
+Certification mounts the exported project package at a package root served by the unchanged production runtime, then invokes normal production startup. Standalone runtime/site bundling is explicitly deferred.
 
 Before folder Save, serialization of every changed entry completes in memory. Writes then occur in a deterministic order with `project.json` last, reducing the chance that the manifest points at resources not yet written. If a write fails, the editor reports exactly which files succeeded or failed, retains dirty state for unwritten entries, and does not pretend the operation was atomic. V1 does not add shadow files or hidden metadata to the user's package.
 
@@ -368,11 +372,11 @@ The Project inspector edits:
 
 - stable ID, title, subtitle, description, locale;
 - organization, author, project date, and project version;
-- trusted basemap ID, initial center/zoom/pitch/bearing, and optional min/max zoom;
+- preserved read-only basemap ID, editable initial center/zoom/pitch/bearing, and optional min/max zoom;
 - Story collection and primary Story selection; and
 - attribution/provenance entries and their references.
 
-Ordinary authors set the initial camera with “Use current preview view,” which copies center, zoom, pitch, and bearing telemetry into the draft after confirmation. Numeric controls remain available for precision. The basemap is selected from the application-owned catalog; users never type a style URL.
+Ordinary authors set the initial camera with “Use current preview view,” which copies center, zoom, pitch, and bearing telemetry into the draft after confirmation. Numeric controls remain available for precision. Basemap selection is outside GUI Editor V1: existing project basemap IDs are displayed and preserved read-only, and New Project writes the currently supported production basemap ID, `openfreemap-dark`. The editor defines no basemap catalog and never asks users for a style URL.
 
 ## 15. Dataset, table, asset, and metric editors
 
@@ -407,7 +411,7 @@ Removing or replacing an asset reports all image and legend references. SVG rema
 
 Static metrics can be created individually or imported/replaced from locked static metric JSON. They edit the locked metric-file vocabulary: label, literal scalar/null value, formatter, and attribution. Formatter controls cover integer, decimal, percentage, distance, currency, and text, including only the certified decimal/currency/unit fields.
 
-Capability-computed metrics come from the composed trusted capability catalog. They are displayed as read-only discovered outputs with label, status/value from the valid preview when available, and their declared formatter. They are selectable by Story blocks but never written into the static metric file.
+Capability-computed metric descriptors come from the composed trusted capability catalog. Their IDs, labels, value types, and declared formatters are visible, read-only, and selectable by Story blocks, but they are never written into the static metric file. GUI V1 adds no metric-value preview telemetry solely for the inspector; computed runtime values remain visible through the actual Story preview where referenced by content.
 
 ## 16. Focus and map-action editors
 
@@ -429,19 +433,21 @@ The command shows the captured values before applying them. Raw camera JSON is n
 
 ### 16.2 Map actions
 
-Each state exposes ordered Enter and Exit action lists. Add Action first shows types from the composed production action descriptor catalog. Selecting a type renders parameter controls from that exact descriptor and stores the resulting canonical action object directly in the Story array.
+For Story 1.1, each state exposes ordered Enter and Exit action lists. Add Action first shows types from the composed production canonical action descriptor catalog. Selecting a type renders parameter controls from that exact descriptor and stores the resulting canonical action object directly in the Story array.
 
 Baseline types are `map.focus`, `map.set-visibility`, `map.set-emphasis`, and `map.clear-emphasis`. Target selectors combine valid project dataset/focus IDs and selected capability-defined target IDs according to action semantics. Private MapLibre IDs are neither displayed nor accepted.
 
-Move, duplicate, and delete operate on the underlying action array. Preview executes the same order through the production Story Runtime.
+Move, duplicate, and delete operate on the underlying Story 1.1 action array. Preview executes the same order through the production Story Runtime.
+
+For Story 1.0, existing legacy actions are displayed in their authored order and preserved, but their parameter controls are read-only in GUI V1. The trusted normalizers can validate/normalize legacy actions for runtime compatibility, but the serializable catalog does not expose their legacy parameter schemas. The editor does not infer those schemas, reuse canonical controls for a different legacy shape, or invent a second legacy descriptor vocabulary.
 
 ## 17. Story editor and content blocks
 
 ### 17.1 Story lifecycle
 
-New Stories use `schemaVersion: "1.1"` and receive a stable ID, title, and at least one valid initial state. Authors can add, duplicate, delete, and reorder states. Duplicating generates a new stable state ID and deep-clones its production content/actions. The state list position is the Story array position.
+New Stories use `schemaVersion: "1.1"` and receive a stable ID, title, and at least one valid initial state. They receive full canonical action authoring from the production descriptors. Authors can add, duplicate, delete, and reorder states. Duplicating generates a new stable state ID and deep-clones its production content/actions. The state list position is the Story array position.
 
-State metadata includes stable ID, the four locked layouts, presenter note where supported, content blocks, and ordered enter/exit actions. The editor does not introduce transitions or a branching graph.
+State metadata includes stable ID, the four locked layouts, presenter note where supported, and content blocks. Story 1.1 additionally has fully authorable ordered enter/exit action arrays; Story 1.0 legacy action parameters remain read-only as defined below. The editor does not introduce transitions or a branching graph.
 
 ### 17.2 Tailored content editors
 
@@ -459,18 +465,22 @@ The chart editor never exposes Chart.js configuration. The actual preview uses t
 
 ## 18. Capability editor
 
-The Capability section reads `INSTALLED_CAPABILITY_REGISTRY.catalog()` and distinguishes implicit core packs from selectable optional packs.
+The Capability section reads `INSTALLED_CAPABILITY_REGISTRY.catalog()` and distinguishes implicit core packs, capabilities already declared by the opened project, and optional packs explicitly addable to ordinary projects.
 
-For an optional trusted capability, V1 may:
+Installed does not mean universally addable. Existing project declarations remain inspectable and editable when their trusted descriptors are installed, regardless of addability metadata. For a new declaration, the editor offers a capability only when trusted serializable descriptor GUI metadata explicitly sets `gui.addable: true`. Absent metadata defaults to existing-project-only. The editor owns no capability allowlist and does not infer addability from registry presence, label, group, dependencies, actions, or settings shape.
+
+Consequently, the currently installed Route 61-2-specific `route-comparison-v1` and `urban-context-v1` packs do not appear as generic New Project choices merely because they are installed. Their existing declarations in Route 61-2 remain inspectable/editable. A developer may make a future ordinary-project capability addable by explicitly certifying it in trusted descriptor GUI metadata.
+
+For an already-declared capability or an explicitly GUI-addable trusted capability, V1 may:
 
 - show label, group, description, dependencies, roles, actions, targets, metrics, and help metadata;
-- enable/disable its manifest declaration;
+- add its declaration when explicitly GUI-addable, or inspect/edit/remove an existing declaration;
 - render data-only settings from `settingsSchema`;
 - bind required/optional dataset roles by assigning the production `dataset.role` value;
 - explain missing/incompatible role bindings; and
 - expose its actions, targets, and computed metrics elsewhere automatically.
 
-Enabling a pack also resolves declared dependencies or explains why it cannot be enabled. Disabling shows affected action/metric/role references before mutating the draft.
+Adding an eligible pack also resolves declared dependencies or explains why it cannot be added. Removing an existing declaration shows affected action/metric/role references before mutating the draft. A dependency is not auto-added unless its own trusted descriptor is explicitly GUI-addable or it is already declared/implicit; otherwise the editor explains that developer preparation is required.
 
 The editor cannot install a capability, load a URL/module, edit implementation code, create callbacks, or visually construct special behavior. A descriptor unsupported by the bounded field factory remains installed for runtime use but its unsupported settings are not editable in V1; this is an application/developer compatibility issue, not permission to expose raw executable configuration.
 
@@ -480,13 +490,14 @@ The policy is exact:
 
 1. New Stories are always 1.1.
 2. Story 1.0 files open, validate, and preview through the existing production 1.0 validators and trusted normalizers.
-3. The editor exposes only Story 1.0 fields/content/action forms represented by the existing 1.0 contracts and normalizers. Story 1.1-only blocks cannot be added to a 1.0 Story.
-4. Opening, validating, or previewing never rewrites Story 1.0 bytes.
-5. Saving unrelated files does not serialize an untouched Story 1.0 file.
-6. If the user explicitly edits a Story 1.0 file, Save writes it as Story 1.0. It is not silently promoted to 1.1.
-7. No migration wizard is included. A future explicit migration command requires a separate design and contract.
+3. Supported Story 1.0 state metadata and the six Story 1.0 content block types may be edited. Story 1.1-only blocks cannot be added to a 1.0 Story.
+4. Existing legacy map actions are displayed in authored order and preserved, but their parameters are read-only. The serializable catalog does not expose legacy parameter schemas, so GUI V1 neither invents a legacy descriptor vocabulary nor pretends canonical action controls describe legacy shapes.
+5. Opening, validating, or previewing never rewrites Story 1.0 bytes.
+6. Saving unrelated files does not serialize an untouched Story 1.0 file.
+7. If the user explicitly edits supported Story 1.0 state/content metadata, Save writes the file as Story 1.0 and preserves its legacy action objects. It is not silently promoted to 1.1.
+8. No migration wizard is included. A future explicit migration command requires a separate design and contract.
 
-Therefore Route 61-2 opens and previews unchanged. Its Story file remains byte-identical unless the author explicitly edits that Story and saves it; even then its schema version remains 1.0.
+Therefore Route 61-2 opens and previews unchanged. Its Story file remains byte-identical unless the author explicitly edits supported content/state metadata and saves it; even then its schema version remains 1.0 and its existing legacy action parameters remain unchanged.
 
 ## 20. Error handling
 
@@ -525,7 +536,7 @@ Local package content is untrusted authored input.
 - No project value is evaluated, imported, or used as a script/module/plugin URL.
 - Existing package-relative, same-package, no-traversal, no-JavaScript resource path checks remain authoritative.
 - ZIP entry paths are normalized before use and cannot escape the package root.
-- The trusted application registry controls capabilities and basemaps; authored data can select only installed IDs and data-only settings.
+- The trusted application registry controls capabilities and the basemap implementation. Capability declarations follow trusted `gui.addable` metadata, and the authored basemap ID is preserved read-only in V1.
 - The preview receives no local file handles and has no direct write path.
 - `postMessage` payloads are typed, revisioned, size-bounded, and accepted only from the known iframe window; the iframe accepts only its parent.
 - Temporary image URLs are created only for declared supported image media and revoked promptly.
@@ -561,12 +572,11 @@ The proposal favors responsibility clusters rather than one file per noun:
 | Cluster | Responsibility |
 | --- | --- |
 | `editor/editor.js` and shell styles/markup | Composition root, top-level commands, region layout, selection routing, and lifecycle. |
-| `editor/core/package-store.js` | Real package entries, managed/pass-through classification, byte preservation, path normalization, dirty change sets. |
+| `editor/core/package-store.js` | Declared folder resources or bounded ZIP entries, ZIP-only pass-through classification, byte preservation, path normalization, and dirty change sets. |
 | `editor/core/draft-store.js` | Plain production draft snapshots and explicit mutations for project, resource, and Story values. |
 | `editor/core/validation.js` | Debounce/cancellation, production-validator orchestration, definitive `loadProject`, diagnostics, last-valid promotion, path navigation index. |
 | `editor/core/descriptors.js` | Read-only adapter over installed/composed catalogs plus the bounded field/control factory. It does not validate. |
 | `editor/storage/adapters.js` | Folder and in-memory adapter contracts; ZIP implementation may be split only if the selected library boundary warrants it. Export staging belongs here rather than a second package model. |
-| `editor/preview/bridge.js` | Parent-side iframe lifecycle, protocol, revision handling, viewport/mode commands, and telemetry. |
 | `editor/preview/bridge.js` and `package-resolver.js` | Parent protocol plus the iframe-side in-memory fetch/object-URL transport. The iframe is the actual production page in editor-preview startup mode; there is no duplicate shell, map setup, or renderer. |
 | `editor/ui/inspectors.js` | Project, dataset/table, asset, metric, focus, and capability tailored inspectors, split later only when size demonstrates a need. |
 | `editor/ui/story-editor.js` | Story/state ordered-list experience and Story-version policy. |
@@ -583,18 +593,18 @@ This is approximately ten focused modules plus static markup/styles, not a repos
 - `loadProject(...)` is the definitive validation gate.
 - Preview runs the actual production loader, bootstrap, Story Runtime, Story Shell, MapLibre, content renderers, and Chart.js 4.5.1.
 - Draft invalidity never mutates or replaces the last valid preview.
-- Folder save and ZIP export preserve unknown files as specified.
+- Folder save leaves unknown folder files untouched; ZIP re-export preserves unknown safe ZIP entries byte-for-byte.
 - Fatal validation errors block production Export, while repair work can still be saved with a warning.
-- Exported packages run with `/editor/` absent.
+- Exported project packages mount into and run through the unchanged production runtime without editor code. Bundling a standalone deployable site is deferred.
 - No arbitrary code or private MapLibre IDs can enter authored resources.
 
 ### 25.2 Scenario acceptance
 
-1. **New project:** New creates Story 1.1; the author imports a route GeoJSON, styles/labels it, adds states, previews, exports, and the production runtime opens the ZIP contents without transformation.
+1. **New project:** New creates Story 1.1; the author imports a route GeoJSON, styles/labels it, adds states, previews, exports, and the unchanged production runtime opens the mounted project ZIP contents without transformation.
 2. **Data and evidence:** The author adds normalized table JSON and a static metric, creates table/chart blocks from discovered columns/metrics, previews, and exports.
 3. **Map Story:** The author captures/creates focus targets, adds focus/visibility/emphasis actions, reorders states, and preview follows that exact array sequence.
 4. **Image evidence:** The author adds an image, creates an image block with alt/caption/source, and the actual content renderer displays it through the preview transport seam.
-5. **Optional capability:** The author enables an installed pack, binds required compatible dataset roles, edits supported data settings, selects its discovered action, and previews without JavaScript.
+5. **Optional capability:** The author either adds a trusted capability whose descriptor explicitly sets `gui.addable: true`, or edits an already-declared compatible capability. They bind required compatible dataset roles, edit supported data settings, select its discovered action, and preview without JavaScript. Installed packs lacking addability metadata are not offered as generic New Project choices.
 6. **Existing project:** Route 61-2 opens as Story 1.0, validates and previews through production, and its Story bytes are unchanged until that Story is explicitly edited and saved.
 7. **Invalid project:** A package with a broken reference opens in repair mode, the production diagnostic navigates to the field, preview retains the last valid revision or remains paused, Save warns, and Export is blocked until repaired.
 
@@ -602,12 +612,12 @@ This is approximately ten focused modules plus static markup/styles, not a repos
 
 Future implementation uses a small evidence-focused suite:
 
-- unit tests for package path normalization/preservation, dirty change sets, draft ordering/IDs, storage adapter parity, validation revision cancellation, and last-valid promotion;
-- contract tests proving editor catalogs and generated action/settings values come from the same production descriptors used by capability composition and validation;
+- unit tests for declared-resource folder opening without recursive enumeration, safe ZIP pass-through/path normalization, dirty change sets, draft ordering/IDs, storage adapter parity, validation revision cancellation, and last-valid promotion;
+- contract tests proving editor catalogs and generated action/settings values come from the same production descriptors used by capability composition and validation, including `gui.addable: true` and absent-metadata behavior;
 - focused production-loader tests for the preview fetch/object-URL transport seam, including image revocation and path rejection;
 - small preview integration tests for valid refresh, invalid-draft pause, one-map teardown/restart, Story/Explore, and mobile viewport;
 - one browser authoring flow in each meaningful implementation PR; and
-- a final smoke that exports a package, serves it without editor code, and loads it through normal production startup.
+- a final smoke that exports a project package, mounts it into the unchanged production runtime, and loads it through normal production startup without editor code.
 
 Route 61-2 gets a byte-preservation regression for open/preview/unrelated save. There is no massive browser matrix or ordinary-form performance suite.
 
@@ -619,7 +629,7 @@ This is a scope boundary for later planning, not the detailed implementation pla
 
 - **PR A — Shell, package/validation core, and real preview:** static `/editor/` shell; in-memory/folder/ZIP package abstraction contracts; draft/last-valid/UI state separation; production validation coordinator; iframe protocol; in-memory package resolver; actual loader/bootstrap preview; invalid-draft pause.
 - **PR B — Tailored authoring and descriptor-driven catalogs:** project/map, datasets/tables/assets/metrics/focus, Story/state/content inspectors; stable IDs and reorder controls; action/capability field factory; role binding; Story 1.0 policy; camera capture.
-- **PR C — Persistence, hardening, and certification:** folder writes and ZIP import/export, pass-through preservation, validation navigation, accessibility/error/security hardening, desktop/mobile preview flows, Route 61-2 byte proof, and exported-package production smoke.
+- **PR C — Persistence, hardening, and certification:** declared-resource folder writes and ZIP import/export, safe ZIP pass-through preservation, validation navigation, accessibility/error/security hardening, desktop/mobile preview flows, Route 61-2 byte proof, and exported-project-package production smoke.
 
 If PR A becomes too large, implementation planning may stage its commits internally, but the review shape should remain approximately three meaningful PRs rather than many cross-dependent micro-PRs.
 
@@ -634,6 +644,7 @@ Deferred until usage provides evidence:
 - undo/redo history beyond simple session commands;
 - package autosave or crash recovery;
 - multi-Story launch/navigation experience;
+- standalone deployable-site/runtime bundling;
 - generic feature popups or field inspection;
 - geometry editing or GIS processing;
 - additional editor viewport/device presets;
@@ -647,10 +658,10 @@ Deferred until usage provides evidence:
 3. Invalid draft and last-valid production project are separate.
 4. GUI discovery comes from locked production descriptors.
 5. No backend is required.
-6. Export is a normal production package with unknown files preserved.
+6. Export is a normal authored project package: declared resources plus safe ZIP-origin pass-through entries. Unknown folder files remain untouched, and standalone runtime/site bundling is deferred.
 7. Story 1.0 is never silently migrated.
 8. New Stories use 1.1.
-9. Special capabilities remain trusted developer extensions.
+9. Special capabilities remain trusted developer extensions; new declarations require explicit trusted `gui.addable: true` metadata, defaulting to existing-project-only.
 10. Authored configuration cannot contain arbitrary JavaScript.
 11. User files remain authority; IndexedDB is not a project store.
 12. Invalid projects open in repair mode.
@@ -658,3 +669,5 @@ Deferred until usage provides evidence:
 14. The implementation shape is approximately three PRs.
 15. Native ESM is selected from repository evidence; no framework/build system is added by habit.
 16. Major architectural decisions are explicit; no placeholder or unresolved design choice remains.
+17. Basemap IDs are fixed/preserved read-only in V1; New Project uses `openfreemap-dark`, and no basemap catalog is invented.
+18. Computed metric descriptors are read-only/selectable, with runtime values visible only through actual Story preview rather than inspector-only telemetry.
