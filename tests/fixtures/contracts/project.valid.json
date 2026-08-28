@@ -29,9 +29,48 @@
     "minZoom": 8,
     "maxZoom": 18
   },
-  "datasets": {},
-  "assets": {},
-  "focusTargets": {},
+  "datasets": {
+    "existing-route": {
+      "type": "geojson",
+      "geometry": "line",
+      "src": "./data/existing-route.geojson",
+      "label": "Existing route",
+      "attribution": ["transport-authority"]
+    },
+    "stops": {
+      "type": "geojson",
+      "geometry": "point",
+      "src": "./data/stops.geojson",
+      "label": "Stops",
+      "attribution": ["transport-authority"]
+    }
+  },
+  "assets": {
+    "site-photo": {
+      "type": "image",
+      "src": "./assets/site-photo.webp",
+      "mediaType": "image/webp",
+      "attribution": ["planning-team-photo"]
+    }
+  },
+  "focusTargets": {
+    "overview": {
+      "type": "datasets",
+      "datasets": ["existing-route", "stops"],
+      "camera": { "maxZoom": 13, "pitch": 30, "bearing": 0, "padding": 32 }
+    },
+    "town-center": {
+      "type": "coordinate",
+      "center": [106.64, 11.05],
+      "zoom": 15,
+      "camera": { "pitch": 25, "bearing": 0 }
+    },
+    "study-area": {
+      "type": "bounds",
+      "bounds": [[106.55, 10.98], [106.72, 11.14]],
+      "camera": { "maxZoom": 14, "padding": 40 }
+    }
+  },
   "metrics": {
     "src": "./data/metrics.json"
   },
@@ -41,5 +80,17 @@
       "settings": {}
     }
   ],
-  "attribution": {}
+  "attribution": {
+    "transport-authority": {
+      "name": "Example transport authority",
+      "url": "https://example.org/data",
+      "license": "Used with permission",
+      "updated": "2026-08-20",
+      "notes": "Route survey geometry."
+    },
+    "planning-team-photo": {
+      "name": "Planning team field survey",
+      "updated": "2026-08-10"
+    }
+  }
 }
