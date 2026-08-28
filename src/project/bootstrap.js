@@ -1,5 +1,41 @@
 import { createStoryActionRunner } from '../story-action-runner.js';
 import { createStoryRuntime } from '../story-runtime.js';
+import { createContentRendererRegistry } from '../content/content-renderers.js';
+import { createChartRenderer } from '../content/chart-renderer.js';
+import { createLocaleFormatter } from '../metrics/locale-formatter.js';
+import { createMetricRegistry } from '../metrics/metric-registry.js';
+
+export function createProjectContentRenderer(project, {
+  documentRef = document,
+  Chart = globalThis.Chart,
+  reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+  metrics = project.metrics
+} = {}) {
+  if (typeof Chart !== 'function') throw new TypeError('The pinned Chart.js constructor is required for Story 1.1 content.');
+  const formatter = createLocaleFormatter(project.locale);
+  const chartRenderer = createChartRenderer({ Chart, documentRef, reducedMotion, formatter });
+  return createContentRendererRegistry({
+    documentRef,
+    tables: project.tables,
+    assets: project.resources,
+    metrics,
+    attribution: project.attribution,
+    formatter,
+    chartRenderer
+  });
+}
+
+export function createRuntimeMetricRegistry(project, instances) {
+  const providers = instances.flatMap(({ entry, implementation }) => (entry.descriptor.metrics ?? []).map((descriptor) => ({
+    descriptor,
+    compute: implementation.metricProviders?.[descriptor.id]
+  })));
+  return createMetricRegistry({
+    staticMetrics: project.resources.get('metrics')?.value?.metrics ?? {},
+    providers,
+    context: { project, instances }
+  });
+}
 
 function defaultCreateMap({ project, maplibregl }) {
   return new maplibregl.Map({
@@ -58,11 +94,17 @@ export async function bootstrapProject(context) {
     }
     const actionRunner = createStoryActionRunner(mergeHandlers(instances));
     const storyRuntime = createStoryRuntime({ definition: project.story, actionRunner });
+    const metrics = await createRuntimeMetricRegistry(project, instances);
+    const contentRenderer = documentRef && (context.Chart ?? globalThis.Chart)
+      ? createProjectContentRenderer(project, { documentRef, Chart: context.Chart ?? globalThis.Chart, reducedMotion: context.reducedMotion, metrics })
+      : null;
     const shell = await context.bindStoryExperience?.({
       ...context,
       map,
       project,
       runtime: storyRuntime,
+      contentRenderer,
+      metrics,
       instances: Object.freeze(instances)
     }) ?? null;
     return Object.freeze({
@@ -70,12 +112,15 @@ export async function bootstrapProject(context) {
       project,
       storyRuntime,
       shell,
+      contentRenderer,
+      metrics,
       instances: Object.freeze(instances),
       destroy() {
         if (destroyed) return;
         destroyed = true;
         shell?.exit?.();
         shell?.destroy?.();
+        contentRenderer?.destroy?.();
         storyRuntime.deactivate();
         teardown(instances, map);
       }

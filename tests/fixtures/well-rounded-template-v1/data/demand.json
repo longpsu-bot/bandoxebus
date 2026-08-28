@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "columns": [
+    { "id": "year", "label": "Year", "type": "integer" },
+    { "id": "boardings", "label": "Daily boardings", "type": "integer", "unit": "passengers" },
+    { "id": "coverage", "label": "Coverage", "type": "number" }
+  ],
+  "rows": [
+    { "year": 2025, "boardings": 1200, "coverage": 0.62 },
+    { "year": 2026, "boardings": 1480, "coverage": 0.74 }
+  ]
+}

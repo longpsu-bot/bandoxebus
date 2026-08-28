@@ -1,6 +1,7 @@
 import { ProjectLoadError } from '../project/project-error.js';
 import { deepFreeze } from './descriptor-schema.js';
 import { createLegacyActionNormalizer } from './story-1.0-normalizer.js';
+import { haversineMeters } from '../comparison.js';
 
 function action(type, label, description, required, properties) {
   return {
@@ -46,7 +47,12 @@ export const ROUTE_COMPARISON_V1_DESCRIPTOR = deepFreeze({
   ],
   content: [],
   targets: [],
-  metrics: [],
+  metrics: [
+    { id: 'route-existing-length', label: 'Existing route length', valueType: 'number', format: { type: 'distance', decimals: 1 } },
+    { id: 'route-proposed-length', label: 'Proposed route length', valueType: 'number', format: { type: 'distance', decimals: 1 } },
+    { id: 'route-length-delta', label: 'Route length change', valueType: 'number', format: { type: 'distance', decimals: 1 } },
+    { id: 'route-stop-count', label: 'Existing stop count', valueType: 'number', format: { type: 'integer' } }
+  ],
   legacyActions: [
     { type: 'map.mode', canonicalType: 'route.set-mode' },
     { type: 'map.poi-emphasis', canonicalType: 'transport.set-poi-emphasis' },
@@ -135,10 +141,24 @@ export function createRouteComparisonCapability(context = {}) {
       ? (descriptor) => context.setPoiEmphasis(descriptor.target, descriptor.active)
       : unavailable('transport.set-poi-emphasis')
   };
+  const byRole = (role) => [...(context.resources ?? [])].find(([, resource]) => resource.descriptor?.role === role)?.[1]?.value;
+  const routeLength = (role) => {
+    const collection = byRole(role);
+    return (collection?.features ?? []).reduce((total, feature) => {
+      const lines = feature.geometry?.type === 'MultiLineString' ? feature.geometry.coordinates : [feature.geometry?.coordinates ?? []];
+      return total + lines.reduce((lineTotal, coordinates) => lineTotal + coordinates.slice(1).reduce((sum, coordinate, index) => sum + haversineMeters(coordinates[index], coordinate), 0), 0);
+    }, 0);
+  };
   return Object.freeze({
     handlers: Object.freeze(handlers),
     datasetRoles: Object.freeze(Object.fromEntries(
       ROUTE_COMPARISON_V1_DESCRIPTOR.datasetRoles.map(({ role }) => [role, true])
-    ))
+    )),
+    metricProviders: Object.freeze({
+      'route-existing-length': () => routeLength('route.existing'),
+      'route-proposed-length': () => routeLength('route.proposed'),
+      'route-length-delta': () => routeLength('route.proposed') - routeLength('route.existing'),
+      'route-stop-count': () => byRole('stops.existing')?.features?.length ?? 0
+    })
   });
 }

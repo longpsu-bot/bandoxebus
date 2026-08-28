@@ -1,8 +1,6 @@
-const INTEGER_FORMATTER = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 });
-const DISTANCE_FORMATTER = new Intl.NumberFormat('vi-VN', {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1
-});
+import { createLocaleFormatter } from './metrics/locale-formatter.js';
+
+const DEFAULT_FORMATTER = createLocaleFormatter('vi-VN');
 
 function collectionSize(collection) {
   return Array.isArray(collection?.features) ? collection.features.length : 0;
@@ -29,15 +27,15 @@ export function buildPresentationMetrics({ routeComparison, stopComparison, land
   };
 }
 
-export function formatPresentationMetric(value, format = 'integer') {
+export function formatPresentationMetric(value, format = 'integer', formatter = DEFAULT_FORMATTER) {
   if (!Number.isFinite(value)) return '—';
 
   if (format === 'distance' || format === 'signed-distance') {
     const prefix = format === 'signed-distance' && value > 0 ? '+' : '';
-    return `${prefix}${DISTANCE_FORMATTER.format(value / 1000)} km`;
+    return `${prefix}${formatter.format(value / 1000, { type: 'decimal', decimals: 1 })} km`;
   }
 
-  return INTEGER_FORMATTER.format(value);
+  return formatter.format(value, { type: 'integer' });
 }
 
 export function resolvePresentationMetric(binding, metrics) {

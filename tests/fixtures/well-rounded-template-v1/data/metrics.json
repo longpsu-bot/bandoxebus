@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0",
+  "metrics": {
+    "annual-demand": { "label": "Annual demand", "value": 1480, "format": { "type": "integer" }, "attribution": ["survey"] }
+  }
+}

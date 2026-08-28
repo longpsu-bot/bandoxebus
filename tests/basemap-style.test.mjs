@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   prepareBasemapStyle,
   stripOpenFreeMapDarkStyle
@@ -23,7 +24,8 @@ const fixtureStyle = {
 test('basemap preparation preserves reference building layers for fair A/B comparison', () => {
   const prepared = prepareBasemapStyle(fixtureStyle);
   assert.equal(prepared.layers.find(({ id }) => id === 'building').layout, undefined);
-  assert.equal(prepared.glyphs, 'https://orangemug.github.io/font-glyphs/glyphs/{fontstack}/{range}.pbf');
+  assert.equal(prepared.glyphs, 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf');
+  assert.deepEqual(prepared.layers.find(({ id }) => id === 'place_city').layout['text-font'], ['Noto Sans Regular']);
   assert.equal(fixtureStyle.layers.find(({ id }) => id === 'building').layout, undefined);
 });
 
@@ -32,4 +34,10 @@ test('stripped Dark retains geographic context while removing noisy POIs and bui
   assert.deepEqual(stripped.layers.map(({ id }) => id), [
     'background', 'highway_major_inner', 'highway_minor', 'place_city', 'water'
   ]);
+});
+
+test('application-owned map labels use the available fixed glyph stack', async () => {
+  const source = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /Roboto Regular/);
+  assert.match(source, /Noto Sans Regular/);
 });

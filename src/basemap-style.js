@@ -4,10 +4,10 @@ const ROAD_LABELS = /(road|highway)_(label|shield|name)/i;
 
 export function prepareBasemapStyle(style) {
   const copy = structuredClone(style);
-  copy.glyphs = 'https://orangemug.github.io/font-glyphs/glyphs/{fontstack}/{range}.pbf';
+  copy.glyphs = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
   copy.layers.forEach((layer) => {
     if (layer.type === 'symbol' && layer.layout?.['text-field']) {
-      layer.layout = { ...(layer.layout ?? {}), 'text-font': ['Roboto Regular'] };
+      layer.layout = { ...(layer.layout ?? {}), 'text-font': ['Noto Sans Regular'] };
     }
     if (layer.type === 'symbol' && HIDDEN_LOCAL_LABELS.test(layer.id)) {
       layer.layout = { ...(layer.layout ?? {}), visibility: 'none' };

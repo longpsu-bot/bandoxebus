@@ -38,3 +38,11 @@ test('active story mode removes the hidden legacy panel from overflow layout', a
   const css = await readFile(cssUrl, 'utf8');
   assert.match(css, /body\.is-story-shell \.panel\s*\{[^}]*display:\s*none/);
 });
+
+test('Story 1.1 content has scoped responsive table, chart, image, and legend rules', async () => {
+  const css = await readFile(cssUrl, 'utf8');
+  for (const name of ['content-table', 'content-chart', 'content-image', 'content-legend']) assert.match(css, new RegExp(`\\.${name}`));
+  assert.match(css, /\.content-table[^}]*overflow-x:\s*auto/s);
+  assert.match(css, /\.content-chart[^}]*min-height/s);
+  assert.match(css, /\.content-image img[^}]*max-width:\s*100%/s);
+});

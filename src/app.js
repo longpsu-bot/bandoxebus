@@ -36,6 +36,7 @@ import { createStopPulseTracker } from './stop-pulses.js';
 import { startApplication } from './application.js';
 import { INSTALLED_CAPABILITY_REGISTRY } from './capabilities/installed-capabilities.js';
 import { renderProjectLoadError } from './project/bootstrap.js';
+import { createTransportPoiBeacons } from './transport-poi-beacons.js';
 
 const BUS_STOP_TRIGGER_RADIUS_METERS = 55;
 const BUS_LOOP_DURATION_MS = 50_000;
@@ -139,6 +140,7 @@ let map;
 let activeProject = null;
 let revealToken = 0;
 let mapReady = false;
+let poiBeaconController = null;
 let appliedRoadLabelCollection = null;
 let industrialZoneFeature = null;
 let overtureBuildingCollection = null;
@@ -362,7 +364,7 @@ function addEndpointLayers() {
     filter: ['==', ['get', 'dataset'], 'proposed'],
     layout: {
       'text-field': ['get', 'label'], 'text-size': 11, 'text-anchor': 'top', 'text-offset': [0, 1.25],
-      'text-font': ['Roboto Regular'], 'text-max-width': 16,
+      'text-font': ['Noto Sans Regular'], 'text-max-width': 16,
       'text-allow-overlap': false, 'text-pitch-alignment': 'viewport'
     },
     paint: { 'text-color': '#eef7ff', 'text-halo-color': 'rgba(5, 11, 20, .94)', 'text-halo-width': 2 }
@@ -379,7 +381,7 @@ function addFilteredRoadLabelLayer() {
       'symbol-placement': 'line',
       'symbol-spacing': 260,
       'text-field': ['get', 'name'],
-      'text-font': ['Roboto Regular'],
+      'text-font': ['Noto Sans Regular'],
       'text-size': ['interpolate', ['linear'], ['zoom'], 9, 10.5, 13, 12.5, 16, 14],
       'text-pitch-alignment': 'viewport',
       'text-rotation-alignment': 'map',
@@ -442,15 +444,15 @@ function addPoiLayers() {
   map.addLayer({
     id: 'poi-halo', type: 'circle', source: 'route-pois',
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 7, 13, 12, 16, 16],
-      'circle-color': '#fbbf24', 'circle-opacity': .28, 'circle-blur': .65
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 8, 13, 13, 16, 17],
+      'circle-color': '#bff6ff', 'circle-opacity': 0
     }
   });
   map.addLayer({
     id: 'poi-core', type: 'circle', source: 'route-pois',
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 4, 13, 6.5, 16, 8],
-      'circle-color': '#fbbf24', 'circle-stroke-color': '#fff7d6', 'circle-stroke-width': 2
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 6, 13, 9, 16, 12],
+      'circle-color': '#dffaff', 'circle-opacity': 0, 'circle-stroke-width': 0
     }
   });
   map.addLayer({
@@ -458,7 +460,7 @@ function addPoiLayers() {
     layout: {
       'text-field': ['get', 'name'],
       'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 12],
-      'text-font': ['Roboto Regular'],
+      'text-font': ['Noto Sans Regular'],
       'text-variable-anchor': ['left', 'right', 'top', 'bottom'],
       'text-radial-offset': 1.15,
       'text-justify': 'auto',
@@ -468,7 +470,7 @@ function addPoiLayers() {
       'text-pitch-alignment': 'viewport'
     },
     paint: {
-      'text-color': '#fff5cf', 'text-halo-color': 'rgba(5, 11, 20, .96)',
+      'text-color': '#effcff', 'text-halo-color': 'rgba(5, 11, 20, .96)',
       'text-halo-width': 2, 'text-halo-blur': .4
     }
   });
@@ -722,11 +724,7 @@ function currentStoryLayoutPadding() {
 
 function emphasizePois(active) {
   document.body.classList.toggle('emphasize-pois', active);
-  if (!mapReady) return;
-  map.setPaintProperty('poi-halo', 'circle-radius', active
-    ? ['interpolate', ['linear'], ['zoom'], 9, 13, 13, 20, 16, 25]
-    : ['interpolate', ['linear'], ['zoom'], 9, 7, 13, 12, 16, 16]);
-  map.setPaintProperty('poi-halo', 'circle-opacity', active ? .48 : .28);
+  poiBeaconController?.setEmphasis(active);
 }
 
 function revealProposedRoute() {
@@ -880,6 +878,7 @@ function bindControls() {
   document.getElementById('toggle-pois').addEventListener('change', (event) => {
     uiState.showPois = event.target.checked;
     ['poi-halo', 'poi-core', 'poi-labels'].forEach((id) => setLayerVisible(id, uiState.showPois));
+    poiBeaconController?.setVisible(uiState.showPois);
   });
   document.getElementById('toggle-arrows').addEventListener('change', (event) => {
     uiState.showArrows = event.target.checked;
@@ -945,25 +944,26 @@ function bindMapInteractions() {
 
 async function createRouteMap({ project }) {
   activeProject = project;
+  const routeProject = project.manifest.capabilities.some(({ id }) => id === 'route-comparison-v1');
   const industrialZoneCollection = project.resources.get('industrial-zone')?.value;
-  if (industrialZoneCollection?.features?.length !== 1
-    || industrialZoneCollection.features[0]?.geometry?.type !== 'Polygon') {
+  if (routeProject && (industrialZoneCollection?.features?.length !== 1
+    || industrialZoneCollection.features[0]?.geometry?.type !== 'Polygon')) {
     throw new TypeError('Dữ liệu vùng công nghiệp phải chứa đúng một Polygon.');
   }
-  industrialZoneFeature = industrialZoneCollection.features[0];
+  if (routeProject) industrialZoneFeature = industrialZoneCollection.features[0];
 
   const [styleResponse, overtureBuildingResponse] = await Promise.all([
     fetch('./style-openfreemap-dark.json'),
-    fetch(OVERTURE_BUILDINGS_DATA_URL).catch(() => null)
+    routeProject ? fetch(OVERTURE_BUILDINGS_DATA_URL).catch(() => null) : null
   ]);
   if (!styleResponse.ok) throw new Error(`Không tải được style.json (${styleResponse.status}).`);
-  if (overtureBuildingResponse?.ok) {
+  if (routeProject && overtureBuildingResponse?.ok) {
     try {
       overtureBuildingCollection = await overtureBuildingResponse.json();
     } catch (error) {
       console.warn('Dữ liệu công trình Overture không hợp lệ; dùng khối tích tổng hợp dự phòng.', error);
     }
-  } else {
+  } else if (routeProject) {
     console.warn('Không tải được dữ liệu công trình Overture; dùng khối tích tổng hợp dự phòng.');
   }
 
@@ -984,8 +984,33 @@ async function createRouteMap({ project }) {
   return map;
 }
 
-function bindRouteStoryExperience({ runtime }) {
+function bindRouteStoryExperience({ runtime, project, contentRenderer, metrics }) {
   storyRuntime = runtime;
+  const routeProject = project.manifest.capabilities.some(({ id }) => id === 'route-comparison-v1');
+  if (!routeProject) {
+    document.body.classList.add('is-generic-project');
+    map.once('load', () => {
+      storyShell = createStoryShell({
+        runtime: storyRuntime,
+        elements: {
+          root: document.getElementById('story-shell'), steps: document.getElementById('story-shell-steps'),
+          progressCurrent: document.getElementById('story-progress-current'), progressTotal: document.getElementById('story-progress-total'),
+          previousButton: document.getElementById('story-previous'), nextButton: document.getElementById('story-next'), exitButton: document.getElementById('story-explore')
+        },
+        renderContent: (container, state) => contentRenderer.render(container, state),
+        metrics,
+        interactionPolicy: createGuidedMapInteractionPolicy(map),
+        reducedMotion: prefersReducedMotion,
+        onActivate({ state, index, total }) { const heading = findStoryContentBlock(state, 'heading'); setStatus(`Story ${index + 1}/${total}: ${heading?.text ?? state.id}.`); },
+        onExit() { setStatus('Ready · Explore mode.'); }
+      });
+      const openButton = document.getElementById('presentation-open');
+      openButton.textContent = 'Start story';
+      openButton.addEventListener('click', () => storyShell.enter());
+      setStatus('Ready · Data-only project loaded.');
+    });
+    return { exit() { storyShell?.exit(); }, destroy() { storyShell?.exit(); } };
+  }
   map.on('load', () => {
     addMapSources();
     addArrowImage();
@@ -995,6 +1020,7 @@ function bindRouteStoryExperience({ runtime }) {
     addEndpointLayers();
     addFilteredRoadLabelLayer();
     addPoiLayers();
+    poiBeaconController = createTransportPoiBeacons({ map, maplibregl, documentRef: document, pois: landmarks });
     urbanContextController = createUrbanContextController({
       map,
       maplibregl,
@@ -1014,6 +1040,8 @@ function bindRouteStoryExperience({ runtime }) {
     setStatus('Sẵn sàng · Chế độ Chênh lệch.');
   });
   map.on('remove', () => {
+    poiBeaconController?.destroy();
+    poiBeaconController = null;
     urbanContextController?.destroy({ removeLayer: false });
     urbanContextController = null;
   });

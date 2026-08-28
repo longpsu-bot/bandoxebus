@@ -131,6 +131,24 @@ h1 { margin: 0; font-size: 24px; letter-spacing: -.03em; line-height: 1.08; }
 .presentation-content--hero .presentation-content__narrative { max-width: 42ch; font-size: 14px; }
 .presentation-content--narrative .presentation-content__narrative { color: #c1cad7; font-size: 14px; line-height: 1.7; }
 .presentation-content--map-focus .presentation-content__narrative { font-size: 12px; }
+.content-table { width: 100%; margin-top: 16px; overflow-x: auto; }
+.content-table table, .content-chart__data { width: 100%; border-collapse: collapse; font-size: 12px; }
+.content-table caption { margin-bottom: 8px; color: #dce8f7; text-align: left; }
+.content-table th, .content-table td, .content-chart__data th, .content-chart__data td { padding: 8px 9px; border-bottom: 1px solid rgba(148,163,184,.2); text-align: left; white-space: nowrap; }
+.content-table .align-center { text-align: center; }
+.content-table .align-end { text-align: right; }
+.content-chart { position: relative; min-height: 260px; margin-top: 16px; }
+.content-chart canvas { width: 100%; min-height: 220px; }
+.content-chart__data { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.content-image { margin: 16px 0 0; }
+.content-image img { display: block; width: auto; max-width: 100%; height: auto; max-height: 48vh; border-radius: 10px; }
+.content-image figcaption, .content-source { display: block; margin-top: 7px; color: #8291a5; font-size: 11px; }
+.content-legend { margin-top: 14px; }
+.content-legend ul { display: grid; gap: 7px; margin: 8px 0 0; padding: 0; list-style: none; }
+.content-legend li { display: grid; grid-template-columns: 28px 1fr; align-items: center; gap: 9px; font-size: 12px; }
+.content-legend__swatch { width: 18px; height: 12px; border-radius: 3px; }
+.content-legend__line { width: 26px; height: 3px; border-radius: 999px; }
+.content-legend__icon { width: 24px; height: 24px; object-fit: contain; }
 .presentation-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 17px; }
 .presentation-metric { min-height: 78px; padding: 12px 13px; border: 1px solid rgba(148,163,184,.18); border-radius: 11px; background: rgba(148,163,184,.055); }
 .presentation-metric__label { display: block; margin-bottom: 7px; color: #8190a5; font-size: 9px; font-weight: 850; letter-spacing: .09em; text-transform: uppercase; }
@@ -155,6 +173,54 @@ h1 { margin: 0; font-size: 24px; letter-spacing: -.03em; line-height: 1.08; }
 body.is-presenting .panel { opacity: 0; transform: translateX(-20px); pointer-events: none; }
 body.is-presenting .maplibregl-ctrl-top-right { opacity: .35; }
 body.emphasize-pois .maplibregl-map { cursor: default; }
+
+.transport-poi-beacon {
+  position: relative;
+  width: 24px;
+  height: 64px;
+  pointer-events: none;
+  filter: drop-shadow(0 0 5px rgba(177, 244, 255, .38));
+}
+.transport-poi-beacon__pillar {
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  width: 2px;
+  height: 43px;
+  border-radius: 999px;
+  background: linear-gradient(to top, rgba(224, 251, 255, .98), rgba(161, 238, 255, .1));
+  box-shadow: 0 0 6px rgba(190, 245, 255, .58);
+  transform: translateX(-50%);
+  transform-origin: bottom;
+  opacity: .72;
+  transition: height 180ms ease, opacity 180ms ease, box-shadow 180ms ease;
+}
+.transport-poi-beacon__anchor {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgba(235, 253, 255, .95);
+  border-radius: 50%;
+  background: #bdefff;
+  box-shadow: 0 0 0 7px rgba(155, 231, 255, .1), 0 0 12px rgba(177, 244, 255, .55);
+  transform: translateX(-50%);
+  transition: box-shadow 180ms ease, background 180ms ease;
+}
+.transport-poi-beacon.is-emphasized .transport-poi-beacon__pillar {
+  height: 52px;
+  opacity: 1;
+  box-shadow: 0 0 10px rgba(202, 249, 255, .9);
+}
+.transport-poi-beacon.is-emphasized .transport-poi-beacon__anchor {
+  background: #e8fdff;
+  box-shadow: 0 0 0 10px rgba(155, 231, 255, .18), 0 0 18px rgba(202, 249, 255, .88);
+}
+@media (prefers-reduced-motion: reduce) {
+  .transport-poi-beacon__pillar,
+  .transport-poi-beacon__anchor { transition-duration: 1ms; }
+}
 
 .maplibregl-popup-content { border: 1px solid rgba(148,163,184,.25); border-radius: 10px; background: #0a1422; color: #e7edf6; box-shadow: 0 12px 34px rgba(0,0,0,.42); font: 600 11px/1.45 Inter, ui-sans-serif, system-ui, sans-serif; }
 .maplibregl-popup-tip { border-top-color: #0a1422 !important; }
