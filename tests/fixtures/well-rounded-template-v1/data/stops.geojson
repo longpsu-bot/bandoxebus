@@ -1,0 +1,1 @@
+{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"Central stop"},"geometry":{"type":"Point","coordinates":[106.65,11.05]}},{"type":"Feature","properties":{"name":"Market stop"},"geometry":{"type":"Point","coordinates":[106.67,11.07]}}]}

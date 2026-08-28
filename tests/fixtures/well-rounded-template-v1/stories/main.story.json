@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.1",
+  "id": "main",
+  "title": "Well-rounded planning story",
+  "states": [
+    {
+      "id": "route-realignment",
+      "content": { "layout": "hero", "blocks": [{ "type": "heading", "text": "Route realignment" }, { "type": "paragraph", "text": "Compare existing and proposed alignments." }, { "type": "legend", "items": [{ "label": "Existing", "sample": "line", "color": "#94A3B8" }, { "label": "Proposed", "sample": "line", "color": "#2BB7FF" }] }] },
+      "map": { "enter": [{ "type": "map.focus", "target": "overview" }, { "type": "map.set-visibility", "target": "service-area", "visible": false }], "exit": [] }
+    },
+    {
+      "id": "service-area-context",
+      "content": { "layout": "map-focus", "blocks": [{ "type": "heading", "text": "Service area context" }, { "type": "paragraph", "text": "A bounded polygon provides ordinary planning context." }] },
+      "map": { "enter": [{ "type": "map.set-visibility", "target": "service-area", "visible": true }, { "type": "map.focus", "target": "study-area" }], "exit": [] }
+    },
+    {
+      "id": "route-stop-rationalization",
+      "content": { "layout": "map-focus", "blocks": [{ "type": "heading", "text": "Stop rationalization" }, { "type": "paragraph", "text": "Feature labels identify the selected stops." }] },
+      "map": { "enter": [{ "type": "map.focus", "target": "town-center" }, { "type": "map.set-emphasis", "target": "stops", "active": true }], "exit": [{ "type": "map.clear-emphasis" }] }
+    },
+    {
+      "id": "demand-evidence",
+      "content": { "layout": "metrics", "blocks": [{ "type": "heading", "text": "Demand evidence" }, { "type": "stat-group", "items": [{ "label": "Daily boardings", "metric": "annual-demand", "format": { "type": "integer" } }] }, { "type": "table", "caption": "Demand observations", "data": { "dataset": "demand", "columns": [{ "field": "year", "header": "Year", "align": "start", "format": { "type": "integer" } }, { "field": "boardings", "header": "Boardings", "align": "end", "format": { "type": "integer" } }] }, "source": "survey" }, { "type": "chart", "chartType": "bar", "title": "Daily boardings", "description": "Boardings by year", "data": { "dataset": "demand", "x": "year", "series": [{ "y": "boardings", "label": "Boardings", "format": { "type": "integer" } }] }, "source": "survey" }] },
+      "map": { "enter": [], "exit": [] }
+    },
+    {
+      "id": "network-connectivity",
+      "content": { "layout": "narrative", "blocks": [{ "type": "heading", "text": "Network connectivity" }, { "type": "chart", "chartType": "line", "title": "Boarding trend", "data": { "dataset": "demand", "x": "year", "series": [{ "y": "boardings", "label": "Boardings" }] } }, { "type": "chart", "chartType": "area", "title": "Coverage trend", "description": "Share within service reach", "data": { "dataset": "demand", "x": "year", "series": [{ "y": "coverage", "label": "Coverage", "format": { "type": "percentage", "decimals": 0 } }] } }] },
+      "map": { "enter": [{ "type": "map.focus", "target": "overview" }], "exit": [] }
+    },
+    {
+      "id": "image-supported-evidence",
+      "content": { "layout": "narrative", "blocks": [{ "type": "heading", "text": "Image-supported evidence" }, { "type": "image", "asset": "site-photo", "alt": "Stylized view of the planning site", "caption": "Local deterministic fixture image", "source": "planning-team" }] },
+      "map": { "enter": [{ "type": "map.clear-emphasis" }], "exit": [] }
+    }
+  ]
+}

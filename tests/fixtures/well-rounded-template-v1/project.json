@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0",
+  "id": "well-rounded-template-v1",
+  "title": "Well-rounded planning story",
+  "subtitle": "Data-only authoring fixture",
+  "locale": "en-US",
+  "stories": { "primary": "main", "items": [{ "id": "main", "src": "./stories/main.story.json" }] },
+  "map": { "basemap": "openfreemap-dark", "initialView": { "center": [106.65, 11.05], "zoom": 11, "pitch": 25, "bearing": 0 } },
+  "datasets": {
+    "existing-route": { "type": "geojson", "geometry": "line", "src": "./data/existing-route.geojson", "label": "Existing route", "render": { "type": "line", "color": "#94A3B8", "width": 3, "opacity": 0.9, "lineStyle": "solid" }, "attribution": ["planning-team"] },
+    "proposed-route": { "type": "geojson", "geometry": "line", "src": "./data/proposed-route.geojson", "label": "Proposed route", "render": { "type": "line", "color": "#2BB7FF", "width": 4, "opacity": 1, "lineStyle": "dashed" }, "attribution": ["planning-team"] },
+    "stops": { "type": "geojson", "geometry": "point", "src": "./data/stops.geojson", "label": "Stops", "render": { "type": "point", "color": "#FFFFFF", "radius": 5, "strokeColor": "#2BB7FF", "strokeWidth": 2, "label": { "field": "name", "minZoom": 10, "placement": "point" } }, "attribution": ["planning-team"] },
+    "service-area": { "type": "geojson", "geometry": "polygon", "src": "./data/service-area.geojson", "label": "Service area", "render": { "type": "fill", "color": "#2BB7FF33", "opacity": 0.25, "outlineColor": "#2BB7FF", "outlineWidth": 2 }, "attribution": ["planning-team"] },
+    "demand": { "type": "table-json", "src": "./data/demand.json", "label": "Demand by year", "attribution": ["survey"] }
+  },
+  "assets": { "site-photo": { "type": "image", "src": "./assets/site-photo.svg", "mediaType": "image/svg+xml", "attribution": ["planning-team"] } },
+  "focusTargets": {
+    "overview": { "type": "datasets", "datasets": ["existing-route", "proposed-route", "stops", "service-area"], "camera": { "maxZoom": 13, "padding": 20 } },
+    "town-center": { "type": "coordinate", "center": [106.65, 11.05], "zoom": 14, "camera": { "pitch": 20 } },
+    "study-area": { "type": "bounds", "bounds": [[106.61, 11.01], [106.69, 11.09]], "camera": { "maxZoom": 13 } }
+  },
+  "metrics": { "src": "./data/metrics.json" },
+  "capabilities": [],
+  "attribution": {
+    "planning-team": { "name": "Planning team", "updated": "2026-08-28" },
+    "survey": { "name": "Passenger survey", "updated": "2026-08-20" }
+  }
+}

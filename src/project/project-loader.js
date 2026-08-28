@@ -1,4 +1,6 @@
 import { composeCapabilities } from '../capabilities/capability-composer.js';
+import { createTableRegistry } from '../data/table-registry.js';
+import { createMetricRegistry } from '../metrics/metric-registry.js';
 import { createCoreMap10Normalizers } from '../capabilities/core-map-v1.js';
 import { normalizeStory10 } from '../capabilities/story-1.0-normalizer.js';
 import { validateStoryDefinition } from '../story-schema.js';
@@ -147,8 +149,12 @@ function bindingsFor(manifest) {
 }
 
 function validateAndNormalizeStory(rawStory, manifest, capabilities) {
-  if (rawStory?.schemaVersion !== '1.0') {
+  if (!['1.0', '1.1'].includes(rawStory?.schemaVersion)) {
     throw new ProjectLoadError('STORY_VERSION_UNSUPPORTED', '$.schemaVersion', `Unsupported Story schemaVersion: ${rawStory?.schemaVersion ?? ''}.`);
+  }
+  if (rawStory.schemaVersion === '1.1') {
+    validateStoryDefinition(rawStory, { actionContracts: canonicalStoryContracts(capabilities), contentDescriptors: Object.values(capabilities.contentDescriptors) });
+    return rawStory;
   }
   const normalizers = storyNormalizers(capabilities, Object.keys(manifest.focusTargets));
   validateStoryDefinition(rawStory, { actionContracts: rawStoryContracts(rawStory, normalizers, capabilities) });
@@ -187,7 +193,13 @@ export async function loadProject(manifestUrl = './project.json', {
   const loaded = await loadProjectResources(resourceRequests(manifest, urls, capabilities), { fetchImpl, signal });
   const resources = resolvedResources(manifest, urls, loaded.values);
   const rawStory = loaded.values.get(`story:${manifest.stories.primary}`);
-  validateResolvedReferences({ manifest, story: rawStory, resources, capabilities });
+  const tables = createTableRegistry([...resources]
+    .filter(([, resource]) => resource.descriptor?.type === 'table-json')
+    .map(([id, resource]) => [id, resource.value]));
+  const metricResource = resources.get('metrics')?.value;
+  const providers = Object.values(capabilities.metricDescriptors ?? {}).map((descriptor) => ({ descriptor }));
+  const metrics = await createMetricRegistry({ staticMetrics: metricResource?.metrics ?? {}, providers });
+  validateResolvedReferences({ manifest, story: rawStory, resources, capabilities, metrics });
   const story = validateAndNormalizeStory(rawStory, manifest, capabilities);
   const metadata = deepFreeze(Object.fromEntries([
     'id', 'title', 'subtitle', 'description', 'organization', 'author', 'projectDate', 'projectVersion'
@@ -202,6 +214,8 @@ export async function loadProject(manifestUrl = './project.json', {
     map: manifest.map,
     story,
     resources,
+    tables,
+    metrics,
     focusTargets: manifest.focusTargets,
     attribution: manifest.attribution,
     capabilities,

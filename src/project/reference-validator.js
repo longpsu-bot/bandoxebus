@@ -10,8 +10,8 @@ const CAMERA_BOUNDS = Object.freeze({
   padding: [0, 256]
 });
 
-function fail(path, message) {
-  throw new ProjectLoadError('PROJECT_REFERENCE_INVALID', path, message);
+function fail(path, message, code = 'PROJECT_REFERENCE_INVALID') {
+  throw new ProjectLoadError(code, path, message);
 }
 
 function validateRegistryIds(manifest) {
@@ -152,7 +152,79 @@ export function validateManifestReferences(manifest) {
   return manifest;
 }
 
-export function validateResolvedReferences({ manifest }) {
+function columnMap(resource) {
+  return new Map((resource?.value?.columns ?? []).map((column) => [column.id, column]));
+}
+
+function tableResource(context, id, path) {
+  const resource = context.resources?.get?.(id);
+  if (!resource || resource.descriptor?.type !== 'table-json') {
+    fail(path, `Dataset ${id} is not a loaded normalized table.`, 'TABLE_DATASET_INVALID');
+  }
+  return resource;
+}
+
+function column(resource, id, path) {
+  const result = columnMap(resource).get(id);
+  if (!result) fail(path, `Unknown table column: ${id}.`, 'TABLE_COLUMN_UNKNOWN');
+  return result;
+}
+
+function validateFormat(columnDescriptor, format, path) {
+  const type = typeof format === 'string' ? format : format?.type;
+  if (!type) return;
+  const numeric = new Set(['integer', 'number']);
+  if (['integer', 'decimal', 'percentage', 'distance', 'currency'].includes(type) && !numeric.has(columnDescriptor.type)) {
+    fail(path, `Column ${columnDescriptor.id} is incompatible with ${type} formatting.`, 'TABLE_COLUMN_TYPE_INVALID');
+  }
+}
+
+function validateBlockReferences(block, path, context) {
+  if (block.type === 'stat-group' && context.story?.schemaVersion === '1.1') {
+    for (const [index, item] of (block.items ?? []).entries()) {
+      if (!context.metrics?.has?.(item.metric)) fail(`${path}.items[${index}].metric`, `Unknown metric ID: ${item.metric}.`, 'METRIC_UNKNOWN');
+    }
+  }
+  if (block.type === 'table') {
+    const resource = tableResource(context, block.data?.dataset, `${path}.data.dataset`);
+    for (const [index, selected] of (block.data?.columns ?? []).entries()) {
+      const descriptor = column(resource, selected.field, `${path}.data.columns[${index}].field`);
+      validateFormat(descriptor, selected.format, `${path}.data.columns[${index}].format`);
+    }
+  }
+  if (block.type === 'chart') {
+    const resource = tableResource(context, block.data?.dataset, `${path}.data.dataset`);
+    const x = column(resource, block.data?.x, `${path}.data.x`);
+    if (!['text', 'date', 'integer'].includes(x.type)) fail(`${path}.data.x`, `Chart x column ${x.id} has an incompatible type.`, 'TABLE_COLUMN_TYPE_INVALID');
+    for (const [index, series] of (block.data?.series ?? []).entries()) {
+      const y = column(resource, series.y, `${path}.data.series[${index}].y`);
+      if (!['integer', 'number'].includes(y.type)) fail(`${path}.data.series[${index}].y`, `Chart series column ${y.id} must be numeric.`, 'TABLE_COLUMN_TYPE_INVALID');
+      validateFormat(y, series.format, `${path}.data.series[${index}].format`);
+    }
+  }
+  if (block.type === 'image') validateImageAsset(block.asset, `${path}.asset`, context);
+  if (block.type === 'legend') {
+    for (const [index, item] of (block.items ?? []).entries()) {
+      if (item.sample === 'icon') validateImageAsset(item.asset, `${path}.items[${index}].asset`, context);
+    }
+  }
+  if (block.source !== undefined && !Object.hasOwn(context.manifest.attribution, block.source)) {
+    fail(`${path}.source`, `Unknown attribution ID: ${block.source}.`, 'ATTRIBUTION_UNKNOWN');
+  }
+}
+
+function validateImageAsset(id, path, context) {
+  const asset = context.manifest.assets[id];
+  if (!asset || asset.type !== 'image') fail(path, `Unknown image asset ID: ${id}.`, 'ASSET_UNKNOWN');
+}
+
+export function validateResolvedReferences(context) {
+  const { manifest, story } = context;
   validateManifestReferences(manifest);
+  for (const state of story?.states ?? []) {
+    for (const [index, block] of (state.content?.blocks ?? []).entries()) {
+      validateBlockReferences(block, `$.states.${state.id}.content.blocks[${index}]`, context);
+    }
+  }
   return true;
 }
