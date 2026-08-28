@@ -1,0 +1,1209 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 0
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.668524,
+          10.96564
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 1
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.660461,
+          10.968838
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 2
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.660729,
+          10.968552
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 3
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.657743,
+          10.976622
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 4
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.657834,
+          10.975938
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 5
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.656222,
+          10.978814
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 6
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.654247,
+          10.98044
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 7
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.652674,
+          10.983723
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 8
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.652664,
+          10.983211
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 9
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.651073,
+          10.990664
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 10
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.651052,
+          10.989949
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 11
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.650485,
+          10.99364
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 12
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.650358,
+          10.993055
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 13
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.623845,
+          11.103394
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 14
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.623092,
+          11.104387
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 15
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.591265,
+          11.154614
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 16
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.591029,
+          11.153993
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 17
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.61843,
+          11.111283
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 18
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.61824,
+          11.111273
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 19
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.615517,
+          11.119274
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 20
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.615322,
+          11.119283
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 21
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.606418,
+          11.132822
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 22
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.606513,
+          11.132482
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 23
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.603911,
+          11.14023
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 24
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.603672,
+          11.140431
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 25
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.60014,
+          11.145825
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 26
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.600351,
+          11.145253
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 27
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.593653,
+          11.151322
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 28
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.593902,
+          11.151058
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 29
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.591583,
+          11.152639
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 30
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.591947,
+          11.152178
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 31
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.665836,
+          10.966628
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 32
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.666195,
+          10.966077
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 33
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.650528,
+          10.995433
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 34
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.659817,
+          10.972116
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 35
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.650567,
+          10.992513
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 36
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.659313,
+          10.97355
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 37
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.664248,
+          10.967262
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 38
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.659436,
+          10.973597
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 39
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.657977,
+          10.975993
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 40
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.65412,
+          10.98028
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 41
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.652575,
+          10.986852
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 42
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.645392,
+          11.008364
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 43
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.64912,
+          11.022059
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 44
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.64904,
+          11.02505
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 45
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.645339,
+          11.006944
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 46
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.646567,
+          11.009859
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 47
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.640443,
+          11.033196
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 48
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.639293,
+          11.036076
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 49
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.635479,
+          11.042773
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 50
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.633145,
+          11.047096
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 51
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.638858,
+          11.036313
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 52
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.628736,
+          11.056741
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 53
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.627534,
+          11.076989
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 54
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.626241,
+          11.090671
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 55
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.625893,
+          11.096425
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 56
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.625415,
+          11.098283
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 57
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.607713,
+          11.131403
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 58
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.625656,
+          11.098514
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 59
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.625957,
+          11.094414
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 60
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.626477,
+          11.09075
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 61
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.627866,
+          11.077076
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 62
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.629514,
+          11.054903
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 63
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.629701,
+          11.05304
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 64
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.632882,
+          11.046996
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 65
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.634932,
+          11.043157
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 66
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.648784,
+          11.021534
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 67
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.647853,
+          10.997935
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 68
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.648662,
+          10.997555
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 69
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.647152,
+          10.999778
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 70
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.646578,
+          11.026472
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 71
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.643713,
+          11.029426
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 72
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.65096,
+          10.991034
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 73
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.650362,
+          10.99538
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 74
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.592719,
+          11.155688
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 75
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.591904,
+          11.152417
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 76
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.663747,
+          10.967879
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 77
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.652382,
+          10.987742
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 78
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.647924,
+          11.015857
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 79
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.627878,
+          11.069622
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 80
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.626589,
+          11.083566
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 81
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.626327,
+          11.083975
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 82
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.627434,
+          11.071002
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 83
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.628387,
+          11.064143
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 84
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.647381,
+          11.014352
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "dataset": "existing",
+        "sourceIndex": 85
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.630798,
+          11.051546
+        ]
+      }
+    }
+  ]
+}

@@ -16,13 +16,22 @@ export function createCapabilityRegistry(entries) {
     const path = `$.entries[${index}]`;
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) entryError(path, 'Capability registry entry must be an object.');
     if (typeof entry.createCapability !== 'function') entryError(`${path}.createCapability`, 'Trusted capability factory must be a function.');
+    const story10Normalizers = entry.story10Normalizers ?? [];
+    if (!Array.isArray(story10Normalizers) || story10Normalizers.some((normalizer) => (
+      typeof normalizer?.legacyType !== 'string'
+      || typeof normalizer.validate !== 'function'
+      || typeof normalizer.normalize !== 'function'
+    ))) {
+      entryError(`${path}.story10Normalizers`, 'Story 1.0 normalizers must be trusted validator/normalizer entries.');
+    }
     const descriptor = validateCapabilityDescriptor(entry.descriptor);
     if (byId.has(descriptor.id)) {
       throw new ProjectLoadError('CAPABILITY_DUPLICATE', `${path}.descriptor.id`, `Duplicate capability ID: ${descriptor.id}.`);
     }
     byId.set(descriptor.id, Object.freeze({
       descriptor: cloneDescriptor(descriptor),
-      createCapability: entry.createCapability
+      createCapability: entry.createCapability,
+      story10Normalizers: Object.freeze([...story10Normalizers])
     }));
   });
 

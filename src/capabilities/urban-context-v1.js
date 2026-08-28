@@ -39,7 +39,9 @@ export const URBAN_CONTEXT_V1_DESCRIPTOR = deepFreeze({
   settingsSchema: {
     type: 'object',
     additionalProperties: false,
-    properties: {}
+    properties: {
+      adapter: { type: 'string', enum: ['route-61-2-current'] }
+    }
   },
   gui: { group: 'Urban context' }
 });

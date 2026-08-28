@@ -14,6 +14,7 @@ import { ROUTE_612_STORY_ACTION_CONTRACTS } from '../../src/route-61-2-story-act
 const STORY_URL = new URL('../../data/stories/route-61-2.story.json', import.meta.url);
 const APP_URL = new URL('../../src/app.js', import.meta.url);
 const ROUTE_DATA_URL = new URL('../../src/route-data.js', import.meta.url);
+const PROJECT_URL = new URL('../../project.json', import.meta.url);
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -231,34 +232,18 @@ test('canonical Route 61-2 story remains unchanged after all in-memory experimen
   assert.equal(canonical.states[0].content.blocks.find(({ type }) => type === 'heading').text, 'Tuyến 61-2');
 });
 
-test('hypothetical serialized project manifest is not consumed by the current application boundary', async () => {
-  const alternateProject = {
-    id: 'alternate-corridor',
-    title: 'Alternate Corridor',
-    storyPath: './data/stories/alternate.story.json',
-    datasets: {
-      existingRoute: './data/alternate/existing.geojson',
-      proposedRoute: './data/alternate/proposed.geojson',
-      existingStops: './data/alternate/existing-stops.geojson',
-      proposedStops: './data/alternate/proposed-stops.geojson',
-      pois: './data/alternate/pois.geojson',
-      contextPolygon: './data/alternate/context.geojson',
-      overtureBuildings: './data/alternate/buildings.geojson'
-    },
-    focusTargets: { overview: { datasets: ['existingRoute', 'proposedRoute'] } },
-    defaultView: { center: [105.8, 10.8], zoom: 9.5, pitch: 30, bearing: 0 },
-    attribution: [{ label: 'Alternate authority', url: 'https://example.invalid/source' }]
-  };
-  assert.deepEqual(JSON.parse(JSON.stringify(alternateProject)), alternateProject);
-
-  const [appSource, routeDataSource] = await Promise.all([
+test('production now consumes project.json while retaining trusted Route 61-2 adapters', async () => {
+  const [appSource, routeDataSource, projectSource] = await Promise.all([
     readFile(APP_URL, 'utf8'),
-    readFile(ROUTE_DATA_URL, 'utf8')
+    readFile(ROUTE_DATA_URL, 'utf8'),
+    readFile(PROJECT_URL, 'utf8')
   ]);
-  assert.doesNotMatch(appSource, /project-manifest|projectManifest|loadProject/i);
-  assert.match(appSource, /loadStoryDefinition\(['"]\.\/data\/stories\/route-61-2\.story\.json['"]/);
-  assert.match(appSource, /fetch\(['"]\.\/data\/industrial-zone-poc\.geojson['"]\)/);
-  assert.match(appSource, /center:\s*\[106\.63,\s*11\.06\]/);
+  const project = JSON.parse(projectSource);
+  assert.equal(project.id, 'route-61-2');
+  assert.equal(project.stories.items[0].src, './data/stories/route-61-2.story.json');
+  assert.match(appSource, /startApplication\(\{/);
+  assert.match(appSource, /manifestUrl:\s*['"]\.\/project\.json['"]/);
+  assert.doesNotMatch(appSource, /loadStoryDefinition\(['"]\.\/data\/stories\/route-61-2\.story\.json/);
   assert.match(appSource, /from ['"]\.\/route-data\.js['"]/);
   assert.match(routeDataSource, /export const existingRouteLatLng/);
   assert.match(routeDataSource, /export const proposedRouteLatLng/);
