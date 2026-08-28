@@ -9,7 +9,6 @@ import {
   compareRoutes,
   compareStops,
   haversineMeters,
-  lineLengthMeters,
   ROUTE_MATCH_THRESHOLD_METERS,
   STOP_MATCH_THRESHOLD_METERS
 } from './comparison.js';
@@ -24,21 +23,19 @@ import {
 } from './presentation.js';
 import { buildPresentationMetrics } from './presentation-metrics.js';
 import { findStoryContentBlock, renderPresentationContent } from './presentation-renderer.js';
-import { loadStoryDefinition } from './story-schema.js';
-import { createStoryActionRunner } from './story-action-runner.js';
-import { createStoryRuntime } from './story-runtime.js';
 import { createStoryShell, resolveStoryExperience } from './story-shell.js';
 import { createGuidedMapInteractionPolicy } from './story-map-interactions.js';
 import {
-  createRouteRevealController,
-  createRoute612StoryActionHandlers,
-  ROUTE_612_STORY_ACTION_CONTRACTS
+  createRouteRevealController
 } from './route-61-2-story-actions.js';
 import { createUrbanContextController } from './urban-context.js';
 import { prepareBasemapStyle, stripOpenFreeMapDarkStyle } from './basemap-style.js';
 import { OVERTURE_BUILDINGS_DATA_URL } from './overture-buildings.js';
 import { shouldUpdateAnimationFrame } from './animation-timing.js';
 import { createStopPulseTracker } from './stop-pulses.js';
+import { startApplication } from './application.js';
+import { INSTALLED_CAPABILITY_REGISTRY } from './capabilities/installed-capabilities.js';
+import { renderProjectLoadError } from './project/bootstrap.js';
 
 const BUS_STOP_TRIGGER_RADIUS_METERS = 55;
 const BUS_LOOP_DURATION_MS = 50_000;
@@ -139,6 +136,7 @@ const uiState = {
 let storyRuntime = null;
 let storyShell = null;
 let map;
+let activeProject = null;
 let revealToken = 0;
 let mapReady = false;
 let appliedRoadLabelCollection = null;
@@ -686,22 +684,17 @@ function allCoordinatesFromFeatureCollection(collection) {
 }
 
 function targetCoordinates(target) {
-  switch (target) {
-    case 'existing': return existingCoordinates;
-    case 'proposed': return proposedCoordinates;
-    case 'changes': {
-      const changedFeatures = [...routeComparison.added.features, ...routeComparison.removed.features]
-        .sort((featureA, featureB) => (
-          lineLengthMeters(featureB.geometry.coordinates) - lineLengthMeters(featureA.geometry.coordinates)
-        ))
-        .slice(0, 2);
-      const changed = changedFeatures.flatMap((feature) => feature.geometry.coordinates);
-      return changed.length ? changed : [...existingCoordinates, ...proposedCoordinates];
-    }
-    case 'service-area': return industrialZoneFeature?.geometry?.coordinates?.[0] ?? proposedCoordinates;
-    case 'connections': return landmarks.map((landmark) => landmark.coordinates);
-    default: return [...existingCoordinates, ...proposedCoordinates, ...landmarks.map((landmark) => landmark.coordinates)];
+  const definition = activeProject?.focusTargets?.[target];
+  if (!definition) return [];
+  if (definition.type === 'coordinate') return [definition.center];
+  if (definition.type === 'bounds') return definition.bounds;
+  if (definition.type === 'datasets') {
+    return definition.datasets.flatMap((id) => {
+      const collection = activeProject.resources.get(id)?.value;
+      return collection ? allCoordinatesFromFeatureCollection(collection) : [];
+    });
   }
+  return [];
 }
 
 function fitTarget(target, presentationActive, camera = {}, layoutPadding) {
@@ -950,102 +943,133 @@ function bindMapInteractions() {
   });
 }
 
+async function createRouteMap({ project }) {
+  activeProject = project;
+  const industrialZoneCollection = project.resources.get('industrial-zone')?.value;
+  if (industrialZoneCollection?.features?.length !== 1
+    || industrialZoneCollection.features[0]?.geometry?.type !== 'Polygon') {
+    throw new TypeError('Dữ liệu vùng công nghiệp phải chứa đúng một Polygon.');
+  }
+  industrialZoneFeature = industrialZoneCollection.features[0];
+
+  const [styleResponse, overtureBuildingResponse] = await Promise.all([
+    fetch('./style-openfreemap-dark.json'),
+    fetch(OVERTURE_BUILDINGS_DATA_URL).catch(() => null)
+  ]);
+  if (!styleResponse.ok) throw new Error(`Không tải được style.json (${styleResponse.status}).`);
+  if (overtureBuildingResponse?.ok) {
+    try {
+      overtureBuildingCollection = await overtureBuildingResponse.json();
+    } catch (error) {
+      console.warn('Dữ liệu công trình Overture không hợp lệ; dùng khối tích tổng hợp dự phòng.', error);
+    }
+  } else {
+    console.warn('Không tải được dữ liệu công trình Overture; dùng khối tích tổng hợp dự phòng.');
+  }
+
+  const rawBasemapStyle = await styleResponse.json();
+  const basemapStyle = prepareBasemapStyle(stripOpenFreeMapDarkStyle(rawBasemapStyle));
+  map = new maplibregl.Map({
+    container: 'map',
+    style: basemapStyle,
+    ...project.map.initialView,
+    maxPitch: 72,
+    antialias: true,
+    canvasContextAttributes: { antialias: true, powerPreference: 'high-performance' }
+  });
+  document.getElementById('map').dataset.basemapVariant = 'stripped-dark';
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+  map.addControl(new maplibregl.FullscreenControl(), 'top-right');
+  map.addControl(new maplibregl.ScaleControl({ maxWidth: 120 }), 'bottom-right');
+  return map;
+}
+
+function bindRouteStoryExperience({ runtime }) {
+  storyRuntime = runtime;
+  map.on('load', () => {
+    addMapSources();
+    addArrowImage();
+    addRouteLayers();
+    addStopLayers();
+    addDirectionLayers();
+    addEndpointLayers();
+    addFilteredRoadLabelLayer();
+    addPoiLayers();
+    urbanContextController = createUrbanContextController({
+      map,
+      maplibregl,
+      zone: industrialZoneFeature,
+      overtureBuildings: overtureBuildingCollection,
+      routeCoordinates: [existingCoordinates, proposedCoordinates],
+      pois: landmarks,
+      reducedMotion: prefersReducedMotion
+    });
+    mapReady = true;
+    storyExperience === 'legacy' ? bindPresentation() : bindStoryShell();
+    map.once('idle', primeRouteRoadLabels);
+    applyMode(VIEW_MODES.DIFFERENCE, { announce: false });
+    bindMapInteractions();
+    startBusSimulation();
+    fitTarget('overview', false);
+    setStatus('Sẵn sàng · Chế độ Chênh lệch.');
+  });
+  map.on('remove', () => {
+    urbanContextController?.destroy({ removeLayer: false });
+    urbanContextController = null;
+  });
+  map.on('error', (event) => {
+    if (event?.error?.message) console.warn('MapLibre:', event.error.message);
+  });
+  return {
+    exit() { storyShell?.exit(); },
+    destroy() { storyShell?.exit(); }
+  };
+}
+
+function routeCapabilityContexts() {
+  const renderers = Object.fromEntries(
+    ['eyebrow', 'heading', 'paragraph', 'stat-group', 'callout', 'disclosure']
+      .map((type) => [type, () => undefined])
+  );
+  return {
+    'core-content-v1': { renderers },
+    'core-map-v1': {
+      handlers: {
+        'map.focus': ({ target, camera = {} }) => fitTarget(target, true, camera, currentStoryLayoutPadding()),
+        'map.set-visibility': () => undefined,
+        'map.set-emphasis': () => undefined,
+        'map.clear-emphasis': () => undefined
+      }
+    },
+    'route-comparison-v1': {
+      setMode: (mode) => applyMode(mode, { announce: false }),
+      setPoiEmphasis: (_target, active) => emphasizePois(active),
+      setRouteReveal: (_target, active, delayMs) => routeRevealController.setActive(active, delayMs)
+    },
+    'urban-context-v1': {
+      setContextMode: (mode) => urbanContextController?.setMode(mode)
+    }
+  };
+}
+
 async function initialize() {
   renderMetrics();
   bindTabs();
   bindControls();
-
-  try {
-    const [storyDefinition, styleResponse, industrialZoneResponse, overtureBuildingResponse] = await Promise.all([
-      loadStoryDefinition('./data/stories/route-61-2.story.json', {
-        actionContracts: ROUTE_612_STORY_ACTION_CONTRACTS
-      }),
-      fetch('./style-openfreemap-dark.json'),
-      fetch('./data/industrial-zone-poc.geojson'),
-      fetch(OVERTURE_BUILDINGS_DATA_URL).catch(() => null)
-    ]);
-    if (!styleResponse.ok) throw new Error(`Không tải được style.json (${styleResponse.status}).`);
-    if (!industrialZoneResponse.ok) throw new Error(`Không tải được vùng công nghiệp (${industrialZoneResponse.status}).`);
-    const industrialZoneCollection = await industrialZoneResponse.json();
-    if (industrialZoneCollection.type !== 'FeatureCollection'
-      || industrialZoneCollection.features?.length !== 1
-      || industrialZoneCollection.features[0]?.geometry?.type !== 'Polygon') {
-      throw new TypeError('Dữ liệu vùng công nghiệp phải chứa đúng một Polygon.');
-    }
-    industrialZoneFeature = industrialZoneCollection.features[0];
-    const storyActionRunner = createStoryActionRunner(createRoute612StoryActionHandlers({
-      setMode: (mode) => applyMode(mode, { announce: false }),
-      focus: (target, camera) => fitTarget(target, true, camera, currentStoryLayoutPadding()),
-      setPoiEmphasis: emphasizePois,
-      setUrbanContext: (mode) => urbanContextController?.setMode(mode),
-      setRouteReveal: routeRevealController.setActive
-    }));
-    storyRuntime = createStoryRuntime({ definition: storyDefinition, actionRunner: storyActionRunner });
-    if (overtureBuildingResponse?.ok) {
-      try {
-        overtureBuildingCollection = await overtureBuildingResponse.json();
-      } catch (error) {
-        console.warn('Dữ liệu công trình Overture không hợp lệ; dùng khối tích tổng hợp dự phòng.', error);
-      }
-    } else {
-      console.warn('Không tải được dữ liệu công trình Overture; dùng khối tích tổng hợp dự phòng.');
-    }
-    const rawBasemapStyle = await styleResponse.json();
-    const basemapStyle = prepareBasemapStyle(stripOpenFreeMapDarkStyle(rawBasemapStyle));
-    map = new maplibregl.Map({
-      container: 'map',
-      style: basemapStyle,
-      center: [106.63, 11.06],
-      zoom: 10.7,
-      pitch: 46,
-      bearing: -18,
-      maxPitch: 72,
-      antialias: true,
-      canvasContextAttributes: { antialias: true, powerPreference: 'high-performance' }
-    });
-    document.getElementById('map').dataset.basemapVariant = 'stripped-dark';
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
-    map.addControl(new maplibregl.FullscreenControl(), 'top-right');
-    map.addControl(new maplibregl.ScaleControl({ maxWidth: 120 }), 'bottom-right');
-
-    map.on('load', () => {
-      addMapSources();
-      addArrowImage();
-      addRouteLayers();
-      addStopLayers();
-      addDirectionLayers();
-      addEndpointLayers();
-      addFilteredRoadLabelLayer();
-      addPoiLayers();
-      urbanContextController = createUrbanContextController({
-        map,
-        maplibregl,
-        zone: industrialZoneFeature,
-        overtureBuildings: overtureBuildingCollection,
-        routeCoordinates: [existingCoordinates, proposedCoordinates],
-        pois: landmarks,
-        reducedMotion: prefersReducedMotion
-      });
-      mapReady = true;
-      storyExperience === 'legacy' ? bindPresentation() : bindStoryShell();
-      map.once('idle', primeRouteRoadLabels);
-      applyMode(VIEW_MODES.DIFFERENCE, { announce: false });
-      bindMapInteractions();
-      startBusSimulation();
-      fitTarget('overview', false);
-      setStatus('Sẵn sàng · Chế độ Chênh lệch.');
-    });
-    map.on('remove', () => {
-      urbanContextController?.destroy({ removeLayer: false });
-      urbanContextController = null;
-    });
-    map.on('error', (event) => {
-      if (event?.error?.message) console.warn('MapLibre:', event.error.message);
-    });
-  } catch (error) {
-    console.error(error);
-    setStatus('Không thể tải nền bản đồ. Hãy mở package qua web server tĩnh.');
-  }
+  return startApplication({
+    manifestUrl: './project.json',
+    capabilityRegistry: INSTALLED_CAPABILITY_REGISTRY,
+    maplibregl,
+    documentRef: document,
+    storyExperience,
+    createMap: createRouteMap,
+    bindStoryExperience: bindRouteStoryExperience,
+    capabilityContexts: routeCapabilityContexts()
+  });
 }
 
-initialize();
+initialize().catch((error) => {
+  console.error(error);
+  renderProjectLoadError(error, { documentRef: document });
+  setStatus('Không thể tải dự án. Hãy mở package qua web server tĩnh.');
+});

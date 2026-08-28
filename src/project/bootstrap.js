@@ -45,6 +45,8 @@ export async function bootstrapProject(context) {
   if (!project?.story || !project?.capabilities?.ordered) {
     throw new TypeError('A ValidatedProject is required.');
   }
+  const documentRef = context.documentRef ?? globalThis.document;
+  if (documentRef) applyProjectMetadata(project, { documentRef });
   const createMap = context.createMap ?? defaultCreateMap;
   const map = await createMap({ project, maplibregl: context.maplibregl, documentRef: context.documentRef });
   const instances = [];
@@ -81,6 +83,21 @@ export async function bootstrapProject(context) {
   } catch (error) {
     teardown(instances, map);
     throw error;
+  }
+}
+
+export function applyProjectMetadata(project, { documentRef = document } = {}) {
+  const title = project?.metadata?.title ?? project?.manifest?.title ?? '';
+  const subtitle = project?.metadata?.subtitle ?? project?.manifest?.subtitle ?? '';
+  if (project?.locale) documentRef.documentElement.lang = project.locale;
+  if (title) documentRef.title = `${title} · Route Storytelling V1`;
+  const titleElement = documentRef.getElementById('project-title');
+  const subtitleElement = documentRef.getElementById('project-subtitle');
+  if (titleElement) titleElement.textContent = title;
+  if (subtitleElement) subtitleElement.textContent = subtitle;
+  if (title) {
+    documentRef.getElementById('map')?.setAttribute('aria-label', `Bản đồ · ${title}`);
+    documentRef.getElementById('control-panel')?.setAttribute('aria-label', `Bảng điều khiển · ${title}`);
   }
 }
 
