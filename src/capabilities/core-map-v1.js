@@ -1,5 +1,6 @@
 import { ProjectLoadError } from '../project/project-error.js';
 import { deepFreeze } from './descriptor-schema.js';
+import { createLegacyActionNormalizer } from './story-1.0-normalizer.js';
 
 function action(type, label, description, required, properties) {
   return {
@@ -81,3 +82,35 @@ export function createCoreMapCapability(context = {}) {
     ))
   });
 }
+
+export function createCoreMap10Normalizers({ focusTargets } = {}) {
+  const targetSchema = focusTargets
+    ? { type: 'string', enum: [...focusTargets] }
+    : { type: 'string', pattern: '^[a-z][a-z0-9-]*$' };
+  return deepFreeze([
+    createLegacyActionNormalizer({
+      legacyType: 'map.focus',
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['type', 'target'],
+        properties: {
+          type: { const: 'map.focus' },
+          target: targetSchema,
+          camera: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              pitch: { type: 'number', minimum: 0, maximum: 72 },
+              bearing: { type: 'number', minimum: -360, maximum: 360 },
+              maxZoom: { type: 'number', minimum: 0, maximum: 24 }
+            }
+          }
+        }
+      },
+      normalize: (descriptor) => structuredClone(descriptor)
+    })
+  ]);
+}
+
+export const CORE_MAP_V1_NORMALIZERS = createCoreMap10Normalizers();
