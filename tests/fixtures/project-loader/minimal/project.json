@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "id": "minimal-project",
+  "title": "Minimal project",
+  "subtitle": "Validated package",
+  "locale": "en-US",
+  "stories": {
+    "primary": "main",
+    "items": [{ "id": "main", "src": "./stories/main.story.json" }]
+  },
+  "map": {
+    "basemap": "openfreemap-dark",
+    "initialView": { "center": [106.63, 11.06], "zoom": 10.7, "pitch": 46, "bearing": -18 }
+  },
+  "datasets": {
+    "route": {
+      "type": "geojson",
+      "geometry": "line",
+      "src": "./data/route.geojson",
+      "label": "Route"
+    }
+  },
+  "assets": {},
+  "focusTargets": {
+    "overview": { "type": "datasets", "datasets": ["route"] }
+  },
+  "capabilities": [],
+  "attribution": {}
+}
