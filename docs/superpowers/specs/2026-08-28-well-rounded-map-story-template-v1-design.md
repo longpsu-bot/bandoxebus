@@ -82,8 +82,8 @@ Project loader + validator + reference resolver
         │
         ▼
 Trusted capability registry
-        ├── core-content-v1
-        ├── core-map-v1
+        ├── core-content-v1 (implicit baseline)
+        ├── core-map-v1 (implicit baseline)
         ├── route-comparison-v1 (optional)
         ├── urban-context-v1 (optional)
         └── application-installed extensions (optional)
@@ -100,6 +100,8 @@ Generic Story Runtime → Story Shell → persistent MapLibre map
 ```
 
 `app.js` becomes a small composition root. Loading, schema validation, resource resolution, capability composition and project-specific adapters remain separate modules with focused contracts.
+
+`core-content-v1` and `core-map-v1` are mandatory baseline capabilities composed automatically by the application for every valid project. They are not manifest options and cannot be removed, replaced or repeated in `capabilities`. The manifest array declares only optional installed packs. This makes baseline Story rendering and generic map behavior deterministic while keeping route, urban-context and special behavior opt-in.
 
 ### V1 deployment decision
 
@@ -157,10 +159,40 @@ An illustrative complete shape is:
       },
       "attribution": ["transport-authority"]
     },
+    "proposed-route": {
+      "type": "geojson",
+      "geometry": "line",
+      "src": "./data/proposed-route.geojson",
+      "role": "route.proposed",
+      "label": "Proposed route",
+      "render": {
+        "type": "line",
+        "color": "#2bb7ff",
+        "width": 4,
+        "lineStyle": "solid"
+      },
+      "attribution": ["transport-authority"]
+    },
+    "stops": {
+      "type": "geojson",
+      "geometry": "point",
+      "src": "./data/stops.geojson",
+      "label": "Stops",
+      "render": {
+        "type": "point",
+        "color": "#ffffff",
+        "radius": 5,
+        "label": {
+          "field": "name",
+          "minZoom": 12,
+          "placement": "point"
+        }
+      },
+      "attribution": ["transport-authority"]
+    },
     "demand-by-year": {
       "type": "table-json",
       "src": "./data/demand-by-year.json",
-      "role": "evidence.demand",
       "label": "Annual demand",
       "attribution": ["survey-2026"]
     }
@@ -181,7 +213,7 @@ An illustrative complete shape is:
     },
     "connections": {
       "type": "datasets",
-      "datasets": ["proposed-route", "transport-nodes"],
+      "datasets": ["proposed-route", "stops"],
       "camera": { "maxZoom": 14 }
     }
   },
@@ -189,9 +221,7 @@ An illustrative complete shape is:
     "src": "./data/metrics.json"
   },
   "capabilities": [
-    { "id": "core-map-v1" },
-    { "id": "route-comparison-v1" },
-    { "id": "urban-context-v1" }
+    { "id": "route-comparison-v1" }
   ],
   "attribution": {
     "transport-authority": {
@@ -214,7 +244,7 @@ An illustrative complete shape is:
 }
 ```
 
-Identity requires `schemaVersion`, `id`, `title`, `locale`, `stories`, `map`, `datasets`, `assets`, `focusTargets`, `capabilities`, and `attribution`; the contained registries may be empty when the project does not need them. Subtitle/description, organization/author, date and project version are optional display metadata. Dates use ISO `YYYY-MM-DD` strings and are not interpreted as executable schedules.
+Identity requires `schemaVersion`, `id`, `title`, `locale`, `stories`, `map`, `datasets`, `assets`, `focusTargets`, `capabilities`, and `attribution`; the contained registries may be empty when the project does not need them. `capabilities` contains only optional capability declarations and may therefore be `[]`; declaring reserved `core-content-v1` or `core-map-v1` is a validation error because the application already composes them. Subtitle/description, organization/author, date and project version are optional display metadata. Dates use ISO `YYYY-MM-DD` strings and are not interpreted as executable schedules.
 
 `basemap` is a trusted application-owned basemap ID, not a style URL or module path. The initial camera uses `[longitude, latitude]`, finite numbers, zoom 0–24, pitch 0–72, and bearing -360–360. `minZoom` and `maxZoom` are optional and must contain the initial zoom.
 
@@ -229,9 +259,9 @@ V1 supports:
 - `geojson` with declared `geometry`: `line`, `point`, `polygon`, or `mixed`;
 - `table-json` using the normalized tabular contract below.
 
-Building/context data is ordinary GeoJSON, usually with a semantic role such as `context.buildings` or `context.area`. Image/media files are assets rather than datasets. Roles are semantic strings consumed by known capabilities; they do not change the dataset's storage type.
+Building/context data is ordinary GeoJSON, and image/media files are assets rather than datasets. `role` is optional for datasets rendered or bound only by the implicit core capabilities. An optional capability descriptor may require semantic roles such as `route.existing`, `route.proposed`, `context.buildings`, or `context.area`; when that capability is declared, the required roles must be present, unique where its descriptor says so, and compatible with the declared resource/geometry types. Roles do not change a dataset's storage type.
 
-Each dataset has a stable manifest key, `type`, `src`, `role`, `label`, optional `render`, optional `attribution`, and optional `required` (default `true`). IDs are unique within their registry and follow `^[a-z][a-z0-9-]*$`.
+Each dataset has a stable manifest key, required `type`, `src`, and `label`, plus optional `role`, `render`, `attribution`, and `required` (default `true`). IDs are unique within their registry and follow `^[a-z][a-z0-9-]*$`.
 
 ### Safe generic rendering
 
@@ -243,6 +273,22 @@ Each dataset has a stable manifest key, `type`, `src`, `role`, `label`, optional
 - `fill-extrusion`: excluded from the generic V1 renderer; a trusted context capability owns it.
 
 Values are bounded primitives, not MapLibre expressions, raw layer objects, filters, event callbacks or shader configuration. Authored colors are restricted to `#RRGGBB` or `#RRGGBBAA` values; arbitrary CSS strings are not accepted. A capability may claim a role and render it itself; the validator rejects two capabilities claiming the same render responsibility.
+
+Any `line`, `point`, or `fill` render descriptor may include one optional read-only feature label:
+
+```json
+{
+  "label": {
+    "field": "name",
+    "minZoom": 12,
+    "placement": "point"
+  }
+}
+```
+
+`field` is a required top-level GeoJSON property name. `minZoom` is optional and bounded to 0–24. `placement` is one of `auto`, `point`, `line`, or `centroid`; it must be compatible with the dataset geometry, while `auto` selects `point` for points, `line` for lines and `centroid` for polygons. Mixed-geometry datasets may use only `auto`. The renderer owns collision handling, typography, contrast halo and safe conversion of scalar string/number/boolean values. Null or missing values omit that feature's label, while a field absent from every feature is a load-time validation error. There are no templates, concatenation, nested property paths, raw MapLibre expressions, per-feature styles or authored font URLs.
+
+Baseline V1 feature labels are non-interactive. Generic click inspection and author-configured popups are explicitly deferred: their field selection, value formatting, links, mobile interaction and accessibility contract require a separate evidenced design. Trusted optional capabilities may continue to provide bounded read-only inspection, including the existing Route 61-2 popups, without making popup configuration part of `core-map-v1`.
 
 The public authored target is a dataset ID or capability-declared logical target ID, never a private MapLibre source/layer ID. Capabilities may create several internal layers for one target without changing Story data.
 
@@ -392,7 +438,7 @@ Samples are `swatch`, `line`, or `icon`. A swatch/line accepts a validated hex c
 
 ## 10. Common Map Actions V1
 
-Action availability is capability-driven. The Story Runtime continues to dispatch ordered `enter` and `exit` arrays by opaque action `type`.
+Action availability is capability-driven. Actions from implicit `core-map-v1` are always available; actions from optional packs are available only when the manifest declares the pack and its inputs validate. The Story Runtime continues to dispatch ordered `enter` and `exit` arrays by opaque action `type`.
 
 ### Generic actions from `core-map-v1`
 
@@ -419,7 +465,21 @@ Ordinary building/context visibility uses `map.set-visibility`. `urban-context-v
 
 ### Route 61-2 compatibility
 
-The existing action types—`map.mode`, `map.focus`, `map.poi-emphasis`, `map.urban-context`, and `route.reveal`—remain registered as legacy aliases in the Route 61-2 adapter for Story 1.0. Its current enum values and behavior remain unchanged. New Story 1.1 content should use the baseline names above. Aliases are compatibility surface, not new GUI defaults.
+Canonical capabilities are the only action-handler owners. Story 1.0 compatibility is a separate versioned validation/normalization registry that runs once during project loading, before the Generic Story Runtime receives the definition. It does not register legacy handlers, does not claim canonical action ownership and is not exposed in the Story 1.1 GUI catalog. Duplicate ownership of a legacy normalizer is also rejected.
+
+For the declared Route 61-2 capability set, the composed Story 1.0 normalizers validate the existing descriptors with their exact current parameter shapes and produce canonical descriptors:
+
+| Existing Story 1.0 descriptor | Canonical result |
+| --- | --- |
+| `map.mode { mode }` | `route.set-mode { mode }` |
+| `map.focus { target, camera? }` | unchanged `map.focus { target, camera? }`, dispatched to the sole `core-map-v1` handler |
+| `map.poi-emphasis { active }` | `transport.set-poi-emphasis { target: <Route 61-2 POI target>, active }` |
+| `map.urban-context { mode }` | `context.set-mode { mode }` |
+| `route.reveal { active, delayMs? }` | `route.reveal { target: <Route 61-2 proposed-route target>, active, delayMs? }` |
+
+`core-map-v1` supplies the pass-through `map.focus` normalizer. The optional route/transport/context capabilities supply normalizers only for the legacy descriptors they understand. The Route 61-2 manifest binds the normalizers' default targets through semantic roles/settings: its `route.proposed` dataset is the reveal target and its declared connection-POI target is the POI-emphasis target. These resolve to the same proposed route and POI collection used today; they are project bindings, not new Story fields or global assumptions. Normalization preserves array order, enter/exit phase, camera values, delay and lifecycle. Each normalized action is then validated against the canonical capability descriptor before launch. Thus `core-map-v1` owns exactly one `map.focus` handler, `route-comparison-v1` owns exactly one `route.reveal` handler, and duplicate action ownership remains an error.
+
+New Story 1.1 content uses only canonical action descriptors. The Story 1.0 normalizer registry exists solely for certified backward compatibility, beginning with the checked-in Route 61-2 Story; it is not a general alias system.
 
 ## 11. Metric/Data Binding V1
 
@@ -495,6 +555,7 @@ A capability may register:
 - required/optional dataset roles and supported resource types;
 - a schema for its manifest `settings` object;
 - action descriptors and handlers;
+- optional Story 1.0-only validation/normalization descriptors for certified legacy actions, kept separate from handler ownership;
 - logical map targets and focus targets;
 - MapLibre sources/layers/renderers it owns;
 - map-load, project-activate, Story action, reset and destroy lifecycle behavior;
@@ -516,9 +577,9 @@ Manifest declarations contain IDs and optional data-only settings:
 }
 ```
 
-The registry decides whether that ID exists and which trusted code implements it. The descriptor validates settings and required roles. No `src`, `module`, `script`, URL or import path is permitted in a capability declaration.
+The registry decides whether that ID exists and which trusted code implements it. The descriptor validates settings and any roles that optional capability requires; ordinary core-map datasets need no role. No `src`, `module`, `script`, URL or import path is permitted in a capability declaration.
 
-Composition is deterministic: manifest order is not execution authority. The project loader resolves declared dependencies, sorts capabilities by dependency order, rejects cycles, rejects duplicate action ownership, and creates them once around the persistent map. Cleanup runs in reverse creation order. Core capabilities cannot be shadowed.
+Composition is deterministic: the application first installs exactly one `core-content-v1` and one `core-map-v1`, then resolves the optional manifest declarations. Manifest order is not execution authority. The project loader sorts optional capabilities by dependency order, rejects reserved core IDs in the manifest, rejects cycles and duplicate action ownership, and creates every capability once around the persistent map. Cleanup runs in reverse creation order. Core capabilities cannot be shadowed.
 
 ## 13. Capability authoring metadata
 
@@ -618,10 +679,10 @@ This is a convention, not a semantic requirement. References are resolved relati
 
 1. Load fixed `./project.json`.
 2. Validate `PROJECT_MANIFEST_V1` and normalize resource URLs relative to the manifest.
-3. Resolve every declared capability ID from the trusted registry; validate dependencies, settings, required roles, action ownership and descriptor/handler parity.
+3. Compose the mandatory `core-content-v1` and `core-map-v1`, then resolve every optional manifest capability ID from the trusted registry; reject explicit core declarations and validate dependencies, settings, required roles, action ownership and descriptor/handler parity.
 4. Load the primary Story, required datasets, table data, static metrics and required assets in parallel where dependencies permit.
 5. Validate resource payloads, provenance references, focus targets, metric namespace and all cross-file references.
-6. Validate Story against its versioned core content schema plus composed action descriptors.
+6. Validate Story against its versioned schema; for Story 1.0 only, apply the composed compatibility normalizers from the implicit and declared capabilities, then validate the normalized output against the canonical composed action descriptors.
 7. Create the persistent MapLibre instance from trusted basemap and validated manifest camera defaults.
 8. Initialize capabilities in dependency order and let them register owned sources/layers/targets/metrics.
 9. Compose action handlers, metric registry, content renderer registry and localized shell metadata.
@@ -637,7 +698,7 @@ Migration preserves appearance, interaction, data and performance:
 
 1. Add a Route 61-2 `project.json` at the deployment root with current metadata, Story path, camera, provenance, capabilities and semantic targets.
 2. Initially adapt existing `route-data.js`, comparison, urban context and map-layer functions behind trusted Route 61-2/known capability implementations. Do not rewrite all spatial files solely to match the recommended package layout.
-3. Register current Story 1.0 action names as compatibility aliases with their existing validators and handlers.
+3. Compose Route 61-2 Story 1.0 normalizers from the core/route/context capabilities, bind the existing POI and proposed-route targets through manifest roles/settings, and map legacy descriptors to canonical actions without registering a second handler.
 4. Move hardcoded project title/subtitle/locale, initial extent, focus registry, dataset URLs and attribution into the manifest one concern at a time.
 5. Convert embedded route/stops/POI values to manifest resources in a later bounded slice only when parity fixtures prove exact output.
 6. Keep the same Generic Runtime, Story Shell, persistent map and legacy fallback. Re-run the certified desktop/mobile lifecycle and settled-performance envelopes after executable migration slices.
@@ -647,8 +708,9 @@ The target composition is:
 ```text
 Route 61-2 manifest
 + unchanged Route 61-2 Story JSON
-+ core-map-v1 / route-comparison-v1 / urban-context-v1
-+ temporary compatibility adapter where needed
++ implicit core-content-v1 / core-map-v1
++ declared route-comparison-v1 / urban-context-v1
++ Story 1.0 compatibility normalizer
 + same Generic Story Runtime and Story Shell
 ```
 
@@ -662,6 +724,7 @@ Create a small non-production project, for example `tests/fixtures/well-rounded-
 - a semantic HTML table bound to selected columns;
 - an image with alt/caption/source;
 - an authored legend with line/swatch samples;
+- generic point labels bound to a GeoJSON `name` property;
 - generic dataset show/hide and emphasis/reset;
 - semantic focus for combined datasets, coordinate and explicit bounds;
 - static and capability-computed metric binding with locale formatting.
@@ -693,7 +756,7 @@ project manifest editor
 + production-runtime preview
 ```
 
-The GUI reads the manifest schema, Story 1.1 schema, core block descriptors and installed capability descriptors. It filters action choices to declared capabilities and resolved project options, validates references before save, and writes the same `project.json`, Story JSON, normalized table JSON, metric JSON and assets consumed in production. Preview loads those files through the production project loader. There is no GUI-only schema or translation layer.
+The GUI reads the manifest schema, Story 1.1 schema, the two implicit core descriptors and descriptors for optional capabilities declared by the project. It always offers core content, core map actions and the bounded GeoJSON label fields; it offers optional actions only for declared capabilities and resolved project options. It validates references before save and writes the same `project.json`, Story JSON, normalized table JSON, metric JSON and assets consumed in production. Preview loads those files through the production project loader. There is no GUI-only schema or translation layer.
 
 Capability authoring metadata can make an installed special capability editable, but GUI V1 need not create capability code or expose capabilities absent from the trusted build.
 
@@ -702,9 +765,9 @@ Capability authoring metadata can make an installed special capability editable,
 Validation occurs in layers and reports a stable code, JSON-style path and human-readable message:
 
 1. **Manifest structure:** schema version, required fields, bounds and unknown properties.
-2. **Capability composition:** installed IDs, dependencies, cycles, settings, claimed roles/actions and handler parity.
+2. **Capability composition:** implicit core installation, rejection of explicit core declarations, optional installed IDs, dependencies, cycles, settings, required roles/actions and handler parity.
 3. **Resource loading:** same-origin path resolution, HTTP status, JSON parse, MIME/type expectations and required resources.
-4. **Resource semantics:** GeoJSON collection/geometry compatibility, normalized table columns/rows and asset types.
+4. **Resource semantics:** GeoJSON collection/geometry/label-field compatibility, normalized table columns/rows and asset types.
 5. **Cross references:** primary Story, dataset/asset/attribution IDs, capability roles, focus targets, metric IDs and table columns.
 6. **Story:** versioned block schema and composed capability action parameter schemas.
 
@@ -722,11 +785,13 @@ Resource loaders use cancellation so a failed project load does not leave late m
 - Dependency-free/runtime validator parity with canonical JSON Schemas.
 - Reject unknown properties, unsafe paths, arbitrary module/script fields, callbacks and expressions.
 - Reference graph tests for missing/duplicate IDs, roles, columns, metrics, attribution and focus targets.
-- Capability descriptor/handler parity, dependency sorting, cycle rejection and ownership collision tests.
+- Implicit-core composition, reserved-core declaration rejection, optional-role requirements, capability descriptor/handler parity, dependency sorting, cycle rejection and ownership collision tests.
+- Story 1.0 compatibility tests proving validation and normalization into canonical actions without duplicate handlers, including insertion of the Route 61-2 reveal and POI targets.
 
 ### Rendering and accessibility tests
 
 - DOM semantics for tables, captions, figures, alt text, legends and sources.
+- Generic point/line/polygon label translation, geometry-placement validation, missing values and all-missing-field failure.
 - Chart.js translation snapshots for bar, grouped/stacked bar, line and area.
 - Chart accessible name, description/summary and fallback table.
 - Locale formatting for every common format type and unavailable values.
@@ -735,7 +800,7 @@ Resource loaders use cancellation so a failed project load does not leave late m
 ### Integration tests
 
 - Load the synthetic package through `./project.json` without JavaScript/HTML edits.
-- Traverse every synthetic state and verify ordered enter/exit actions, focus, visibility, emphasis and reset.
+- Traverse every synthetic state and verify ordered enter/exit actions, focus, visibility, emphasis, reset and declarative labels.
 - Verify one MapLibre canvas through Explore → Story → Explore and responsive reuse on desktop/mobile.
 - Verify GUI-readable catalogs exactly match runtime-accepted content/action options.
 
@@ -755,7 +820,7 @@ Certification passes only if all six target use cases work without project JavaS
 
 - Existing Story 1.0 JSON remains valid and uses the unchanged six-block/four-layout contract.
 - The loader accepts Story 1.0 and 1.1; only new stories default to 1.1.
-- Existing Route 61-2 action names remain compatibility aliases with identical parameters and lifecycle.
+- Existing Route 61-2 action descriptors retain identical saved parameters and lifecycle; a trusted Story 1.0 normalizer maps them to the sole canonical handlers before runtime dispatch.
 - The generic runtime still consumes ordered states and dispatches opaque action descriptors; no state or shell semantic changes.
 - Legacy presentation fallback stays explicitly selectable.
 - Manifest migration is additive around Route 61-2 and can temporarily wrap existing JS data behind trusted adapters.
@@ -768,6 +833,7 @@ Certification passes only if all six target use cases work without project JavaS
 - Multiple-project selection and `?project=` routing.
 - Multi-Story navigation UI despite the future-compatible reference collection.
 - Automatic MapLibre style-to-legend introspection.
+- Generic feature inspection and author-configured popups; trusted capabilities may provide bounded inspection.
 - Galleries, audio, video and arbitrary embeds.
 - Advanced chart types, mixed axes, arbitrary Chart.js options and dashboard composition.
 - Generic feature filters, joins, aggregations and formula language.
@@ -793,11 +859,11 @@ Hospital entrances, terminal bays and similar domain nouns are not baseline Stor
 This is a low-risk sequence of bounded, reviewable implementation PRs, not an implementation plan:
 
 1. **Contract foundations:** Manifest 1.0 JSON Schema/validator, normalized table and metric schemas, safe reference resolver, and invalid/valid fixtures.
-2. **Capability descriptors:** serializable core content/action descriptor format, trusted registry, composition validation and descriptor/handler parity tests; wrap current Route 61-2 actions as legacy aliases.
+2. **Capability descriptors:** serializable core content/action descriptor format, implicit baseline composition, trusted optional registry, composition validation and descriptor/handler parity tests; add the Route 61-2 Story 1.0 validation/normalization profile without duplicate action handlers.
 3. **Generic bootstrap:** project loader and small composition root consuming `./project.json`, with metadata/locale/camera/focus/attribution wiring and structured load errors.
 4. **Route 61-2 manifest migration:** add the manifest around current resources/adapters and prove unchanged Story 1.0, visual behavior, lifecycle and performance.
 5. **Data/metric binding:** normalized table loader, static/computed metric registry and shared locale formatter; expose existing comparison metrics through the capability boundary.
-6. **Common map capability:** generic GeoJSON render descriptors, visibility, emphasis, reset and declarative focus; then route-comparison/context capability descriptors.
+6. **Common map capability:** generic GeoJSON render and bounded label descriptors, visibility, emphasis, reset and declarative focus; then route-comparison/context capability descriptors.
 7. **Core content expansion:** Story 1.1 plus table, image, legend and pinned Chart.js-backed chart renderers with accessibility tests.
 8. **Synthetic fixture:** one complete static package exercising all baseline contracts and six target use cases without source edits.
 9. **Template certification:** schema/runtime/GUI-catalog parity, special-extension test, Route 61-2 regression, responsive lifecycle, accessibility and performance evidence.
@@ -809,6 +875,9 @@ No slice should combine the entire migration and content expansion. Each PR must
 
 - No incomplete design marker, executable project configuration or arbitrary module path is present.
 - Existing Route 61-2 Story 1.0 remains valid unchanged.
+- Story 1.0 compatibility normalizes into canonical handlers without duplicate action ownership.
+- Core content/map capabilities are implicit; the manifest contains optional packs only, and ordinary core datasets do not require roles.
+- Basic GeoJSON property labels are declarative, while generic inspection/popups are explicitly deferred.
 - Special facility/entrance behavior remains a trusted extension.
 - A new basic project can launch from static files without JavaScript or HTML edits.
 - GUI discovery comes from the same content/action/capability schemas used for runtime validation.
