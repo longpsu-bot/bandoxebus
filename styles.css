@@ -174,8 +174,8 @@ body.is-presenting .panel { opacity: 0; transform: translateX(-20px); pointer-ev
 body.is-presenting .maplibregl-ctrl-top-right { opacity: .35; }
 body.emphasize-pois .maplibregl-map { cursor: default; }
 
-.transport-poi-beacon {
-  position: relative;
+.maplibregl-marker.transport-poi-beacon {
+  position: absolute;
   width: 24px;
   height: 64px;
   pointer-events: none;

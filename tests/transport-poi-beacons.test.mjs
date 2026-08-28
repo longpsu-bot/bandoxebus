@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import { createTransportPoiBeacons } from '../src/transport-poi-beacons.js';
 import { buildGeoJsonLayerDefinitions } from '../src/map/geojson-renderer.js';
@@ -25,4 +26,10 @@ test('trusted POI beacons are created and emphasized without changing generic po
   assert.equal(generic.layers[0].type, 'circle');
   beacons.destroy();
   assert.equal(markers.every(({ removed }) => removed), true);
+});
+
+test('the MapLibre marker root remains absolutely positioned at its geographic anchor', async () => {
+  const css = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.maplibregl-marker\.transport-poi-beacon\s*\{[^}]*position:\s*absolute/s);
+  assert.doesNotMatch(css, /\.transport-poi-beacon\s*\{[^}]*position:\s*relative/s);
 });
