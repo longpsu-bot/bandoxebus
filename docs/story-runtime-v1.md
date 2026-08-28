@@ -1,12 +1,14 @@
 # Generic Story Runtime V1
 
+Baseline status: `BASELINE_AUTHORING_CONTRACT_V1: LOCKED`. See `docs/baseline-authoring-contract-v1.md` and the certification report under `review/well-rounded-map-story-template-v1/`.
+
 ## Purpose
 
 The story runtime separates Route 61-2 narrative data from navigation and application logic. A future editor can reorder states, edit structured content, and select supported map actions by writing the same JSON document the runtime consumes.
 
 ## Story definition
 
-`data/stories/route-61-2.story.json` is the Route 61-2 story. `data/stories/story.schema.json` is the canonical machine-readable contract. Every story has `schemaVersion`, a stable project `id`, a `title`, and a non-empty ordered `states` array. Version 1 accepts only `schemaVersion: "1.0"`; later versions require an explicit runtime change.
+`data/stories/route-61-2.story.json` is the byte-identical Route 61-2 Story 1.0 authority. The loader routes compatible Story 1.0 and 1.1 documents through the canonical schemas and composed capability descriptors. Every story has `schemaVersion`, a stable project `id`, a `title`, and a non-empty ordered `states` array. New ordinary authoring uses Story 1.1; future vocabulary changes require an explicit compatible minor or breaking major revision.
 
 Each state has a stable `id`, structured `content`, and declarative `map.enter` and `map.exit` action arrays. IDs identify states but have no semantic meaning to the runtime. Array order is story order.
 
@@ -20,6 +22,8 @@ State content declares one presentation `layout` and an ordered `blocks` array. 
 - `stat-group`: metric bindings resolved from application-provided values;
 - `callout`: one or more labeled contextual notes;
 - `disclosure`: source or qualification text.
+
+Story 1.1 additively supports semantic `table`, responsive accessible `chart`, declared-asset `image`, and authored `legend` blocks. The same serializable descriptors drive validation, rendering, and future GUI discovery.
 
 `presenterNote` remains optional authoring metadata and is never rendered. The registry is deliberately limited to blocks needed by the certified seven-state story.
 
@@ -51,4 +55,4 @@ GitHub Actions runs the authoritative dependency-free source/runtime/unit/config
 
 ## Responsive and future-editor rules
 
-There is one story definition for all viewport sizes. Responsive rendering and camera padding remain renderer concerns; an optional semantic focus target plus bounded camera overrides avoids separate desktop/mobile stories. Editor-only UI state does not belong in the schema. The future GUI may manipulate the serializable document but is not a runtime dependency.
+There is one story definition for all viewport sizes. Responsive rendering and camera padding remain renderer concerns; an optional semantic focus target plus bounded camera overrides avoids separate desktop/mobile stories. Editor-only UI state does not belong in the schema. GUI Editor V1 must manipulate and preview the same production manifest, Story, resource, metric, and capability descriptors; it may not introduce a parallel GUI-only schema or translation layer.

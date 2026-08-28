@@ -14,6 +14,8 @@ Mở `http://localhost:8080`. Không mở trực tiếp bằng `file://`, vì tr
 
 ## Kiến trúc
 
+Hợp đồng authoring cơ sở đã được chứng nhận và khóa tại `docs/baseline-authoring-contract-v1.md`. Dự án thông thường dùng trực tiếp `project.json`, Story 1.1 JSON, GeoJSON, bảng/metric JSON chuẩn hóa và image asset; không cần sửa JavaScript hoặc HTML. Story 1.0 của Route 61-2 vẫn tương thích nguyên trạng, còn GUI Editor V1 trong tương lai phải đọc/ghi đúng các hợp đồng production này.
+
 - `src/route-data.js`: dữ liệu tuyến, điểm dừng và POI được tách nguyên trạng từ package hiện tại.
 - `src/comparison.js`: lớp biến đổi thuần dữ liệu, không phụ thuộc UI. Tuyến dùng ngưỡng hành lang 40 m để hấp thụ sai lệch lấy mẫu giữa hai KML; điểm dừng dùng ID ổn định trước, sau đó mới dùng ngưỡng 25 m.
 - `src/road-labels.js`: lọc các đối tượng `transportation_name` chạy song song với tuyến; đường cắt ngang và đường ngoài hành lang bị loại. Phép lọc nặng chạy một lần trong Web Worker, chuẩn bị sẵn cache cho từng chế độ để đổi chế độ không khóa giao diện.
