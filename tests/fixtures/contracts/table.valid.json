@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0",
+  "columns": [
+    { "id": "name", "label": "Name", "type": "text" },
+    { "id": "year", "label": "Year", "type": "integer" },
+    { "id": "distance", "label": "Distance", "type": "number", "unit": "m" },
+    { "id": "active", "label": "Active", "type": "boolean" },
+    { "id": "survey-date", "label": "Survey date", "type": "date" }
+  ],
+  "rows": [
+    {
+      "name": "Route A",
+      "year": 2026,
+      "distance": 1250.5,
+      "active": true,
+      "survey-date": "2026-08-28"
+    },
+    {
+      "name": null,
+      "year": null,
+      "distance": null,
+      "active": null,
+      "survey-date": null
+    }
+  ]
+}
