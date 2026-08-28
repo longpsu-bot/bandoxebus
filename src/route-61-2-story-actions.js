@@ -11,11 +11,23 @@ const FOCUS_TARGETS = [
   'connections'
 ];
 
-export const ROUTE_612_STORY_10_NORMALIZERS = Object.freeze([
+const LEGACY_ACTION_TYPES = Object.freeze([
+  'map.mode',
+  'map.focus',
+  'map.poi-emphasis',
+  'map.urban-context',
+  'route.reveal'
+]);
+
+const NORMALIZERS_BY_TYPE = new Map([
   ...createCoreMap10Normalizers({ focusTargets: FOCUS_TARGETS }),
   ...ROUTE_COMPARISON_V1_NORMALIZERS,
   ...URBAN_CONTEXT_V1_NORMALIZERS
-]);
+].map((normalizer) => [normalizer.legacyType, normalizer]));
+
+export const ROUTE_612_STORY_10_NORMALIZERS = Object.freeze(
+  LEGACY_ACTION_TYPES.map((type) => NORMALIZERS_BY_TYPE.get(type))
+);
 
 export const ROUTE_612_STORY_ACTION_CONTRACTS = Object.freeze(Object.fromEntries(
   ROUTE_612_STORY_10_NORMALIZERS.map((normalizer) => [
