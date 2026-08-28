@@ -184,7 +184,7 @@ body.emphasize-pois .maplibregl-map { cursor: default; }
 .transport-poi-beacon__pillar {
   position: absolute;
   left: 50%;
-  bottom: 5px;
+  bottom: 0;
   width: 2px;
   height: 43px;
   border-radius: 999px;
@@ -195,31 +195,13 @@ body.emphasize-pois .maplibregl-map { cursor: default; }
   opacity: .72;
   transition: height 180ms ease, opacity 180ms ease, box-shadow 180ms ease;
 }
-.transport-poi-beacon__anchor {
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: 7px;
-  height: 7px;
-  border: 1px solid rgba(235, 253, 255, .95);
-  border-radius: 50%;
-  background: #bdefff;
-  box-shadow: 0 0 0 7px rgba(155, 231, 255, .1), 0 0 12px rgba(177, 244, 255, .55);
-  transform: translateX(-50%);
-  transition: box-shadow 180ms ease, background 180ms ease;
-}
 .transport-poi-beacon.is-emphasized .transport-poi-beacon__pillar {
   height: 52px;
   opacity: 1;
   box-shadow: 0 0 10px rgba(202, 249, 255, .9);
 }
-.transport-poi-beacon.is-emphasized .transport-poi-beacon__anchor {
-  background: #e8fdff;
-  box-shadow: 0 0 0 10px rgba(155, 231, 255, .18), 0 0 18px rgba(202, 249, 255, .88);
-}
 @media (prefers-reduced-motion: reduce) {
-  .transport-poi-beacon__pillar,
-  .transport-poi-beacon__anchor { transition-duration: 1ms; }
+  .transport-poi-beacon__pillar { transition-duration: 1ms; }
 }
 
 .maplibregl-popup-content { border: 1px solid rgba(148,163,184,.25); border-radius: 10px; background: #0a1422; color: #e7edf6; box-shadow: 0 12px 34px rgba(0,0,0,.42); font: 600 11px/1.45 Inter, ui-sans-serif, system-ui, sans-serif; }

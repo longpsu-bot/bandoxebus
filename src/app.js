@@ -36,7 +36,11 @@ import { createStopPulseTracker } from './stop-pulses.js';
 import { startApplication } from './application.js';
 import { INSTALLED_CAPABILITY_REGISTRY } from './capabilities/installed-capabilities.js';
 import { renderProjectLoadError } from './project/bootstrap.js';
-import { createTransportPoiBeacons } from './transport-poi-beacons.js';
+import {
+  buildTransportPoiGroundLayers,
+  createTransportPoiBeacons,
+  setTransportPoiGroundEmphasis
+} from './transport-poi-beacons.js';
 
 const BUS_STOP_TRIGGER_RADIUS_METERS = 55;
 const BUS_LOOP_DURATION_MS = 50_000;
@@ -141,6 +145,7 @@ let activeProject = null;
 let revealToken = 0;
 let mapReady = false;
 let poiBeaconController = null;
+let poiEmphasisActive = false;
 let appliedRoadLabelCollection = null;
 let industrialZoneFeature = null;
 let overtureBuildingCollection = null;
@@ -441,20 +446,7 @@ function primeRouteRoadLabels() {
 }
 
 function addPoiLayers() {
-  map.addLayer({
-    id: 'poi-halo', type: 'circle', source: 'route-pois',
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 8, 13, 13, 16, 17],
-      'circle-color': '#bff6ff', 'circle-opacity': 0
-    }
-  });
-  map.addLayer({
-    id: 'poi-core', type: 'circle', source: 'route-pois',
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 6, 13, 9, 16, 12],
-      'circle-color': '#dffaff', 'circle-opacity': 0, 'circle-stroke-width': 0
-    }
-  });
+  for (const layer of buildTransportPoiGroundLayers()) map.addLayer(layer);
   map.addLayer({
     id: 'poi-labels', type: 'symbol', source: 'route-pois', minzoom: 9.5,
     layout: {
@@ -723,8 +715,12 @@ function currentStoryLayoutPadding() {
 }
 
 function emphasizePois(active) {
-  document.body.classList.toggle('emphasize-pois', active);
-  poiBeaconController?.setEmphasis(active);
+  const next = Boolean(active);
+  if (next === poiEmphasisActive) return;
+  poiEmphasisActive = next;
+  document.body.classList.toggle('emphasize-pois', next);
+  poiBeaconController?.setEmphasis(next);
+  setTransportPoiGroundEmphasis(map, next);
 }
 
 function revealProposedRoute() {
