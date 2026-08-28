@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "1.0",
+  "metrics": {
+    "annual-passengers": {
+      "label": "Annual passengers",
+      "value": 910000,
+      "format": { "type": "integer" },
+      "attribution": ["survey-2026"]
+    },
+    "service-area-share": {
+      "label": "Population served",
+      "value": 0.64,
+      "format": { "type": "percentage", "decimals": 0 }
+    },
+    "status": {
+      "label": "Status",
+      "value": "Approved",
+      "format": { "type": "text" }
+    },
+    "available": {
+      "label": "Available",
+      "value": true,
+      "format": { "type": "text" }
+    },
+    "unknown": {
+      "label": "Unknown",
+      "value": null,
+      "format": { "type": "text" }
+    }
+  }
+}

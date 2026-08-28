@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0",
+  "metrics": {
+    "route-delta": {
+      "label": "Route delta",
+      "value": null,
+      "expression": "proposed - existing",
+      "format": { "type": "distance", "decimals": 1 }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0",
+  "columns": [
+    { "id": "year", "label": "Year", "type": "integer" }
+  ],
+  "rows": [
+    { "year": 2026, "extra": 1 }
+  ]
+}
