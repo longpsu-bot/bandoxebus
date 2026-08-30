@@ -1,4 +1,4 @@
-import { validateGeoJsonResource, validateTableData } from '../../src/project/resource-schemas.js';
+import { validateGeoJsonResource, validateMetricFile, validateTableData } from '../../src/project/resource-schemas.js';
 
 const PROJECT_FIELDS = Object.freeze([
   ['schemaVersion', 'Schema version', 'text', true],
@@ -397,6 +397,200 @@ function datasetInspector({ manifest, resources = {}, mutate, writeResource, rol
   };
 }
 
+const IMAGE_EXTENSIONS = Object.freeze({
+  'image/avif': 'avif',
+  'image/gif': 'gif',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/svg+xml': 'svg',
+  'image/webp': 'webp'
+});
+
+function storyAssetReferences(stories, assetId) {
+  const references = [];
+  for (const [storyId, story] of Object.entries(stories ?? {})) {
+    for (const [stateIndex, state] of (story.states ?? []).entries()) {
+      for (const [blockIndex, block] of (state.content?.blocks ?? []).entries()) {
+        const base = `stories.${storyId}.states[${stateIndex}].content.blocks[${blockIndex}]`;
+        if (block.type === 'image' && block.asset === assetId) references.push(`${base}.asset`);
+        if (block.type === 'legend') {
+          for (const [itemIndex, item] of (block.items ?? []).entries()) {
+            if (item.sample === 'icon' && item.asset === assetId) references.push(`${base}.items[${itemIndex}].asset`);
+          }
+        }
+      }
+    }
+  }
+  return references;
+}
+
+function assetInspector({
+  manifest,
+  assetBytes = {},
+  stories = {},
+  mutate,
+  writeBinary,
+  removeResource,
+  urlApi = globalThis.URL
+}) {
+  const objectUrls = new Map();
+  function revoke(id) {
+    const url = objectUrls.get(id);
+    if (url) urlApi.revokeObjectURL(url);
+    objectUrls.delete(id);
+  }
+  function entity(id) {
+    const descriptor = manifest.assets[id];
+    if (!descriptor) throw new TypeError(`Unknown asset ID: ${id}`);
+    return {
+      control(path) {
+        if (!['id', 'type', 'src', 'mediaType', 'required', 'attribution'].includes(path)) {
+          throw new TypeError(`Unsupported asset control: ${path}`);
+        }
+        return fieldControl({
+          path,
+          readOnly: ['id', 'type', 'src', 'mediaType'].includes(path),
+          read: () => path === 'id' ? id : descriptor[path],
+          write(value) { requireMutate(mutate)((draft) => writePath(draft.assets[id], path, value)); }
+        });
+      },
+      thumbnailUrl() {
+        if (objectUrls.has(id)) return objectUrls.get(id);
+        const bytes = assetBytes[id];
+        if (!(bytes instanceof Uint8Array)) throw new TypeError(`Image bytes are unavailable: ${id}`);
+        const url = urlApi.createObjectURL(new Blob([bytes.slice()], { type: descriptor.mediaType }));
+        objectUrls.set(id, url);
+        return url;
+      },
+      command(name, value) {
+        if (name === 'replace') {
+          const bytes = value instanceof Uint8Array ? value.slice() : new Uint8Array(value);
+          requireMutate(writeBinary)(descriptor.src.replace(/^\.\//, ''), bytes, { id, kind: 'asset', mediaType: descriptor.mediaType });
+          assetBytes[id] = bytes.slice();
+          revoke(id);
+          return;
+        }
+        if (name === 'request-delete') {
+          const brokenReferences = storyAssetReferences(stories, id);
+          return { requiresConfirmation: brokenReferences.length > 0, brokenReferences };
+        }
+        if (name === 'confirm-delete') {
+          const path = descriptor.src.replace(/^\.\//, '');
+          requireMutate(mutate)((draft) => { delete draft.assets[id]; });
+          requireMutate(removeResource)(path);
+          delete assetBytes[id];
+          revoke(id);
+          return;
+        }
+        throw new TypeError(`Unknown asset command: ${name}`);
+      }
+    };
+  }
+  return {
+    kind: 'asset',
+    entity,
+    command(name, id, input) {
+      if (name !== 'add-image') throw new TypeError(`Unknown asset command: ${name}`);
+      assertStableId(id, 'Asset');
+      if (manifest.assets[id]) throw new TypeError(`Asset ID already exists: ${id}`);
+      const extension = IMAGE_EXTENSIONS[input.mediaType];
+      if (!extension) throw new TypeError(`Unsupported image media type: ${input.mediaType}`);
+      const descriptor = {
+        type: 'image',
+        src: `./assets/${id}.${extension}`,
+        mediaType: input.mediaType,
+        ...(input.required === undefined ? {} : { required: input.required }),
+        ...(input.attribution === undefined ? {} : { attribution: clone(input.attribution) })
+      };
+      const bytes = input.bytes instanceof Uint8Array ? input.bytes.slice() : new Uint8Array(input.bytes);
+      requireMutate(writeBinary)(descriptor.src.slice(2), bytes, { id, kind: 'asset', mediaType: descriptor.mediaType });
+      assetBytes[id] = bytes.slice();
+      requireMutate(mutate)((draft) => { draft.assets[id] = descriptor; });
+      return entity(id);
+    },
+    dispose() {
+      for (const id of [...objectUrls.keys()]) revoke(id);
+    }
+  };
+}
+
+function metricFormatControls(format) {
+  if (format.type === 'decimal') return ['type', 'decimals', 'unit'];
+  if (format.type === 'percentage' || format.type === 'distance') return ['type', 'decimals'];
+  if (format.type === 'currency') return ['type', 'currency'];
+  return ['type'];
+}
+
+function metricInspector({ manifest, metricsFile, computed = [], mutate, writeResource }) {
+  let current = clone(metricsFile ?? { schemaVersion: '1.0', metrics: {} });
+  const computedById = new Map(computed.map((descriptor) => [descriptor.id, clone(descriptor)]));
+  function save(candidate) {
+    validateMetricFile(candidate);
+    current = clone(candidate);
+    requireMutate(writeResource)(manifest.metrics?.src?.replace(/^\.\//, '') ?? 'data/metrics.json', current, {
+      id: 'metrics', kind: 'metrics', mediaType: 'application/json'
+    });
+    return clone(current);
+  }
+  function metric(id) {
+    const computedDescriptor = computedById.get(id);
+    if (computedDescriptor) return {
+      id,
+      readOnly: true,
+      descriptor: clone(computedDescriptor),
+      control(path) {
+        return {
+          path,
+          readOnly: true,
+          get value() { return clone(readPath(computedDescriptor, path)); },
+          set() { throw new TypeError(`Computed metric ${id} is read-only.`); }
+        };
+      },
+      formatControls: () => metricFormatControls(computedDescriptor.format)
+    };
+    if (!current.metrics[id]) throw new TypeError(`Unknown metric ID: ${id}`);
+    return {
+      id,
+      readOnly: false,
+      control(path) {
+        if (!['id', 'label', 'value', 'format.type', 'format.decimals', 'format.unit', 'format.currency', 'attribution'].includes(path)) {
+          throw new TypeError(`Unsupported metric control: ${path}`);
+        }
+        return {
+          path,
+          readOnly: path === 'id',
+          get value() { return path === 'id' ? id : clone(readPath(current.metrics[id], path)); },
+          set(value) {
+            if (path === 'id') throw new TypeError(`Metric ${id} ID is read-only.`);
+            const candidate = clone(current);
+            if (path === 'value') candidate.metrics[id].value = clone(value);
+            else writePath(candidate.metrics[id], path, value);
+            save(candidate);
+          }
+        };
+      },
+      formatControls: () => metricFormatControls(current.metrics[id].format)
+    };
+  }
+  return {
+    kind: 'metric',
+    metric,
+    metricOptions: () => [...new Set([...Object.keys(current.metrics), ...computedById.keys()])],
+    replaceMetricsFile(value) { current = clone(value); },
+    command(name, id, descriptor) {
+      if (name !== 'add-static') throw new TypeError(`Unknown metric command: ${name}`);
+      assertStableId(id, 'Metric');
+      if (current.metrics[id] || computedById.has(id)) throw new TypeError(`Metric ID already exists: ${id}`);
+      const candidate = clone(current);
+      candidate.metrics[id] = clone(descriptor);
+      validateMetricFile(candidate);
+      if (!manifest.metrics) requireMutate(mutate)((draft) => { draft.metrics = { src: './data/metrics.json' }; });
+      save(candidate);
+      return metric(id);
+    }
+  };
+}
+
 function renderProjectFields(model, { container, documentRef }) {
   if (!container || !documentRef?.createElement) return;
   const section = documentRef.createElement('section');
@@ -467,6 +661,8 @@ export function renderEntityInspector(options) {
   else if (kind === 'attribution') model = attributionInspector(options);
   else if (kind === 'focus') model = focusInspector(options);
   else if (kind === 'dataset') model = datasetInspector(options);
+  else if (kind === 'asset') model = assetInspector(options);
+  else if (kind === 'metric') model = metricInspector(options);
   else throw new TypeError(`Unknown inspector kind: ${kind}`);
   if (kind === 'project') renderProjectFields(model, { container, documentRef });
   return model;

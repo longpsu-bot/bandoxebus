@@ -37,11 +37,22 @@ export function createEditor({
       id,
       draftStore.get(descriptor.src.replace(/^\.\//, ''))
     ]));
+    const assetBytes = Object.fromEntries(Object.entries(manifest.assets ?? {}).map(([id, descriptor]) => [
+      id,
+      packageStore.get(descriptor.src.replace(/^\.\//, ''))?.currentBytes.slice()
+    ]));
+    const stories = Object.fromEntries((manifest.stories?.items ?? []).map(({ id, src }) => [
+      id,
+      draftStore.get(src.replace(/^\.\//, ''))
+    ]));
     return renderEntityInspector({
       kind,
       manifest,
       telemetry: previewTelemetry,
       resources,
+      assetBytes,
+      stories,
+      metricsFile: manifest.metrics ? draftStore.get(manifest.metrics.src.replace(/^\.\//, '')) : undefined,
       mutate(updater) {
         draftStore.mutate('project.json', updater);
         renderDirty();
@@ -51,6 +62,18 @@ export function createEditor({
         const entry = packageStore.get(path);
         if (entry) packageStore.setCurrentBytes(path, bytes);
         else packageStore.setManaged(path, { ...descriptor, bytes, managed: true });
+        validation?.schedule();
+        renderDirty();
+      },
+      writeBinary(path, bytes, descriptor) {
+        const entry = packageStore.get(path);
+        if (entry) packageStore.setCurrentBytes(path, bytes);
+        else packageStore.setManaged(path, { ...descriptor, bytes, managed: true });
+        validation?.schedule();
+        renderDirty();
+      },
+      removeResource(path) {
+        packageStore.removeManaged(path);
         validation?.schedule();
         renderDirty();
       },
