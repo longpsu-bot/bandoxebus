@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b1220">
-  <title>GUI Editor V1</title>
+  <title>Map Story Studio</title>
   <link rel="stylesheet" href="./editor.css">
 </head>
 <body>
   <header class="editor-topbar">
     <div>
-      <p class="editor-kicker">GUI Editor V1</p>
-      <h1>Project package</h1>
+      <p class="editor-kicker">Map Story Studio V1.1</p>
+      <h1>Map Story Studio</h1>
     </div>
     <div class="editor-actions" aria-label="Project commands">
       <button id="new-project" type="button">New</button>
@@ -22,6 +22,10 @@
       <button id="save-project" type="button" disabled>Save</button>
       <button id="export-project-zip" type="button" disabled>Export Project ZIP</button>
       <button id="validate-project" type="button" disabled>Validate</button>
+      <button id="undo-command" type="button" disabled>Undo</button>
+      <button id="redo-command" type="button" disabled>Redo</button>
+      <button id="preview-story" type="button" disabled>Preview Story</button>
+      <button id="present-story" type="button" disabled>Present</button>
       <span id="preview-status" role="status" aria-live="polite">Preview waiting</span>
       <span id="dirty-status">No project</span>
     </div>
@@ -50,7 +54,6 @@
           data-preview-src-story12="../src/runtime/?editorPreview=1"></iframe>
         <div id="preview-paused" class="preview-paused" hidden>Preview paused at the last valid revision.</div>
       </div>
-      <section id="studio-scenes" class="studio-scenes" aria-label="Scenes" hidden></section>
     </main>
 
     <aside class="editor-inspector" aria-labelledby="inspector-heading">
@@ -62,6 +65,8 @@
       <input id="project-locale" type="text" required aria-describedby="project-locale-help" aria-errormessage="validation-status" disabled>
       <p id="project-locale-help">Uses the locked production locale contract. Empty locale is invalid.</p>
     </aside>
+
+    <section id="studio-scenes" class="studio-scenes" aria-label="Scenes" hidden></section>
   </div>
 
   <section class="validation-drawer" aria-labelledby="validation-heading">

@@ -95,7 +95,6 @@ function parseJsonEntry(snapshot, path) {
     throw new TypeError(`Preview package ${path} is not valid JSON.`);
   }
 }
-
 export function resolvePreviewSourceForSnapshot(snapshot, {
   legacy = '../?editorPreview=1',
   story12 = '../src/runtime/?editorPreview=1'
@@ -201,8 +200,8 @@ export function createPreviewBridge({
   }
 
   function selectSnapshotSource(snapshot) {
-    const legacy = iframe.dataset.previewSrcLegacy;
-    const story12 = iframe.dataset.previewSrcStory12;
+    const legacy = iframe.dataset?.previewSrcLegacy;
+    const story12 = iframe.dataset?.previewSrcStory12;
     if (!legacy || !story12) return;
     const source = resolvePreviewSourceForSnapshot(snapshot, { legacy, story12 });
     if (iframe.dataset.previewSrc === source) return;

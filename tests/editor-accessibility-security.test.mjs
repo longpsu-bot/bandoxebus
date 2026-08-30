@@ -232,6 +232,7 @@ test('editor authored rendering and protocol sources prohibit executable and uns
     '../editor/storage/adapters.js',
     '../editor/ui/inspectors.js',
     '../editor/ui/story-editor.js',
+    '../editor/ui/studio-shell.js',
     '../editor/ui/content-actions.js'
   ].map((path) => readFile(new URL(path, import.meta.url), 'utf8')));
   const source = sources.join('\n');
