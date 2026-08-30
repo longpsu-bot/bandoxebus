@@ -3,6 +3,7 @@ import { createNewProjectEntries, createPackageStore } from './core/package-stor
 import { createValidationCoordinator } from './core/validation.js';
 import { createPreviewBridge } from './preview/bridge.js';
 import { renderEntityInspector } from './ui/inspectors.js';
+import { createStoryEditor } from './ui/story-editor.js';
 
 export function createEditor({
   documentRef = globalThis.document,
@@ -87,6 +88,43 @@ export function createEditor({
     inspect('project', {
       container: elements.inspector,
       documentRef
+    });
+  }
+
+  function editStories(options = {}) {
+    if (!draftStore || !packageStore) throw new TypeError('Create or open a project before authoring.');
+    const manifest = draftStore.get('project.json');
+    const stories = Object.fromEntries(manifest.stories.items.map(({ id, src }) => [
+      id,
+      draftStore.get(src.replace(/^\.\//, ''))
+    ]));
+    return createStoryEditor({
+      manifest,
+      stories,
+      mutateManifest(updater) {
+        draftStore.mutate('project.json', updater);
+        renderDirty();
+      },
+      writeStory(id, story, metadata = {}) {
+        const path = metadata.path ?? manifest.stories.items.find((item) => item.id === id)?.src.replace(/^\.\//, '');
+        const text = `${JSON.stringify(story, null, 2)}\n`;
+        if (metadata.create || !packageStore.get(path)) {
+          packageStore.setManaged(path, { bytes: text, mediaType: 'application/json', kind: 'story', managed: true });
+          draftStore.replaceText(path, text);
+        } else {
+          draftStore.mutate(path, () => story);
+        }
+        renderDirty();
+      },
+      removeStory(_id, path) {
+        packageStore.removeManaged(path);
+        validation?.schedule();
+        renderDirty();
+      },
+      announce(message) {
+        elements.validationStatus.textContent = message;
+      },
+      ...options
     });
   }
 
@@ -206,7 +244,7 @@ export function createEditor({
     bridge.dispose();
   }
 
-  return { newProject, setViewport, inspect, dispose };
+  return { newProject, setViewport, inspect, editStories, dispose };
 }
 
 createEditor();
