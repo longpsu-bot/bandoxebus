@@ -301,6 +301,98 @@ test('restart retries the latest requested snapshot after its first start failed
   await host.dispose();
 });
 
+test('Story 1.2 authoring commands use exact bounded preview payloads', () => {
+  const windowRef = fakeWindow();
+  const messages = [];
+  const frame = { postMessage(message, origin) { messages.push({ message, origin }); } };
+  const bridge = createPreviewBridge({
+    iframe: { contentWindow: frame, addEventListener() {}, removeEventListener() {}, dataset: {} },
+    windowRef,
+    origin: windowRef.location.origin
+  });
+
+  bridge.command('activate-scene', { index: 2, animate: false });
+  bridge.command('authoring-mode', { mode: 'map' });
+  bridge.command('restore-scene-camera', { index: 2 });
+
+  assert.deepEqual(messages.map(({ message }) => message.payload), [
+    { name: 'activate-scene', payload: { index: 2, animate: false } },
+    { name: 'authoring-mode', payload: { mode: 'map' } },
+    { name: 'restore-scene-camera', payload: { index: 2 } }
+  ]);
+  assert.equal(messages.every(({ origin }) => origin === windowRef.location.origin), true);
+  assert.throws(() => bridge.command('activate-scene', { index: 2, animate: false, method: 'jumpTo' }), /payload/i);
+  assert.throws(() => bridge.command('authoring-mode', { mode: 'anything' }), /payload/i);
+  assert.throws(() => bridge.command('restore-scene-camera', { index: -1 }), /payload/i);
+  bridge.dispose();
+});
+
+test('preview host routes bounded Story commands only to the active production shell', async () => {
+  const calls = [];
+  const windowRef = fakeWindow();
+  windowRef.parent = { postMessage() {} };
+  const host = startEditorPreviewHost({
+    windowRef,
+    expectedOrigin: windowRef.location.origin,
+    createResolver() {
+      return { manifestUrl: new URL('https://editor.example/project.json'), fetchImpl() {}, resolveAssetUrl() {}, revoke() {} };
+    },
+    async startProductionApplication() {
+      return {
+        shell: {
+          activateScene(index, options) { calls.push(['activate', index, options]); },
+          setAuthoringMode(mode) { calls.push(['mode', mode]); },
+          restoreSceneCamera(index) { calls.push(['restore', index]); }
+        },
+        destroy() {}
+      };
+    }
+  });
+  await host.start({ revision: 4, entries: [] });
+
+  const send = (name, payload, event = {}) => windowRef.emit('message', {
+    source: windowRef.parent,
+    origin: windowRef.location.origin,
+    data: envelope('command', 4, { name, payload }, `command-${name}`),
+    ...event
+  });
+  send('activate-scene', { index: 1, animate: false });
+  send('authoring-mode', { mode: 'select' });
+  send('restore-scene-camera', { index: 1 });
+  windowRef.emit('message', {
+    source: {}, origin: windowRef.location.origin,
+    data: envelope('command', 4, { name: 'authoring-mode', payload: { mode: 'map' } }, 'wrong-source')
+  });
+  windowRef.emit('message', {
+    source: windowRef.parent, origin: 'https://evil.example',
+    data: envelope('command', 4, { name: 'authoring-mode', payload: { mode: 'map' } }, 'wrong-origin')
+  });
+
+  assert.deepEqual(calls, [
+    ['activate', 1, { animate: false }],
+    ['mode', 'select'],
+    ['restore', 1]
+  ]);
+  await host.dispose();
+});
+
+test('Story 1.2 Studio source exposes Layers Canvas Properties Scenes and explicit camera controls', async () => {
+  const [source, css, editorSource] = await Promise.all([
+    readFile(new URL('../editor/ui/studio-shell.js', import.meta.url), 'utf8'),
+    readFile(new URL('../editor/editor.css', import.meta.url), 'utf8'),
+    readFile(new URL('../editor/editor.js', import.meta.url), 'utf8')
+  ]);
+  for (const label of ['Layers', 'Canvas', 'Properties', 'Scenes', 'Select', 'Map', 'Camera changed', 'Capture Camera', 'Restore Saved Camera']) {
+    assert.match(source, new RegExp(label.replaceAll(' ', '\\s+'), 'i'), label);
+  }
+  assert.match(source, /addProjectLayerToStory12|setSceneLayerVisibility/);
+  assert.match(source, /ArrowLeft|ArrowRight/);
+  assert.match(source, /Move Scene Up|Move Scene Down/);
+  assert.match(css, /aspect-ratio:\s*16\s*\/\s*9/);
+  assert.match(editorSource, /src\/runtime\/\?editorPreview=1/);
+  assert.match(editorSource, /schemaVersion\s*===\s*['"]1\.2['"]/);
+});
+
 test('static editor shell and production preview mode expose only the PR A spine', async () => {
   const [html, editorSource, css, appSource, smokeSource] = await Promise.all([
     readFile(new URL('../editor/index.html', import.meta.url), 'utf8'),
