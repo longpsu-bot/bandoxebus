@@ -2,6 +2,7 @@ import { createDraftStore } from './core/draft-store.js';
 import { createNewProjectEntries, createPackageStore } from './core/package-store.js';
 import { createValidationCoordinator } from './core/validation.js';
 import { createPreviewBridge } from './preview/bridge.js';
+import { renderEntityInspector } from './ui/inspectors.js';
 
 export function createEditor({
   documentRef = globalThis.document,
@@ -22,10 +23,28 @@ export function createEditor({
     desktop: documentRef.getElementById('preview-desktop'),
     mobile: documentRef.getElementById('preview-mobile')
   };
+  elements.inspector = documentRef.querySelector?.('.editor-inspector') ?? null;
   let packageStore = null;
   let draftStore = null;
   let validation = null;
   let lastSentRevision = -1;
+  let previewTelemetry = null;
+
+  function renderProjectInspector() {
+    if (!draftStore || !elements.inspector) return;
+    elements.inspector.querySelector?.('.tailored-inspector')?.remove();
+    renderEntityInspector({
+      kind: 'project',
+      manifest: draftStore.get('project.json'),
+      telemetry: previewTelemetry,
+      mutate(updater) {
+        draftStore.mutate('project.json', updater);
+        renderDirty();
+      },
+      container: elements.inspector,
+      documentRef
+    });
+  }
 
   const bridge = createPreviewBridge({
     iframe: elements.iframe,
@@ -40,6 +59,9 @@ export function createEditor({
       } else if (event.type === 'editor-preview:runtime-error') {
         elements.previewStatus.textContent = 'Preview runtime error';
         elements.paused.hidden = false;
+      } else if (event.type === 'editor-preview:camera') {
+        previewTelemetry = structuredClone(event.payload);
+        renderProjectInspector();
       }
     }
   });
@@ -96,6 +118,7 @@ export function createEditor({
     draftStore = createDraftStore({ packageStore });
     validation = createValidationCoordinator({ draftStore, onChange: handleValidationChange });
     lastSentRevision = -1;
+    previewTelemetry = null;
     const manifest = draftStore.get('project.json');
     const story = draftStore.get('stories/main.story.json');
     elements.locale.disabled = false;
@@ -103,6 +126,7 @@ export function createEditor({
     elements.validate.disabled = false;
     elements.locale.value = manifest.locale;
     elements.heading.value = story.states[0].content.blocks.find(({ type }) => type === 'heading')?.text ?? '';
+    renderProjectInspector();
     renderDirty();
     return validation.validateNow();
   }
