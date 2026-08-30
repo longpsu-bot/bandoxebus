@@ -106,6 +106,7 @@ export function startEditorPreviewHost({
   let latestRequestedSnapshot = null;
   let disposed = false;
   let replacement = Promise.resolve();
+  let removeCameraListener = null;
 
   function post(type, revision = activeSnapshot?.revision ?? 0, payload = {}, requestId = null) {
     windowRef.parent?.postMessage({
@@ -119,6 +120,8 @@ export function startEditorPreviewHost({
 
   async function replace(snapshot, requestId = null) {
     if (disposed) return;
+    removeCameraListener?.();
+    removeCameraListener = null;
     await activeRuntime?.destroy?.();
     activeRuntime = null;
     activeResolver?.revoke();
@@ -144,6 +147,27 @@ export function startEditorPreviewHost({
       activeResolver = resolver;
       activeRuntime = runtime;
       post('loaded', snapshot.revision, {}, requestId);
+      const map = runtime?.map;
+      const postCamera = () => {
+        const center = map?.getCenter?.();
+        const bounds = map?.getBounds?.();
+        if (!center || !bounds) return;
+        post('camera', snapshot.revision, {
+          center: [center.lng, center.lat],
+          zoom: map.getZoom(),
+          pitch: map.getPitch(),
+          bearing: map.getBearing(),
+          bounds: [
+            [bounds.getSouthWest().lng, bounds.getSouthWest().lat],
+            [bounds.getNorthEast().lng, bounds.getNorthEast().lat]
+          ]
+        });
+      };
+      postCamera();
+      if (typeof map?.on === 'function' && typeof map?.off === 'function') {
+        map.on('moveend', postCamera);
+        removeCameraListener = () => map.off('moveend', postCamera);
+      }
     } catch (error) {
       resolver.revoke();
       post('runtime-error', snapshot.revision, {
@@ -197,6 +221,8 @@ export function startEditorPreviewHost({
     disposed = true;
     windowRef.removeEventListener('message', handleMessage);
     replacement = replacement.then(async () => {
+      removeCameraListener?.();
+      removeCameraListener = null;
       await activeRuntime?.destroy?.();
       activeRuntime = null;
       activeResolver?.revoke();

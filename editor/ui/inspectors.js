@@ -1,4 +1,5 @@
 import { validateGeoJsonResource, validateMetricFile, validateTableData } from '../../src/project/resource-schemas.js';
+import { createEditorDescriptorCatalog, renderSchemaControls } from '../core/descriptors.js';
 
 const PROJECT_FIELDS = Object.freeze([
   ['schemaVersion', 'Schema version', 'text', true],
@@ -75,6 +76,7 @@ function projectInspector({ manifest, telemetry, mutate }) {
   ]));
   return {
     kind: 'project',
+    captureAvailable: telemetry !== null && telemetry !== undefined,
     fields: PROJECT_FIELDS,
     control(path) {
       const result = controls.get(path);
@@ -157,6 +159,7 @@ function attributionEntity({ manifest, id, mutate }) {
             }
           }
         });
+        delete manifest.attribution[id];
         return;
       }
       throw new TypeError(`Unknown attribution command: ${name}`);
@@ -175,6 +178,7 @@ function attributionInspector({ manifest, mutate }) {
       if (name !== 'add') throw new TypeError(`Unknown attribution command: ${name}`);
       if (manifest.attribution[id]) throw new TypeError(`Attribution ID already exists: ${id}`);
       requireMutate(mutate)((draft) => { draft.attribution[id] = clone(value); });
+      manifest.attribution[id] = clone(value);
       return attributionEntity({ manifest, id, mutate });
     }
   };
@@ -208,6 +212,7 @@ function focusInspector({ manifest, telemetry, mutate }) {
       if (name === 'add') {
         if (manifest.focusTargets[id]) throw new TypeError(`Focus target ID already exists: ${id}`);
         requireMutate(mutate)((draft) => { draft.focusTargets[id] = clone(value); });
+        manifest.focusTargets[id] = clone(value);
         return focusEntity({ manifest, id, mutate });
       }
       if (name === 'capture') {
@@ -219,6 +224,7 @@ function focusInspector({ manifest, telemetry, mutate }) {
         if (manifest.focusTargets[id]) throw new TypeError(`Focus target ID already exists: ${id}`);
         const captured = pendingCapture;
         requireMutate(mutate)((draft) => { draft.focusTargets[id] = clone(captured); });
+        manifest.focusTargets[id] = clone(captured);
         pendingCapture = null;
         return clone(captured);
       }
@@ -381,6 +387,7 @@ function datasetInspector({ manifest, resources = {}, mutate, writeResource, rol
       : importNormalizedTable(input.value, { path: `$.datasets.${id}` }).value;
     writeValidatedResource({ id, descriptor, value: imported, resources, writeResource });
     requireMutate(mutate)((draft) => { draft.datasets[id] = descriptor; });
+    manifest.datasets[id] = clone(descriptor);
     return datasetEntity({ manifest, resources, id, mutate, writeResource, roleCatalog });
   }
   return {
@@ -479,6 +486,7 @@ function assetInspector({
           requireMutate(mutate)((draft) => { delete draft.assets[id]; });
           requireMutate(removeResource)(path);
           delete assetBytes[id];
+          delete manifest.assets[id];
           revoke(id);
           return;
         }
@@ -506,6 +514,7 @@ function assetInspector({
       requireMutate(writeBinary)(descriptor.src.slice(2), bytes, { id, kind: 'asset', mediaType: descriptor.mediaType });
       assetBytes[id] = bytes.slice();
       requireMutate(mutate)((draft) => { draft.assets[id] = descriptor; });
+      manifest.assets[id] = clone(descriptor);
       return entity(id);
     },
     dispose() {
@@ -584,9 +593,184 @@ function metricInspector({ manifest, metricsFile, computed = [], mutate, writeRe
       const candidate = clone(current);
       candidate.metrics[id] = clone(descriptor);
       validateMetricFile(candidate);
-      if (!manifest.metrics) requireMutate(mutate)((draft) => { draft.metrics = { src: './data/metrics.json' }; });
+      if (!manifest.metrics) {
+        requireMutate(mutate)((draft) => { draft.metrics = { src: './data/metrics.json' }; });
+        manifest.metrics = { src: './data/metrics.json' };
+      }
       save(candidate);
       return metric(id);
+    }
+  };
+}
+
+const IMPLICIT_CAPABILITIES = new Set(['core-content-v1', 'core-map-v1']);
+
+function defaultSchemaValue(schema) {
+  if (Object.hasOwn(schema, 'const')) return clone(schema.const);
+  if (schema.default !== undefined) return clone(schema.default);
+  if (schema.enum?.length) return clone(schema.enum[0]);
+  if (schema.type === 'object') {
+    return Object.fromEntries(Object.entries(schema.properties ?? {})
+      .filter(([key, child]) => (schema.required ?? []).includes(key) || child.default !== undefined || Object.hasOwn(child, 'const'))
+      .map(([key, child]) => [key, defaultSchemaValue(child)]));
+  }
+  if (schema.type === 'array') return [];
+  if (schema.type === 'boolean') return false;
+  if (schema.type === 'number' || schema.type === 'integer') return schema.minimum ?? 0;
+  return '';
+}
+
+function storyCapabilityImpact(stories, descriptor) {
+  const actionTypes = new Set(descriptor.actions.map(({ type }) => type));
+  const metricIds = new Set(descriptor.metrics.map(({ id }) => id));
+  const impact = [];
+  for (const [storyId, story] of Object.entries(stories ?? {})) {
+    for (const [stateIndex, state] of (story.states ?? []).entries()) {
+      for (const phase of ['enter', 'exit']) {
+        for (const [actionIndex, action] of (state.map?.[phase] ?? []).entries()) {
+          if (actionTypes.has(action.type)) impact.push(`stories.${storyId}.states[${stateIndex}].map.${phase}[${actionIndex}]`);
+        }
+      }
+      for (const [blockIndex, block] of (state.content?.blocks ?? []).entries()) {
+        if (block.type === 'stat-group' && block.items?.some(({ metric }) => metricIds.has(metric))) {
+          impact.push(`stories.${storyId}.states[${stateIndex}].content.blocks[${blockIndex}]`);
+        }
+      }
+    }
+  }
+  return impact;
+}
+
+function capabilityInspector({ manifest, registry, stories = {}, mutate }) {
+  const installed = registry.catalog();
+  const byId = new Map(installed.map((descriptor) => [descriptor.id, descriptor]));
+  const catalog = () => createEditorDescriptorCatalog({ registry, declarations: manifest.capabilities });
+  const declared = (id) => manifest.capabilities.find((item) => item.id === id);
+  function selectedDescriptors() {
+    const ids = new Set([...IMPLICIT_CAPABILITIES, ...manifest.capabilities.map(({ id }) => id)]);
+    return installed.filter(({ id }) => ids.has(id));
+  }
+  function dependencyProblem(id, seen = new Set()) {
+    if (seen.has(id)) return `Dependency cycle includes ${id}.`;
+    seen.add(id);
+    const descriptor = byId.get(id);
+    for (const dependency of descriptor?.requires ?? []) {
+      if (IMPLICIT_CAPABILITIES.has(dependency) || declared(dependency)) continue;
+      const dependencyDescriptor = byId.get(dependency);
+      if (!dependencyDescriptor) return `${id} requires missing installed capability ${dependency}.`;
+      if (dependencyDescriptor.gui?.addable !== true) return `${id} requires ${dependency}, which is not explicitly addable.`;
+      const nested = dependencyProblem(dependency, new Set(seen));
+      if (nested) return nested;
+    }
+    return null;
+  }
+  function additionsFor(id, result = [], seen = new Set()) {
+    if (seen.has(id) || declared(id) || IMPLICIT_CAPABILITIES.has(id)) return result;
+    seen.add(id);
+    const descriptor = byId.get(id);
+    if (!descriptor || descriptor.gui?.addable !== true) {
+      const error = Object.assign(new Error(dependencyProblem(id) ?? `${id} is not explicitly addable.`), {
+        code: 'GUI_CAPABILITY_DEPENDENCY_UNAVAILABLE'
+      });
+      throw error;
+    }
+    for (const dependency of descriptor.requires) additionsFor(dependency, result, seen);
+    result.push({ id, settings: defaultSchemaValue(descriptor.settingsSchema) });
+    return result;
+  }
+  return {
+    kind: 'capability',
+    existingIds: () => manifest.capabilities.map(({ id }) => id),
+    addableIds: () => catalog().addable.map(({ id }) => id),
+    dependencyExplanation: (id) => dependencyProblem(id),
+    settingsControl(id, field) {
+      const declaration = declared(id);
+      const descriptor = byId.get(id);
+      if (!declaration || !descriptor) throw new TypeError(`Unknown declared capability: ${id}`);
+      const result = renderSchemaControls(descriptor.settingsSchema, {
+        value: declaration.settings ?? {},
+        path: '$.settings',
+        onChange(path, value) {
+          const relative = path.replace(/^\$\.settings\.?/, '');
+          requireMutate(mutate)((draft) => {
+            const target = draft.capabilities.find((item) => item.id === id);
+            target.settings ??= {};
+            writePath(target.settings, relative, value);
+            if (!Object.keys(target.settings).length) delete target.settings;
+          });
+        }
+      });
+      if (!result.supported) return result;
+      const control = result.controls.find(({ path }) => path === `$.settings.${field}`);
+      if (!control) throw new TypeError(`Unsupported capability setting: ${field}`);
+      return control;
+    },
+    roles(id) {
+      const descriptor = byId.get(id);
+      if (!descriptor) throw new TypeError(`Unknown capability: ${id}`);
+      return descriptor.datasetRoles.map((role) => ({
+        ...clone(role),
+        compatibleDatasets: Object.entries(manifest.datasets)
+          .filter(([, dataset]) => role.types.includes(dataset.type))
+          .filter(([, dataset]) => !role.geometry?.length || role.geometry.includes(dataset.geometry))
+          .map(([datasetId]) => datasetId)
+      }));
+    },
+    bindRole(id, roleId, datasetId) {
+      const role = this.roles(id).find(({ role }) => role === roleId);
+      if (!role || !role.compatibleDatasets.includes(datasetId)) throw new TypeError(`Dataset ${datasetId} is incompatible with role ${roleId}.`);
+      requireMutate(mutate)((draft) => { draft.datasets[datasetId].role = roleId; });
+    },
+    discovered() {
+      const descriptors = selectedDescriptors();
+      return {
+        actions: descriptors.flatMap(({ actions }) => actions).map(({ type }) => type),
+        targets: descriptors.flatMap(({ targets }) => targets).map(({ id }) => id),
+        metrics: descriptors.flatMap(({ metrics }) => metrics).map(({ id }) => id)
+      };
+    },
+    removeImpact(id) {
+      const descriptor = byId.get(id);
+      if (!declared(id) || !descriptor) throw new TypeError(`Unknown declared capability: ${id}`);
+      return {
+        requiredBy: manifest.capabilities.filter(({ id: otherId }) => byId.get(otherId)?.requires.includes(id)).map(({ id: otherId }) => otherId),
+        boundDatasets: Object.entries(manifest.datasets).filter(([, dataset]) => descriptor.datasetRoles.some(({ role }) => role === dataset.role)).map(([datasetId]) => datasetId),
+        storyReferences: storyCapabilityImpact(stories, descriptor)
+      };
+    },
+    command(name, id) {
+      if (name === 'add') {
+        const problem = dependencyProblem(id);
+        if (problem) throw Object.assign(new Error(problem), { code: 'GUI_CAPABILITY_DEPENDENCY_UNAVAILABLE' });
+        const additions = additionsFor(id);
+        requireMutate(mutate)((draft) => {
+          for (const addition of additions) {
+            const declaration = { id: addition.id };
+            if (Object.keys(addition.settings).length) declaration.settings = addition.settings;
+            draft.capabilities.push(declaration);
+          }
+        });
+        for (const addition of additions) if (!declared(addition.id)) {
+          manifest.capabilities.push({
+            id: addition.id,
+            ...(Object.keys(addition.settings).length ? { settings: clone(addition.settings) } : {})
+          });
+        }
+        return additions.map(({ id: addedId }) => addedId);
+      }
+      if (name === 'confirm-remove') {
+        const descriptor = byId.get(id);
+        requireMutate(mutate)((draft) => {
+          draft.capabilities = draft.capabilities.filter((item) => item.id !== id);
+          const roles = new Set(descriptor.datasetRoles.map(({ role }) => role));
+          for (const dataset of Object.values(draft.datasets)) if (roles.has(dataset.role)) delete dataset.role;
+        });
+        manifest.capabilities = manifest.capabilities.filter((item) => item.id !== id);
+        const roles = new Set(descriptor.datasetRoles.map(({ role }) => role));
+        for (const dataset of Object.values(manifest.datasets)) if (roles.has(dataset.role)) delete dataset.role;
+        return;
+      }
+      throw new TypeError(`Unknown capability command: ${name}`);
     }
   };
 }
@@ -619,6 +803,7 @@ function renderProjectFields(model, { container, documentRef }) {
   const capture = documentRef.createElement('button');
   capture.type = 'button';
   capture.textContent = 'Use current preview view';
+  capture.disabled = !model.captureAvailable;
   const confirm = documentRef.createElement('button');
   confirm.type = 'button';
   confirm.textContent = 'Confirm captured view';
@@ -663,6 +848,7 @@ export function renderEntityInspector(options) {
   else if (kind === 'dataset') model = datasetInspector(options);
   else if (kind === 'asset') model = assetInspector(options);
   else if (kind === 'metric') model = metricInspector(options);
+  else if (kind === 'capability') model = capabilityInspector(options);
   else throw new TypeError(`Unknown inspector kind: ${kind}`);
   if (kind === 'project') renderProjectFields(model, { container, documentRef });
   return model;
