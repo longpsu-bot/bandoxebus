@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.2",
+  "id": "main",
+  "title": "Story 1.2 blank",
+  "states": [
+    {
+      "id": "opening",
+      "content": {
+        "layout": "freeform-16x9",
+        "blocks": []
+      },
+      "map": {
+        "camera": {
+          "center": [0, 0],
+          "zoom": 2,
+          "pitch": 0,
+          "bearing": 0
+        },
+        "interaction": "locked",
+        "transition": {
+          "type": "ease",
+          "durationMs": 900
+        },
+        "layerVisibility": {},
+        "enter": [],
+        "exit": []
+      }
+    }
+  ]
+}
