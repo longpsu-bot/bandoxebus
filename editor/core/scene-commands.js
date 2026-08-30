@@ -29,12 +29,14 @@ function sceneAt(story, index) {
 
 function normalizeLongitude(value) {
   if (!Number.isFinite(value)) throw new TypeError('Camera longitude must be finite.');
+  if (value >= -180 && value < 180) return value;
   const wrapped = ((value + 180) % 360 + 360) % 360 - 180;
   return Object.is(wrapped, -0) ? 0 : wrapped;
 }
 
 function normalizeBearing(value) {
   if (!Number.isFinite(value)) throw new TypeError('Camera bearing must be finite.');
+  if (value >= -180 && value < 180) return value;
   const wrapped = ((value + 180) % 360 + 360) % 360 - 180;
   return Object.is(wrapped, -0) ? 0 : wrapped;
 }
