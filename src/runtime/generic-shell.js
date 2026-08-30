@@ -1,4 +1,4 @@
-export function createGenericStoryExperience({ runtime } = {}) {
+export function createGenericStoryExperience({ runtime, sceneController, authoringPolicy } = {}) {
   if (!runtime?.activate || !runtime?.goTo || !runtime?.deactivate) {
     throw new TypeError('Generic Story experience requires the production Story runtime.');
   }
@@ -8,8 +8,23 @@ export function createGenericStoryExperience({ runtime } = {}) {
     return runtime.activate(0);
   }
 
-  function activateScene(index) {
-    return runtime.active ? runtime.goTo(index) : runtime.activate(index);
+  function activateScene(index, { animate = true } = {}) {
+    const state = runtime.active ? runtime.goTo(index) : runtime.activate(index);
+    if (!animate) sceneController?.apply?.(state, { animate: false });
+    return state;
+  }
+
+  function setAuthoringMode(mode) {
+    if (!['select', 'map'].includes(mode)) throw new TypeError(`Unsupported authoring mode: ${mode}.`);
+    authoringPolicy?.apply?.(mode === 'select' ? 'locked' : 'explore');
+    return mode;
+  }
+
+  function restoreSceneCamera(index = runtime.currentIndex) {
+    const state = runtime.definition.states[index];
+    if (!state) throw new RangeError(`Unknown Scene index: ${index}.`);
+    sceneController?.apply?.(state, { animate: false });
+    return state;
   }
 
   function exit() {
@@ -20,13 +35,25 @@ export function createGenericStoryExperience({ runtime } = {}) {
   return Object.freeze({
     enter,
     activateScene,
+    setAuthoringMode,
+    restoreSceneCamera,
     exit,
     destroy: exit
   });
 }
 
-export function bindGenericStoryExperience({ runtime, map, documentRef = document } = {}) {
-  const experience = createGenericStoryExperience({ runtime });
+export function bindGenericStoryExperience({ runtime, map, sceneController, documentRef = document } = {}) {
+  const authoringPolicy = {
+    apply(mode) {
+      const enabled = mode === 'explore';
+      for (const name of ['scrollZoom', 'dragPan', 'dragRotate', 'touchZoomRotate', 'boxZoom', 'doubleClickZoom', 'keyboard']) {
+        const handler = map?.[name];
+        if (enabled) handler?.enable?.();
+        else handler?.disable?.();
+      }
+    }
+  };
+  const experience = createGenericStoryExperience({ runtime, sceneController, authoringPolicy });
   const status = documentRef.getElementById?.('runtime-status');
   let started = false;
 

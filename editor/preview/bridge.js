@@ -87,11 +87,18 @@ export function validatePreviewSnapshot(snapshot) {
 
 function validCommandPayload(payload) {
   if (!hasExactKeys(payload, ['name', 'payload']) || !isRecord(payload.payload)) return false;
-  if (!['enter-story', 'explore', 'restart', 'viewport'].includes(payload.name)) return false;
-  if (payload.name !== 'viewport') return hasExactKeys(payload.payload, []);
-  return hasExactKeys(payload.payload, ['preset', 'reducedMotion'])
+  if (['enter-story', 'explore', 'restart'].includes(payload.name)) return hasExactKeys(payload.payload, []);
+  if (payload.name === 'viewport') return hasExactKeys(payload.payload, ['preset', 'reducedMotion'])
     && ['desktop', 'mobile'].includes(payload.payload.preset)
     && typeof payload.payload.reducedMotion === 'boolean';
+  if (payload.name === 'activate-scene') return hasExactKeys(payload.payload, ['index', 'animate'])
+    && Number.isInteger(payload.payload.index) && payload.payload.index >= 0
+    && payload.payload.animate === false;
+  if (payload.name === 'authoring-mode') return hasExactKeys(payload.payload, ['mode'])
+    && ['select', 'map'].includes(payload.payload.mode);
+  if (payload.name === 'restore-scene-camera') return hasExactKeys(payload.payload, ['index'])
+    && Number.isInteger(payload.payload.index) && payload.payload.index >= 0;
+  return false;
 }
 
 function envelope(type, revision, requestId, payload = {}) {
@@ -185,9 +192,6 @@ export function createPreviewBridge({
   }
 
   function command(name, payload = {}) {
-    if (!['enter-story', 'explore', 'restart', 'viewport'].includes(name)) {
-      throw new TypeError(`Unsupported preview command: ${name}`);
-    }
     const commandPayload = { name, payload };
     if (!validCommandPayload(commandPayload)) throw new TypeError(`Invalid preview command payload: ${name}`);
     post(envelope('editor-preview:command', currentRevision, `request-${++requestNumber}`, commandPayload));

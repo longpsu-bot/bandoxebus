@@ -121,12 +121,18 @@ function validIncomingEnvelope(data, type) {
 
 function validCommand(data) {
   if (!validIncomingEnvelope(data, 'editor-preview:command')
-    || !exactKeys(data.payload, ['name', 'payload'])
-    || !exactKeys(data.payload.payload, data.payload.name === 'viewport' ? ['preset', 'reducedMotion'] : [])) return false;
-  if (!['enter-story', 'explore', 'restart', 'viewport'].includes(data.payload.name)) return false;
-  return data.payload.name !== 'viewport'
-    || (['desktop', 'mobile'].includes(data.payload.payload.preset)
-      && typeof data.payload.payload.reducedMotion === 'boolean');
+    || !exactKeys(data.payload, ['name', 'payload'])) return false;
+  const { name, payload } = data.payload;
+  if (['enter-story', 'explore', 'restart'].includes(name)) return exactKeys(payload, []);
+  if (name === 'viewport') return exactKeys(payload, ['preset', 'reducedMotion'])
+    && ['desktop', 'mobile'].includes(payload.preset)
+    && typeof payload.reducedMotion === 'boolean';
+  if (name === 'activate-scene') return exactKeys(payload, ['index', 'animate'])
+    && Number.isInteger(payload.index) && payload.index >= 0 && payload.animate === false;
+  if (name === 'authoring-mode') return exactKeys(payload, ['mode']) && ['select', 'map'].includes(payload.mode);
+  if (name === 'restore-scene-camera') return exactKeys(payload, ['index'])
+    && Number.isInteger(payload.index) && payload.index >= 0;
+  return false;
 }
 
 function waitForProductionSurface(runtime) {
@@ -227,18 +233,21 @@ export function startEditorPreviewHost({
   }
 
   function handleCommand(data) {
-    const { name } = data.payload ?? {};
+    const { name, payload } = data.payload ?? {};
     if (name === 'enter-story') windowRef.document.getElementById('presentation-open')?.click();
     else if (name === 'explore') windowRef.document.getElementById('story-explore')?.click();
     else if (name === 'restart' && latestRequestedSnapshot) {
       void start(latestRequestedSnapshot, data.requestId).catch(() => {});
     }
     else if (name === 'viewport') {
-      const viewport = data.payload.payload;
+      const viewport = payload;
       const root = windowRef.document?.documentElement;
       if (root?.dataset) root.dataset.reducedMotion = String(viewport.reducedMotion);
       post('state', activeSnapshot?.revision ?? 0, { viewport }, data.requestId);
     }
+    else if (name === 'activate-scene') activeRuntime?.shell?.activateScene?.(payload.index, { animate: payload.animate });
+    else if (name === 'authoring-mode') activeRuntime?.shell?.setAuthoringMode?.(payload.mode);
+    else if (name === 'restore-scene-camera') activeRuntime?.shell?.restoreSceneCamera?.(payload.index);
   }
 
   function handleMessage(event) {
