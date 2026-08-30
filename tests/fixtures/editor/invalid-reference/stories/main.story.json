@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.1",
+  "id": "main",
+  "title": "Invalid reference",
+  "states": [
+    {
+      "id": "opening",
+      "content": {
+        "layout": "hero",
+        "blocks": [
+          { "type": "heading", "text": "Repair the missing focus target" }
+        ]
+      },
+      "map": {
+        "enter": [
+          { "type": "map.focus", "target": "overview" }
+        ],
+        "exit": []
+      }
+    }
+  ]
+}
