@@ -4,6 +4,10 @@ import { createContentRendererRegistry } from '../content/content-renderers.js';
 import { createChartRenderer } from '../content/chart-renderer.js';
 import { createLocaleFormatter } from '../metrics/locale-formatter.js';
 import { createMetricRegistry } from '../metrics/metric-registry.js';
+import { createSceneCompositor } from '../scene/scene-compositor.js';
+import { createSceneInteractionPolicy } from '../scene/scene-interaction-policy.js';
+import { createSceneLayerRegistry } from '../scene/scene-layer-registry.js';
+import { createSceneStateController } from '../scene/scene-state-controller.js';
 
 export function createProjectContentRenderer(project, {
   documentRef = document,
@@ -76,6 +80,30 @@ function teardown(instances, map) {
   map?.remove?.();
 }
 
+function createStory12SceneController(context, { project, map, instances, contentRenderer, documentRef }) {
+  if (project.story.schemaVersion !== '1.2') return null;
+  const root = context.sceneRoot ?? documentRef?.getElementById?.('scene-compositor');
+  if (!root) throw new TypeError('Story 1.2 requires a #scene-compositor production root.');
+  if (!contentRenderer) throw new TypeError('Story 1.2 requires the production content renderer.');
+  const expectedLayerIds = Object.keys(project.story.states[0]?.map?.layerVisibility ?? {});
+  const layerRegistry = createSceneLayerRegistry(instances, expectedLayerIds);
+  const compositor = createSceneCompositor({
+    root,
+    documentRef,
+    renderBlock: (block) => contentRenderer.renderBlock(block)
+  });
+  const interactionPolicy = createSceneInteractionPolicy(map, {
+    cooperativeScroll: context.cooperativeScroll ?? false
+  });
+  return createSceneStateController({
+    map,
+    layerRegistry,
+    interactionPolicy,
+    compositor,
+    reducedMotion: context.reducedMotion ?? false
+  });
+}
+
 export async function bootstrapProject(context) {
   const { project } = context;
   if (!project?.story || !project?.capabilities?.ordered) {
@@ -93,16 +121,33 @@ export async function bootstrapProject(context) {
       instances.push(Object.freeze({ entry, implementation }));
     }
     const actionRunner = createStoryActionRunner(mergeHandlers(instances));
-    const storyRuntime = createStoryRuntime({ definition: project.story, actionRunner });
     const metrics = await createRuntimeMetricRegistry(project, instances);
     const contentRenderer = documentRef && (context.Chart ?? globalThis.Chart)
       ? createProjectContentRenderer(project, { documentRef, Chart: context.Chart ?? globalThis.Chart, reducedMotion: context.reducedMotion, metrics })
       : null;
+    const sceneController = createStory12SceneController(context, {
+      project,
+      map,
+      instances,
+      contentRenderer,
+      documentRef
+    });
+    const storyRuntime = createStoryRuntime({
+      definition: project.story,
+      actionRunner,
+      ...(sceneController ? {
+        lifecycle: {
+          beforeEnter: sceneController.beforeEnter,
+          afterExit: sceneController.afterExit
+        }
+      } : {})
+    });
     const shell = await context.bindStoryExperience?.({
       ...context,
       map,
       project,
       runtime: storyRuntime,
+      sceneController,
       contentRenderer,
       metrics,
       instances: Object.freeze(instances)
@@ -111,6 +156,7 @@ export async function bootstrapProject(context) {
       map,
       project,
       storyRuntime,
+      sceneController,
       shell,
       contentRenderer,
       metrics,
