@@ -17,6 +17,23 @@ function story() {
   };
 }
 
+function story12() {
+  return {
+    schemaVersion: '1.2', id: 'main', title: 'Main',
+    states: [{
+      id: 'opening',
+      content: { layout: 'freeform-16x9', blocks: [] },
+      map: {
+        camera: { center: [106.63, 11.06], zoom: 12, pitch: 35, bearing: -10 },
+        interaction: 'locked',
+        transition: { type: 'instant', durationMs: 0 },
+        layerVisibility: {},
+        enter: [], exit: []
+      }
+    }]
+  };
+}
+
 function entry(id, events, handlers = {}) {
   return {
     descriptor: { id },
@@ -28,6 +45,23 @@ function entry(id, events, handlers = {}) {
         destroy() { events.push(`destroy:${id}`); }
       };
     }
+  };
+}
+
+class Element {
+  constructor(tagName) { this.tagName = tagName; this.children = []; this.attributes = {}; this.style = {}; this.dataset = {}; this.className = ''; }
+  append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.children = [...children]; }
+  setAttribute(key, value) { this.attributes[key] = String(value); }
+}
+
+function sceneDocument(sceneRoot) {
+  return {
+    documentElement: {},
+    title: '',
+    body: { prepend() {} },
+    createElement: (tag) => new Element(tag),
+    getElementById(id) { return id === 'scene-compositor' ? sceneRoot : null; }
   };
 }
 
@@ -87,6 +121,36 @@ test('bootstrap binds the selected Story experience around the same runtime and 
   assert.equal(received.runtime, app.storyRuntime);
   assert.equal(received.project, project);
   app.destroy();
+});
+
+test('Story 1.2 bootstrap wires the shared Scene controller into the existing runtime', async () => {
+  const sceneRoot = new Element('section');
+  const cameraCalls = [];
+  const map = {
+    jumpTo(options) { cameraCalls.push(['jumpTo', options]); },
+    stop() { cameraCalls.push(['stop']); },
+    remove() { cameraCalls.push(['remove']); }
+  };
+  const project = {
+    locale: 'en-US',
+    map: { initialView: { center: [0, 0], zoom: 1, pitch: 0, bearing: 0 } },
+    story: story12(),
+    resources: new Map(), tables: new Map(), attribution: {},
+    capabilities: { ordered: [], settings: {} }
+  };
+  const documentRef = sceneDocument(sceneRoot);
+  const app = await bootstrapProject({
+    project,
+    documentRef,
+    Chart: function Chart() {},
+    createMap: () => map
+  });
+  assert.ok(app.sceneController);
+  app.storyRuntime.activate();
+  assert.equal(sceneRoot.dataset.sceneId, 'opening');
+  assert.equal(cameraCalls[0][0], 'jumpTo');
+  app.destroy();
+  assert.deepEqual(cameraCalls.map(([type]) => type), ['jumpTo', 'stop', 'remove']);
 });
 
 test('fatal error text is assigned as text and never parsed as HTML', () => {
