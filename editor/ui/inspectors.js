@@ -1,3 +1,5 @@
+import { validateGeoJsonResource, validateTableData } from '../../src/project/resource-schemas.js';
+
 const PROJECT_FIELDS = Object.freeze([
   ['schemaVersion', 'Schema version', 'text', true],
   ['id', 'Project ID', 'text', true],
@@ -226,6 +228,175 @@ function focusInspector({ manifest, telemetry, mutate }) {
   };
 }
 
+const RENDER_KEYS = Object.freeze({
+  line: ['type', 'color', 'width', 'opacity', 'lineStyle', 'label'],
+  point: ['type', 'color', 'radius', 'strokeColor', 'strokeWidth', 'label'],
+  polygon: ['type', 'color', 'opacity', 'outlineColor', 'outlineWidth', 'label'],
+  mixed: []
+});
+
+function observedTopLevelProperties(collection) {
+  const fields = new Set();
+  for (const feature of collection.features) {
+    for (const [field, value] of Object.entries(feature.properties ?? {})) {
+      if (value !== null && ['string', 'number', 'boolean'].includes(typeof value)) fields.add(field);
+    }
+  }
+  return [...fields].sort();
+}
+
+export function importGeoJson(value, descriptor) {
+  validateGeoJsonResource(value, descriptor, { path: descriptor.path ?? '$' });
+  return {
+    value: clone(value),
+    observedFields: observedTopLevelProperties(value),
+    allowedRenderKeys: [...RENDER_KEYS[descriptor.geometry]]
+  };
+}
+
+export function importNormalizedTable(value, { path = '$' } = {}) {
+  validateTableData(value, { path });
+  const copied = clone(value);
+  return { value: copied, columns: clone(copied.columns) };
+}
+
+function assertStableId(id, label) {
+  if (!/^[a-z][a-z0-9-]*$/.test(id)) throw new TypeError(`${label} ID must be a stable lowercase ID.`);
+}
+
+function compatibleRoles(roleCatalog, descriptor) {
+  return roleCatalog
+    .filter((role) => role.types?.includes(descriptor.type))
+    .filter((role) => !role.geometry?.length || role.geometry.includes(descriptor.geometry))
+    .map(({ role }) => role);
+}
+
+function tableInputValue(value, type) {
+  if (value === '' || value === null || value === undefined) return null;
+  if (type === 'integer' || type === 'number') return Number(value);
+  return value;
+}
+
+function datasetControl({ manifest, id, path, mutate, allowedRenderKeys }) {
+  const fullPath = path.startsWith('render.') ? path : path;
+  const renderKey = path.startsWith('render.') ? path.slice('render.'.length).split('.')[0] : null;
+  if (renderKey && !allowedRenderKeys.includes(renderKey)) return null;
+  return fieldControl({
+    path,
+    inputType: ['width', 'opacity', 'radius', 'strokeWidth', 'outlineWidth', 'minZoom'].some((field) => path.endsWith(field)) ? 'number' : 'text',
+    readOnly: path === 'id' || path === 'src' || path === 'type' || path === 'geometry',
+    read: () => path === 'id' ? id : readPath(manifest.datasets[id], fullPath),
+    write(value) {
+      requireMutate(mutate)((draft) => writePath(draft.datasets[id], fullPath, value));
+    }
+  });
+}
+
+function writeValidatedResource({ id, descriptor, value, resources, writeResource }) {
+  const path = descriptor.src.replace(/^\.\//, '');
+  const mediaType = descriptor.type === 'geojson' ? 'application/geo+json' : 'application/json';
+  requireMutate(writeResource)(path, clone(value), { id, kind: 'dataset', mediaType });
+  if (resources && typeof resources === 'object') resources[id] = clone(value);
+}
+
+function datasetEntity({ manifest, resources, id, mutate, writeResource, roleCatalog }) {
+  const descriptor = manifest.datasets[id];
+  const geometry = descriptor.geometry ?? 'mixed';
+  const allowedRenderKeys = descriptor.type === 'geojson' ? RENDER_KEYS[geometry] : [];
+  const resource = () => resources?.[id];
+  function saveResource(candidate) {
+    if (descriptor.type === 'geojson') validateGeoJsonResource(candidate, descriptor, { path: `$.datasets.${id}` });
+    else validateTableData(candidate, { path: `$.datasets.${id}` });
+    writeValidatedResource({ id, descriptor, value: candidate, resources, writeResource });
+  }
+  return {
+    control(path) {
+      const control = datasetControl({ manifest, id, path, mutate, allowedRenderKeys });
+      if (!control) throw new TypeError(`Unsupported dataset control: ${path}`);
+      return control;
+    },
+    hasControl(path) {
+      if (['csv', 'formula', 'join', 'pivot', 'geometry', 'defaultVisibility'].includes(path)) return false;
+      if (path.startsWith('render.')) return allowedRenderKeys.includes(path.slice(7).split('.')[0]);
+      return ['id', 'type', 'src', 'label', 'required', 'role'].includes(path);
+    },
+    labelFields: () => descriptor.type === 'geojson' ? observedTopLevelProperties(resource()) : [],
+    labelPlacements: () => geometry === 'mixed' ? ['auto'] : ['auto', geometry === 'polygon' ? 'centroid' : geometry],
+    roleOptions: () => compatibleRoles(roleCatalog, descriptor),
+    column(columnId) {
+      const column = resource()?.columns?.find(({ id: candidate }) => candidate === columnId);
+      if (!column) throw new TypeError(`Unknown table column: ${columnId}`);
+      return {
+        control(path) {
+          if (!['id', 'label', 'type', 'unit'].includes(path)) throw new TypeError(`Unknown column control: ${path}`);
+          return fieldControl({
+            path,
+            readOnly: path === 'id',
+            read: () => column[path],
+            write(value) {
+              const candidate = clone(resource());
+              writePath(candidate.columns.find(({ id: candidateId }) => candidateId === columnId), path, value);
+              saveResource(candidate);
+            }
+          });
+        }
+      };
+    },
+    command(name, value) {
+      if (name === 'replace') {
+        const imported = descriptor.type === 'geojson'
+          ? importGeoJson(value, { ...descriptor, path: `$.datasets.${id}` }).value
+          : importNormalizedTable(value, { path: `$.datasets.${id}` }).value;
+        saveResource(imported);
+        return imported;
+      }
+      if (descriptor.type !== 'table-json') throw new TypeError(`Unknown dataset command: ${name}`);
+      const candidate = clone(resource());
+      if (name === 'add-row') {
+        const row = Object.fromEntries(candidate.columns.map((column) => [column.id, tableInputValue(value[column.id], column.type)]));
+        candidate.rows.push(row);
+      } else if (name === 'edit-cell') {
+        const column = candidate.columns.find(({ id: columnId }) => columnId === value.column);
+        if (!column || !candidate.rows[value.row]) throw new TypeError('Unknown table cell.');
+        candidate.rows[value.row][value.column] = tableInputValue(value.value, column.type);
+      } else if (name === 'remove-row') {
+        candidate.rows.splice(value, 1);
+      } else throw new TypeError(`Unknown dataset command: ${name}`);
+      saveResource(candidate);
+      return candidate;
+    }
+  };
+}
+
+function datasetInspector({ manifest, resources = {}, mutate, writeResource, roleCatalog = [] }) {
+  function add(id, input, type) {
+    assertStableId(id, 'Dataset');
+    if (manifest.datasets[id]) throw new TypeError(`Dataset ID already exists: ${id}`);
+    const src = type === 'geojson' ? `./data/${id}.geojson` : `./data/${id}.json`;
+    const descriptor = type === 'geojson'
+      ? { type, geometry: input.geometry, src, label: input.label }
+      : { type, src, label: input.label };
+    const imported = type === 'geojson'
+      ? importGeoJson(input.value, { ...descriptor, path: `$.datasets.${id}` }).value
+      : importNormalizedTable(input.value, { path: `$.datasets.${id}` }).value;
+    writeValidatedResource({ id, descriptor, value: imported, resources, writeResource });
+    requireMutate(mutate)((draft) => { draft.datasets[id] = descriptor; });
+    return datasetEntity({ manifest, resources, id, mutate, writeResource, roleCatalog });
+  }
+  return {
+    kind: 'dataset',
+    entity(id) {
+      if (!manifest.datasets[id]) throw new TypeError(`Unknown dataset ID: ${id}`);
+      return datasetEntity({ manifest, resources, id, mutate, writeResource, roleCatalog });
+    },
+    command(name, id, input) {
+      if (name === 'add-geojson') return add(id, input, 'geojson');
+      if (name === 'add-table') return add(id, input, 'table-json');
+      throw new TypeError(`Unknown dataset command: ${name}`);
+    }
+  };
+}
+
 function renderProjectFields(model, { container, documentRef }) {
   if (!container || !documentRef?.createElement) return;
   const section = documentRef.createElement('section');
@@ -295,6 +466,7 @@ export function renderEntityInspector(options) {
   if (kind === 'project') model = projectInspector(options);
   else if (kind === 'attribution') model = attributionInspector(options);
   else if (kind === 'focus') model = focusInspector(options);
+  else if (kind === 'dataset') model = datasetInspector(options);
   else throw new TypeError(`Unknown inspector kind: ${kind}`);
   if (kind === 'project') renderProjectFields(model, { container, documentRef });
   return model;

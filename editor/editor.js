@@ -30,17 +30,38 @@ export function createEditor({
   let lastSentRevision = -1;
   let previewTelemetry = null;
 
-  function renderProjectInspector() {
-    if (!draftStore || !elements.inspector) return;
-    elements.inspector.querySelector?.('.tailored-inspector')?.remove();
-    renderEntityInspector({
-      kind: 'project',
-      manifest: draftStore.get('project.json'),
+  function inspect(kind, options = {}) {
+    if (!draftStore || !packageStore) throw new TypeError('Create or open a project before authoring.');
+    const manifest = draftStore.get('project.json');
+    const resources = Object.fromEntries(Object.entries(manifest.datasets ?? {}).map(([id, descriptor]) => [
+      id,
+      draftStore.get(descriptor.src.replace(/^\.\//, ''))
+    ]));
+    return renderEntityInspector({
+      kind,
+      manifest,
       telemetry: previewTelemetry,
+      resources,
       mutate(updater) {
         draftStore.mutate('project.json', updater);
         renderDirty();
       },
+      writeResource(path, value, descriptor) {
+        const bytes = new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
+        const entry = packageStore.get(path);
+        if (entry) packageStore.setCurrentBytes(path, bytes);
+        else packageStore.setManaged(path, { ...descriptor, bytes, managed: true });
+        validation?.schedule();
+        renderDirty();
+      },
+      ...options
+    });
+  }
+
+  function renderProjectInspector() {
+    if (!draftStore || !elements.inspector) return;
+    elements.inspector.querySelector?.('.tailored-inspector')?.remove();
+    inspect('project', {
       container: elements.inspector,
       documentRef
     });
@@ -162,7 +183,7 @@ export function createEditor({
     bridge.dispose();
   }
 
-  return { newProject, setViewport, dispose };
+  return { newProject, setViewport, inspect, dispose };
 }
 
 createEditor();
