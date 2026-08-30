@@ -31,7 +31,7 @@
     <nav class="editor-navigation" aria-label="Project navigation">
       <h2>Project</h2>
       <button type="button" class="navigation-item is-current" aria-current="page">Overview</button>
-      <p>PR A provides the package and preview spine. Full navigation arrives in PR B.</p>
+      <p>Open or create a production project to begin.</p>
     </nav>
 
     <main class="editor-preview" aria-label="Production preview workspace">
@@ -45,16 +45,19 @@
           title="Production project preview"
           sandbox="allow-scripts allow-same-origin"
           src="about:blank"
-          data-preview-src="../?editorPreview=1"></iframe>
+          data-preview-src="../?editorPreview=1"
+          data-preview-src-legacy="../?editorPreview=1"
+          data-preview-src-story12="../src/runtime/?editorPreview=1"></iframe>
         <div id="preview-paused" class="preview-paused" hidden>Preview paused at the last valid revision.</div>
       </div>
+      <section id="studio-scenes" class="studio-scenes" aria-label="Scenes" hidden></section>
     </main>
 
     <aside class="editor-inspector" aria-labelledby="inspector-heading">
       <h2 id="inspector-heading">Inspector</h2>
       <label for="story-heading">Story heading</label>
       <input id="story-heading" type="text" required aria-describedby="story-heading-help" aria-errormessage="validation-status" disabled>
-      <p id="story-heading-help">Updates real Story 1.1 authored data.</p>
+      <p id="story-heading-help">Updates structured Story 1.0/1.1 authored data.</p>
       <label for="project-locale">Project locale</label>
       <input id="project-locale" type="text" required aria-describedby="project-locale-help" aria-errormessage="validation-status" disabled>
       <p id="project-locale-help">Uses the locked production locale contract. Empty locale is invalid.</p>
