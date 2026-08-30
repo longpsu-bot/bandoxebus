@@ -14,6 +14,11 @@ const catalogs = {
   metrics: [{ id: 'demand', format: { type: 'integer' } }],
   assets: [{ id: 'photo' }],
   targets: [{ id: 'service-area' }, { id: 'overview' }],
+  actionTargets: {
+    'map.focus': [{ id: 'service-area' }, { id: 'overview' }],
+    'map.set-visibility': [{ id: 'service-area' }],
+    'map.set-emphasis': [{ id: 'service-area' }]
+  },
   tables: [{ id: 'demand-table', columns: [
     { id: 'name', type: 'text' }, { id: 'year', type: 'integer' }, { id: 'value', type: 'number' }
   ] }],
@@ -50,6 +55,8 @@ test('canonical action objects come directly from production descriptors and sem
 });
 
 test('content factory creates the smallest production object for every composed block descriptor', () => {
+  const { ui } = harness();
+  assert.deepEqual(ui.contentTypes(), CONTENT_BLOCK_DESCRIPTORS.map(({ type }) => type));
   const blocks = Object.fromEntries(CONTENT_BLOCK_DESCRIPTORS.map(({ type }) => [
     type, createContentBlock(type, { descriptors: CONTENT_BLOCK_DESCRIPTORS, ...catalogs })
   ]));
@@ -136,10 +143,12 @@ test('Enter and Exit canonical actions retain order and include common and capab
   assert.equal(ui.actionTypes().includes('route.set-mode'), true);
   ui.command('add-action', { stateIndex: 0, phase: 'enter', type: 'map.focus', values: { target: 'overview' } });
   ui.command('add-action', { stateIndex: 0, phase: 'enter', type: 'map.set-visibility', values: { target: 'service-area', visible: true } });
+  ui.command('edit-action', { stateIndex: 0, phase: 'enter', actionIndex: 1, path: 'visible', value: false });
   ui.command('duplicate-action', { stateIndex: 0, phase: 'enter', actionIndex: 0 });
   ui.command('move-action', { stateIndex: 0, phase: 'enter', from: 2, to: 1 });
   ui.command('add-action', { stateIndex: 0, phase: 'exit', type: 'map.clear-emphasis' });
   assert.deepEqual(current().states[0].map.enter.map(({ type }) => type), ['map.focus', 'map.set-visibility', 'map.focus']);
+  assert.equal(current().states[0].map.enter[1].visible, false);
   assert.deepEqual(current().states[0].map.exit, [{ type: 'map.clear-emphasis' }]);
   ui.command('delete-action', { stateIndex: 0, phase: 'enter', actionIndex: 1 });
   assert.equal(current().states[0].map.enter.length, 2);
@@ -150,8 +159,40 @@ test('action controls expose semantic targets without raw MapLibre IDs', () => {
   const controls = ui.actionControls('map.set-visibility', { target: 'service-area', visible: true });
   assert.equal(controls.supported, true);
   const target = controls.controls.find(({ path }) => path.endsWith('.target'));
-  assert.deepEqual(target.options.map(({ value }) => value), ['service-area', 'overview']);
+  assert.deepEqual(target.options.map(({ value }) => value), ['service-area']);
   assert.equal(target.options.some(({ value }) => value.includes('layer-') || value.includes('source-')), false);
+  assert.equal(ui.actionControls('map.clear-emphasis').controls.some(({ path }) => path.endsWith('.target')), false);
+});
+
+test('trusted capability actions use descriptor catalogs and reject unsafe free-form target schemas', () => {
+  const trusted = {
+    type: 'fixture.show', label: 'Show fixture', parameters: {
+      type: 'object', additionalProperties: false, required: ['type', 'target'],
+      properties: {
+        type: { const: 'fixture.show' },
+        target: { type: 'string', gui: { optionsFrom: 'capabilityTargets' } }
+      }
+    }
+  };
+  const unsafe = {
+    type: 'fixture.unsafe', label: 'Unsafe fixture', parameters: {
+      type: 'object', additionalProperties: false, required: ['type', 'target'],
+      properties: { type: { const: 'fixture.unsafe' }, target: { type: 'string' } }
+    }
+  };
+  const ui = createContentActionEditor({
+    story: story(), contentDescriptors: CONTENT_BLOCK_DESCRIPTORS,
+    actionDescriptors: [...CORE_MAP_V1_DESCRIPTOR.actions, trusted, unsafe],
+    catalogs: { ...catalogs, capabilityTargets: [{ id: 'fixture-area', label: 'Fixture area' }] },
+    save() {}
+  });
+
+  assert.equal(ui.actionTypes().includes('fixture.show'), true);
+  assert.deepEqual(
+    ui.actionControls('fixture.show').controls.find(({ path }) => path.endsWith('.target')).options,
+    [{ value: 'fixture-area', label: 'Fixture area' }]
+  );
+  assert.equal(ui.actionControls('fixture.unsafe').code, 'GUI_SCHEMA_UNSUPPORTED');
 });
 
 test('unsupported descriptor shapes return stable GUI diagnostics', () => {

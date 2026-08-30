@@ -8,6 +8,14 @@ function clone(value) {
   return structuredClone(value);
 }
 
+function setPath(target, path, value) {
+  const parts = path.split('.');
+  const field = parts.pop();
+  const parent = parts.reduce((current, part) => current[part], target);
+  if (value === undefined) delete parent[field];
+  else parent[field] = clone(value);
+}
+
 export function createStory11({ id, title }) {
   return {
     schemaVersion: '1.1',
@@ -147,6 +155,13 @@ export function createStoryEditor({
             throw new TypeError(`${options.block.type} is a Story 1.1-only block.`);
           }
           return updateState(options.stateIndex, (content) => { content.blocks.push(clone(options.block)); });
+        }
+        if (name === 'edit-block') {
+          return updateState(options.stateIndex, (content) => {
+            const block = content.blocks[options.blockIndex];
+            if (!block) throw new TypeError(`Unknown content block index: ${options.blockIndex}`);
+            setPath(block, options.path, options.value);
+          });
         }
         throw new TypeError(`Unknown Story command: ${name}`);
       }

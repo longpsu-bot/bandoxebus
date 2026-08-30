@@ -683,11 +683,24 @@ function capabilityInspector({ manifest, registry, stories = {}, mutate }) {
     existingIds: () => manifest.capabilities.map(({ id }) => id),
     addableIds: () => catalog().addable.map(({ id }) => id),
     dependencyExplanation: (id) => dependencyProblem(id),
-    settingsControl(id, field) {
+    details(id) {
+      const descriptor = byId.get(id);
+      if (!declared(id) || !descriptor) throw new TypeError(`Unknown declared capability: ${id}`);
+      return {
+        id: descriptor.id,
+        label: descriptor.label,
+        description: descriptor.description,
+        requires: [...descriptor.requires],
+        actions: descriptor.actions.map(({ type }) => type),
+        targets: descriptor.targets.map(({ id: targetId }) => targetId),
+        metrics: descriptor.metrics.map(({ id: metricId }) => metricId)
+      };
+    },
+    settingsControls(id) {
       const declaration = declared(id);
       const descriptor = byId.get(id);
       if (!declaration || !descriptor) throw new TypeError(`Unknown declared capability: ${id}`);
-      const result = renderSchemaControls(descriptor.settingsSchema, {
+      return renderSchemaControls(descriptor.settingsSchema, {
         value: declaration.settings ?? {},
         path: '$.settings',
         onChange(path, value) {
@@ -700,6 +713,9 @@ function capabilityInspector({ manifest, registry, stories = {}, mutate }) {
           });
         }
       });
+    },
+    settingsControl(id, field) {
+      const result = this.settingsControls(id);
       if (!result.supported) return result;
       const control = result.controls.find(({ path }) => path === `$.settings.${field}`);
       if (!control) throw new TypeError(`Unsupported capability setting: ${field}`);

@@ -134,5 +134,7 @@ test('Story 1.0 refuses 1.1-only blocks and preserves all legacy actions during 
     /Story 1\.1-only block/i
   );
   legacy.command('set-presenter-note', { stateIndex: 0, note: 'Legacy note' });
+  legacy.command('edit-block', { stateIndex: 0, blockIndex: 0, path: 'text', value: 'Edited legacy heading' });
+  assert.equal(draft.stories.legacy.states[0].content.blocks[0].text, 'Edited legacy heading');
   assert.deepEqual(draft.stories.legacy.states[0].map, before);
 });

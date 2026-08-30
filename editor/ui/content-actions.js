@@ -99,6 +99,7 @@ export function createContentActionEditor({
   }
   return {
     replaceStory(value) { current = clone(value); },
+    contentTypes: () => contentDescriptors.map(({ type }) => type),
     actionTypes: () => actionDescriptors.map(({ type }) => type),
     chartTypeOptions: () => ['bar', 'line', 'area'],
     tableColumnOptions: (block) => tableFor(block).columns.map(({ id }) => id),
@@ -136,14 +137,34 @@ export function createContentActionEditor({
     actionControls(type, value = {}) {
       const descriptor = actionDescriptors.find((item) => item.type === type);
       if (!descriptor) return { supported: false, code: 'GUI_SCHEMA_UNSUPPORTED', path: '$.action', message: `Unsupported action: ${type}`, controls: [] };
-      const result = renderSchemaControls(descriptor.parameters, { value: { type, ...value }, path: '$.action' });
+      const result = renderSchemaControls(descriptor.parameters, {
+        value: { type, ...value },
+        path: '$.action',
+        catalogs
+      });
       if (!result.supported) return result;
-      const targetOptions = (catalogs.targets ?? []).map((item) => ({ value: catalogId(item), label: item.label ?? catalogId(item) }));
+      const targetControl = result.controls.find((control) => control.path.endsWith('.target'));
+      if (targetControl && targetControl.kind !== 'select') {
+        const safeTargets = catalogs.actionTargets?.[type];
+        if (!Array.isArray(safeTargets)) {
+          return {
+            supported: false,
+            code: 'GUI_SCHEMA_UNSUPPORTED',
+            path: targetControl.path,
+            message: `No trusted semantic target catalog is available for ${type}.`,
+            controls: []
+          };
+        }
+      }
       return {
         ...result,
-        controls: result.controls.map((control) => control.path.endsWith('.target')
-          ? { ...control, kind: 'select', options: targetOptions }
-          : control)
+        controls: result.controls.map((control) => {
+          if (!control.path.endsWith('.target') || control.kind === 'select') return control;
+          const options = catalogs.actionTargets[type].map((item) => ({
+            value: catalogId(item), label: item.label ?? catalogId(item)
+          }));
+          return { ...control, kind: 'select', options };
+        })
       };
     },
     command(name, options) {
@@ -173,6 +194,10 @@ export function createContentActionEditor({
         selected.content.blocks.splice(options.blockIndex, 1);
       } else if (name === 'add-action') {
         selected.map[options.phase].push(createCanonicalAction(options.type, actionDescriptors, options.values));
+      } else if (name === 'edit-action') {
+        const action = selected.map[options.phase][options.actionIndex];
+        if (!action) throw new TypeError(`Unknown ${options.phase} action index: ${options.actionIndex}`);
+        setPath(action, options.path, options.value);
       } else if (name === 'duplicate-action') {
         const action = selected.map[options.phase][options.actionIndex];
         if (!action) throw new TypeError(`Unknown ${options.phase} action index: ${options.actionIndex}`);

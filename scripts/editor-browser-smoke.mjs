@@ -259,6 +259,20 @@ try {
       await waitFor(client, `/Added dataset/.test(document.querySelector('.authoring-status').textContent)`, `${imported.id} import`);
     }
 
+    await evaluate(client, openSection('datasets'));
+    await evaluate(client, setControl('author-dataset-existing', 'route'));
+    await waitFor(client, `Boolean(document.getElementById('author-dataset-render-color'))`, 'existing dataset inspector');
+    await evaluate(client, setControl('author-dataset-render-color', '#336699'));
+    await evaluate(client, setControl('author-dataset-label-field', 'name'));
+    const datasetEdited = await evaluate(client, `document.getElementById('author-dataset-render-color').value === '#336699' && document.getElementById('author-dataset-label-field').value === 'name'`);
+    if (!datasetEdited) throw new Error('Existing dataset was not edited through visible controls.');
+
+    await evaluate(client, setControl('author-dataset-existing', 'demand'));
+    await waitFor(client, `Boolean(document.getElementById('author-table-cell-0-value'))`, 'normalized table cell');
+    await evaluate(client, setControl('author-table-cell-0-value', '12'));
+    const tableCellEdited = await evaluate(client, `document.getElementById('author-table-cell-0-value').value === '12'`);
+    if (!tableCellEdited) throw new Error('Normalized table cell was not edited through visible controls.');
+
     await evaluate(client, openSection('assets'));
     await evaluate(client, setControl('author-asset-id', 'photo'));
     await evaluate(client, setFile('author-asset-file', 'photo.png', 'image/png', 'preview-image'));
@@ -278,6 +292,13 @@ try {
     await evaluate(client, setControl('author-focus-datasets', 'route,stops'));
     await evaluate(client, `document.getElementById('author-focus-add').click()`);
     await waitFor(client, `/Added focus/.test(document.querySelector('.authoring-status').textContent)`, 'focus authoring');
+    await evaluate(client, setControl('author-focus-id', 'town-center'));
+    await evaluate(client, setControl('author-focus-type', 'coordinate'));
+    await evaluate(client, setControl('author-focus-longitude', '106.61'));
+    await evaluate(client, setControl('author-focus-latitude', '11.01'));
+    await evaluate(client, setControl('author-focus-zoom', '13'));
+    await evaluate(client, `document.getElementById('author-focus-add').click()`);
+    await waitFor(client, `/Added focus town-center/.test(document.querySelector('.authoring-status').textContent)`, 'coordinate focus authoring');
 
     await evaluate(client, openSection('stories'));
     await evaluate(client, setControl('author-state-title', 'Details'));
@@ -289,13 +310,24 @@ try {
       await evaluate(client, `document.getElementById('author-block-add').click()`);
       await waitFor(client, `document.querySelector('.authoring-status').textContent === ${JSON.stringify(`Added ${block} block.`)}`, `${block} block`);
     }
+    await evaluate(client, setControl('author-block-existing', '4'));
+    await evaluate(client, `document.getElementById('author-block-up').click()`);
+    await waitFor(client, `/Moved block up/.test(document.querySelector('.authoring-status').textContent)`, 'visible block reorder');
     await evaluate(client, setControl('author-state-index', '0'));
     for (const [type, semanticTarget] of [['map.focus', 'overview'], ['map.set-visibility', 'route'], ['map.set-emphasis', 'stops']]) {
       await evaluate(client, setControl('author-action-type', type));
+      const targetSafety = await evaluate(client, `(() => {
+        const target = document.getElementById('author-action-target');
+        return target?.tagName === 'SELECT' && ![...target.options].some(({ value }) => value === 'layer-private');
+      })()`);
+      if (!targetSafety) throw new Error(`${type} did not expose a safe semantic target select.`);
       await evaluate(client, setControl('author-action-target', semanticTarget));
       await evaluate(client, `document.getElementById('author-action-add').click()`);
       await waitFor(client, `document.querySelector('.authoring-status').textContent === ${JSON.stringify(`Added ${type}.`)}`, `${type} action`);
     }
+    await evaluate(client, setControl('author-action-existing', '2'));
+    await evaluate(client, `document.getElementById('author-action-up').click()`);
+    await waitFor(client, `/Moved action up/.test(document.querySelector('.authoring-status').textContent)`, 'visible action reorder');
     await evaluate(client, setControl('author-state-index', '1'));
     await evaluate(client, `document.getElementById('author-state-up').click()`);
 
@@ -333,7 +365,19 @@ try {
       return controls.length && controls.every((control) => control.disabled && control.readOnly && control.value.startsWith('{'))
         ? controls.length : 0;
     })()`, 'read-only Story 1.0 action controls');
-    prB = { authoredRevision, legacyControls };
+    await evaluate(client, openSection('capabilities'));
+    const routeCapabilityInspection = await waitFor(client, `(() => {
+      const existing = document.getElementById('author-capability-existing');
+      const add = document.getElementById('author-capability-add-select');
+      const existingValues = [...existing.options].map(({ value }) => value);
+      const addValues = [...add.options].map(({ value }) => value);
+      if (!existingValues.includes('route-comparison-v1') || addValues.includes('route-comparison-v1') || addValues.includes('urban-context-v1')) return null;
+      existing.value = 'route-comparison-v1';
+      existing.dispatchEvent(new Event('change', { bubbles: true }));
+      return Boolean(document.getElementById('author-capability-setting-adapter'))
+        && Boolean(document.querySelector('[id^="author-capability-role-"]'));
+    })()`, 'Route capability inspection');
+    prB = { authoredRevision, legacyControls, datasetEdited, tableCellEdited, routeCapabilityInspection };
   }
   if (consoleIssues.length) throw new Error(`Unexpected browser console issues: ${JSON.stringify(consoleIssues)}`);
 
@@ -357,7 +401,14 @@ try {
       image: true,
       metric: true,
       focusActions: true,
+      coordinateFocus: true,
+      semanticActionTargets: true,
+      privateTargetUnavailable: true,
       storyReorder: true,
+      blockActionReorder: true,
+      existingDatasetEdited: prB.datasetEdited,
+      tableCellEdited: prB.tableCellEdited,
+      routeCapabilityInspection: prB.routeCapabilityInspection,
       contentBlocks: ['table', 'chart', 'image', 'legend'],
       legacyControls: prB.legacyControls
     } : {}),

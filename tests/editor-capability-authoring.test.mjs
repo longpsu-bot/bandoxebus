@@ -75,6 +75,14 @@ test('existing non-addable declaration is editable but absent from Add Capabilit
   assert.equal(ui.settingsControl('route-comparison-v1', 'adapter').value, 'route-61-2-current');
   ui.settingsControl('route-comparison-v1', 'adapter').set('route-61-2-current');
   assert.equal(manifest.capabilities[0].settings.adapter, 'route-61-2-current');
+  assert.deepEqual(ui.details('route-comparison-v1'), {
+    id: 'route-comparison-v1',
+    label: 'route-comparison-v1',
+    description: 'route-comparison-v1 descriptor',
+    requires: ['core-map-v1'],
+    actions: ['route.set-mode'], targets: [], metrics: ['route-length']
+  });
+  assert.deepEqual(ui.settingsControls('route-comparison-v1').controls.map(({ path }) => path), ['$.settings.adapter']);
 });
 
 test('explicitly addable capability creates supported settings and discovers owned public catalogs', () => {
