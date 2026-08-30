@@ -241,8 +241,8 @@ test('production now consumes project.json while retaining trusted Route 61-2 ad
   const project = JSON.parse(projectSource);
   assert.equal(project.id, 'route-61-2');
   assert.equal(project.stories.items[0].src, './data/stories/route-61-2.story.json');
-  assert.match(appSource, /startApplication\(\{/);
-  assert.match(appSource, /manifestUrl:\s*['"]\.\/project\.json['"]/);
+  assert.match(appSource, /startProductionApplication\(\)/);
+  assert.match(appSource, /manifestUrl\s*=\s*['"]\.\/project\.json['"]/);
   assert.doesNotMatch(appSource, /loadStoryDefinition\(['"]\.\/data\/stories\/route-61-2\.story\.json/);
   assert.match(appSource, /from ['"]\.\/route-data\.js['"]/);
   assert.match(routeDataSource, /export const existingRouteLatLng/);

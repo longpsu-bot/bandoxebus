@@ -20,7 +20,7 @@ test('application keeps one MapLibre map and one generic story runtime', async (
   const source = await readFile(appUrl, 'utf8');
   assert.equal((source.match(/new maplibregl\.Map\(/g) ?? []).length, 1);
   assert.equal((source.match(/createStoryRuntime\(/g) ?? []).length, 0);
-  assert.match(source, /startApplication\(\{/);
+  assert.match(source, /startProductionApplication\(\)/);
   assert.doesNotMatch(source, /loadStoryDefinition\(['"]\.\/data\/stories\/route-61-2\.story\.json['"]/);
   assert.match(source, /createStoryShell\(\{\s*runtime:\s*storyRuntime,/);
   assert.match(source, /renderContent:\s*renderPresentationContent/);

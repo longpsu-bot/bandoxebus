@@ -98,3 +98,43 @@ test('unknown Story actions fail during loading before bootstrap is possible', a
       && error.path === '$.states.opening.map.enter[0].type'
   );
 });
+
+test('asset URL hook receives validated URLs and changes only asset resource records', async () => {
+  const manifest = structuredClone(MANIFEST);
+  manifest.assets.photo = {
+    type: 'image',
+    src: './assets/photo.png',
+    mediaType: 'image/png'
+  };
+  const calls = [];
+  const project = await loadProject('https://host/demo/project.json', {
+    fetchImpl: fixtureFetch({ 'https://host/demo/project.json': manifest }),
+    capabilityRegistry,
+    resolveAssetUrl(url, context) {
+      calls.push({ url: url.href, context });
+      return 'blob:preview/photo';
+    }
+  });
+
+  assert.deepEqual(calls, [{
+    url: 'https://host/demo/assets/photo.png',
+    context: { id: 'photo', descriptor: manifest.assets.photo }
+  }]);
+  assert.equal(project.resources.get('photo').url, 'blob:preview/photo');
+  assert.equal(project.resources.get('route').url.href, 'https://host/demo/data/route.geojson');
+});
+
+test('omitting the asset URL hook preserves the existing production URL exactly', async () => {
+  const manifest = structuredClone(MANIFEST);
+  manifest.assets.photo = {
+    type: 'image',
+    src: './assets/photo.png',
+    mediaType: 'image/png'
+  };
+  const project = await loadProject('https://host/demo/project.json', {
+    fetchImpl: fixtureFetch({ 'https://host/demo/project.json': manifest }),
+    capabilityRegistry
+  });
+
+  assert.equal(project.resources.get('photo').url.href, 'https://host/demo/assets/photo.png');
+});

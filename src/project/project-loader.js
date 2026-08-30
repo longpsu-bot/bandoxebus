@@ -77,7 +77,7 @@ function resourceRequests(manifest, urls, capabilities) {
   return requests;
 }
 
-function resolvedResources(manifest, urls, values) {
+function resolvedResources(manifest, urls, values, resolveAssetUrl) {
   const resources = new Map();
   for (const [id, descriptor] of Object.entries(manifest.datasets)) {
     const key = `dataset:${id}`;
@@ -86,7 +86,12 @@ function resolvedResources(manifest, urls, values) {
     }
   }
   for (const [id, descriptor] of Object.entries(manifest.assets)) {
-    resources.set(id, deepFreeze({ id, kind: 'asset', descriptor, url: urls.assets[id] }));
+    resources.set(id, deepFreeze({
+      id,
+      kind: 'asset',
+      descriptor,
+      url: resolveAssetUrl(urls.assets[id], { id, descriptor })
+    }));
   }
   if (manifest.metrics && values.has('metrics')) {
     resources.set('metrics', deepFreeze({ id: 'metrics', kind: 'metrics', url: urls.metrics, value: values.get('metrics') }));
@@ -170,7 +175,8 @@ function validateAndNormalizeStory(rawStory, manifest, capabilities) {
 export async function loadProject(manifestUrl = './project.json', {
   fetchImpl = fetch,
   capabilityRegistry,
-  signal
+  signal,
+  resolveAssetUrl = (url) => url
 } = {}) {
   if (!capabilityRegistry) {
     throw new ProjectLoadError('CAPABILITY_REGISTRY_REQUIRED', '$.capabilities', 'A trusted capability registry is required.');
@@ -191,7 +197,7 @@ export async function loadProject(manifestUrl = './project.json', {
     datasets: manifest.datasets
   });
   const loaded = await loadProjectResources(resourceRequests(manifest, urls, capabilities), { fetchImpl, signal });
-  const resources = resolvedResources(manifest, urls, loaded.values);
+  const resources = resolvedResources(manifest, urls, loaded.values, resolveAssetUrl);
   const rawStory = loaded.values.get(`story:${manifest.stories.primary}`);
   const tables = createTableRegistry([...resources]
     .filter(([, resource]) => resource.descriptor?.type === 'table-json')
