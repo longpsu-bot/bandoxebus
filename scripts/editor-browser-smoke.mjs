@@ -7,7 +7,7 @@ const APP_URL = args.get('--url') ?? 'http://127.0.0.1:8080/editor/';
 const CDP_PORT = Number(process.env.CDP_PORT || 9222);
 const TIMEOUT_MS = 30_000;
 
-if (GATE !== 'pr-a') throw new Error(`Unsupported editor browser gate: ${GATE}`);
+if (!['pr-a', 'pr-b'].includes(GATE)) throw new Error(`Unsupported editor browser gate: ${GATE}`);
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -93,6 +93,23 @@ function setInput(id, value) {
   return `(() => { const input = document.getElementById(${JSON.stringify(id)}); input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
 }
 
+function setControl(id, value) {
+  return `(() => { const input = document.getElementById(${JSON.stringify(id)}); input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
+}
+
+function setFile(id, name, mediaType, contents) {
+  return `(() => {
+    const input = document.getElementById(${JSON.stringify(id)});
+    const file = new File([${JSON.stringify(contents)}], ${JSON.stringify(name)}, { type: ${JSON.stringify(mediaType)} });
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    return true;
+  })()`;
+}
+
+function openSection(id) {
+  return `(() => { document.querySelector('[data-section="${id}"]').click(); return true; })()`;
+}
+
 const target = await pageTarget();
 const client = new CdpClient(target.webSocketDebuggerUrl);
 await client.open();
@@ -105,8 +122,9 @@ client.on('Log.entryAdded', ({ entry }) => {
 });
 
 try {
-  await Promise.all([client.send('Runtime.enable'), client.send('Log.enable')]);
-  await waitFor(client, `document.readyState === 'complete' && Boolean(document.getElementById('new-project'))`, 'editor shell');
+  await Promise.all([client.send('Runtime.enable'), client.send('Log.enable'), client.send('Page.enable')]);
+  await client.send('Page.reload', { ignoreCache: true });
+  await waitFor(client, `document.readyState === 'complete' && Boolean(document.getElementById('new-project')) && Boolean(window.__GUI_EDITOR__)`, 'editor shell');
   await evaluate(client, `document.getElementById('new-project').click()`);
   const firstRevisionState = await waitFor(client, `(() => {
     const frame = document.getElementById('production-preview');
@@ -115,6 +133,7 @@ try {
     return revision >= 0 && child?.querySelectorAll('.maplibregl-canvas').length === 1 ? { revision } : null;
   })()`, 'first valid production preview');
   const firstRevision = firstRevisionState.revision;
+  await waitFor(client, `Boolean(document.getElementById('production-preview').contentDocument?.getElementById('presentation-open'))`, 'first Story control');
   await evaluate(client, `document.getElementById('production-preview').contentDocument.getElementById('presentation-open').click()`);
   await waitFor(client, `(() => {
     const child = document.getElementById('production-preview').contentDocument;
@@ -127,6 +146,7 @@ try {
     const revision = Number(frame.dataset.previewRevision);
     return revision > ${firstRevision} ? revision : 0;
   })()`, 'valid heading revision');
+  await waitFor(client, `Boolean(document.getElementById('production-preview').contentDocument?.getElementById('presentation-open'))`, 'updated Story control');
   await evaluate(client, `document.getElementById('production-preview').contentDocument.getElementById('presentation-open').click()`);
   await waitFor(client, `(() => {
     const child = document.getElementById('production-preview').contentDocument;
@@ -172,6 +192,7 @@ try {
     return revision === 0 && canvasCount === 1 ? { revision } : null;
   })()`, 'second New production preview');
   const secondNewRevision = secondNewRevisionState.revision;
+  await waitFor(client, `Boolean(document.getElementById('production-preview').contentDocument?.getElementById('presentation-open'))`, 'second New Story control');
   await evaluate(client, `document.getElementById('production-preview').contentDocument.getElementById('presentation-open').click()`);
   await waitFor(client, `(() => {
     const child = document.getElementById('production-preview').contentDocument;
@@ -193,6 +214,171 @@ try {
   if (finalState.revision !== secondNewRevision || finalState.canvasCount !== 1 || finalState.locale !== 'en-US') {
     throw new Error(`Unexpected final editor state: ${JSON.stringify(finalState)}`);
   }
+
+  let prB = null;
+  if (GATE === 'pr-b') {
+    await evaluate(client, openSection('project'));
+    await evaluate(client, `(() => {
+      const input = document.querySelector('.tailored-inspector input[data-path="title"]');
+      input.value = 'PR B authored project';
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+    await waitFor(client, `(() => [...document.querySelectorAll('.tailored-inspector button')].some((button) => /Use current preview view/.test(button.textContent) && !button.disabled))()`, 'preview camera telemetry');
+    await evaluate(client, `(() => { [...document.querySelectorAll('.tailored-inspector button')].find((button) => /Use current preview view/.test(button.textContent)).click(); return true; })()`);
+    await evaluate(client, `(() => { [...document.querySelectorAll('.tailored-inspector button')].find((button) => /Confirm captured view/.test(button.textContent)).click(); return true; })()`);
+
+    await evaluate(client, openSection('attribution'));
+    await evaluate(client, setControl('author-attribution-id', 'planning-team'));
+    await evaluate(client, setControl('author-attribution-name', 'Planning team'));
+    await evaluate(client, setControl('author-attribution-url', 'https://example.com/source'));
+    await evaluate(client, `document.getElementById('author-attribution-add').click()`);
+    await waitFor(client, `/Added attribution/.test(document.querySelector('.authoring-status').textContent)`, 'attribution authoring');
+
+    const imports = [
+      {
+        id: 'route', label: 'Route', type: 'line', name: 'route.geojson', mediaType: 'application/geo+json',
+        value: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'Route' }, geometry: { type: 'LineString', coordinates: [[106.5, 10.9], [106.7, 11.1]] } }] }
+      },
+      {
+        id: 'stops', label: 'Stops', type: 'point', name: 'stops.geojson', mediaType: 'application/geo+json',
+        value: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'Stop' }, geometry: { type: 'Point', coordinates: [106.6, 11] } }] }
+      },
+      {
+        id: 'demand', label: 'Demand', type: 'table', name: 'demand.json', mediaType: 'application/json',
+        value: { schemaVersion: '1.0', columns: [{ id: 'name', label: 'Name', type: 'text' }, { id: 'value', label: 'Value', type: 'number' }], rows: [{ name: 'A', value: 10 }] }
+      }
+    ];
+    for (const imported of imports) {
+      await evaluate(client, openSection('datasets'));
+      await evaluate(client, setControl('author-dataset-id', imported.id));
+      await evaluate(client, setControl('author-dataset-label', imported.label));
+      await evaluate(client, setControl('author-dataset-type', imported.type));
+      await evaluate(client, setFile('author-dataset-file', imported.name, imported.mediaType, JSON.stringify(imported.value)));
+      await evaluate(client, `document.getElementById('author-dataset-add').click()`);
+      await waitFor(client, `/Added dataset/.test(document.querySelector('.authoring-status').textContent)`, `${imported.id} import`);
+    }
+
+    await evaluate(client, openSection('datasets'));
+    await evaluate(client, setControl('author-dataset-existing', 'route'));
+    await waitFor(client, `Boolean(document.getElementById('author-dataset-render-color'))`, 'existing dataset inspector');
+    await evaluate(client, setControl('author-dataset-render-color', '#336699'));
+    await evaluate(client, setControl('author-dataset-label-field', 'name'));
+    const datasetEdited = await evaluate(client, `document.getElementById('author-dataset-render-color').value === '#336699' && document.getElementById('author-dataset-label-field').value === 'name'`);
+    if (!datasetEdited) throw new Error('Existing dataset was not edited through visible controls.');
+
+    await evaluate(client, setControl('author-dataset-existing', 'demand'));
+    await waitFor(client, `Boolean(document.getElementById('author-table-cell-0-value'))`, 'normalized table cell');
+    await evaluate(client, setControl('author-table-cell-0-value', '12'));
+    const tableCellEdited = await evaluate(client, `document.getElementById('author-table-cell-0-value').value === '12'`);
+    if (!tableCellEdited) throw new Error('Normalized table cell was not edited through visible controls.');
+
+    await evaluate(client, openSection('assets'));
+    await evaluate(client, setControl('author-asset-id', 'photo'));
+    await evaluate(client, setFile('author-asset-file', 'photo.png', 'image/png', 'preview-image'));
+    await evaluate(client, `document.getElementById('author-asset-add').click()`);
+    await waitFor(client, `/Added image/.test(document.querySelector('.authoring-status').textContent)`, 'image authoring');
+
+    await evaluate(client, openSection('metrics'));
+    await evaluate(client, setControl('author-metric-id', 'total'));
+    await evaluate(client, setControl('author-metric-label', 'Total'));
+    await evaluate(client, setControl('author-metric-value', '10'));
+    await evaluate(client, setControl('author-metric-format', 'integer'));
+    await evaluate(client, `document.getElementById('author-metric-add').click()`);
+    await waitFor(client, `/Added metric/.test(document.querySelector('.authoring-status').textContent)`, 'metric authoring');
+
+    await evaluate(client, openSection('focus'));
+    await evaluate(client, setControl('author-focus-id', 'overview'));
+    await evaluate(client, setControl('author-focus-datasets', 'route,stops'));
+    await evaluate(client, `document.getElementById('author-focus-add').click()`);
+    await waitFor(client, `/Added focus/.test(document.querySelector('.authoring-status').textContent)`, 'focus authoring');
+    await evaluate(client, setControl('author-focus-id', 'town-center'));
+    await evaluate(client, setControl('author-focus-type', 'coordinate'));
+    await evaluate(client, setControl('author-focus-longitude', '106.61'));
+    await evaluate(client, setControl('author-focus-latitude', '11.01'));
+    await evaluate(client, setControl('author-focus-zoom', '13'));
+    await evaluate(client, `document.getElementById('author-focus-add').click()`);
+    await waitFor(client, `/Added focus town-center/.test(document.querySelector('.authoring-status').textContent)`, 'coordinate focus authoring');
+
+    await evaluate(client, openSection('stories'));
+    await evaluate(client, setControl('author-state-title', 'Details'));
+    await evaluate(client, `document.getElementById('author-state-add').click()`);
+    await waitFor(client, `/Added state/.test(document.querySelector('.authoring-status').textContent)`, 'state authoring');
+    await evaluate(client, setControl('author-state-index', '1'));
+    for (const block of ['table', 'chart', 'image', 'legend']) {
+      await evaluate(client, setControl('author-block-type', block));
+      await evaluate(client, `document.getElementById('author-block-add').click()`);
+      await waitFor(client, `document.querySelector('.authoring-status').textContent === ${JSON.stringify(`Added ${block} block.`)}`, `${block} block`);
+    }
+    await evaluate(client, setControl('author-block-existing', '4'));
+    await evaluate(client, `document.getElementById('author-block-up').click()`);
+    await waitFor(client, `/Moved block up/.test(document.querySelector('.authoring-status').textContent)`, 'visible block reorder');
+    await evaluate(client, setControl('author-state-index', '0'));
+    for (const [type, semanticTarget] of [['map.focus', 'overview'], ['map.set-visibility', 'route'], ['map.set-emphasis', 'stops']]) {
+      await evaluate(client, setControl('author-action-type', type));
+      const targetSafety = await evaluate(client, `(() => {
+        const target = document.getElementById('author-action-target');
+        return target?.tagName === 'SELECT' && ![...target.options].some(({ value }) => value === 'layer-private');
+      })()`);
+      if (!targetSafety) throw new Error(`${type} did not expose a safe semantic target select.`);
+      await evaluate(client, setControl('author-action-target', semanticTarget));
+      await evaluate(client, `document.getElementById('author-action-add').click()`);
+      await waitFor(client, `document.querySelector('.authoring-status').textContent === ${JSON.stringify(`Added ${type}.`)}`, `${type} action`);
+    }
+    await evaluate(client, setControl('author-action-existing', '2'));
+    await evaluate(client, `document.getElementById('author-action-up').click()`);
+    await waitFor(client, `/Moved action up/.test(document.querySelector('.authoring-status').textContent)`, 'visible action reorder');
+    await evaluate(client, setControl('author-state-index', '1'));
+    await evaluate(client, `document.getElementById('author-state-up').click()`);
+
+    const authoredRevision = await waitFor(client, `(() => {
+      const frame = document.getElementById('production-preview');
+      const revision = Number(frame.dataset.previewRevision);
+      return revision > 0 && frame.contentDocument?.querySelectorAll('.maplibregl-canvas').length === 1 ? revision : 0;
+    })()`, 'authored production preview');
+
+    const legacyState = await evaluate(client, `(async () => {
+      const manifestResponse = await fetch('../project.json');
+      const manifest = await manifestResponse.json();
+      const declared = [
+        ...manifest.stories.items.map((item) => ({ path: item.src.slice(2), kind: 'story', mediaType: 'application/json' })),
+        ...Object.values(manifest.datasets).map((item) => ({ path: item.src.slice(2), kind: 'dataset', mediaType: item.type === 'geojson' ? 'application/geo+json' : 'application/json' })),
+        ...Object.values(manifest.assets).map((item) => ({ path: item.src.slice(2), kind: 'asset', mediaType: item.mediaType })),
+        ...(manifest.metrics ? [{ path: manifest.metrics.src.slice(2), kind: 'metrics', mediaType: 'application/json' }] : [])
+      ];
+      const entries = [{ path: 'project.json', bytes: new TextEncoder().encode(JSON.stringify(manifest)), kind: 'manifest', mediaType: 'application/json', managed: true }];
+      for (const item of declared) {
+        const response = await fetch('../' + item.path);
+        entries.push({ ...item, bytes: new Uint8Array(await response.arrayBuffer()), managed: true });
+      }
+      await window.__GUI_EDITOR__.openEntries(entries, { label: 'Route 61-2 memory gate' });
+      return true;
+    })()`);
+    if (!legacyState) throw new Error('Route 61-2 memory package did not open.');
+    await waitFor(client, `(() => {
+      const frame = document.getElementById('production-preview');
+      return Number(frame.dataset.previewRevision) === 0 && frame.contentDocument?.querySelectorAll('.maplibregl-canvas').length === 1;
+    })()`, 'Route 61-2 production preview');
+    await evaluate(client, openSection('stories'));
+    const legacyControls = await waitFor(client, `(() => {
+      const controls = [...document.querySelectorAll('[data-legacy-action]')];
+      return controls.length && controls.every((control) => control.disabled && control.readOnly && control.value.startsWith('{'))
+        ? controls.length : 0;
+    })()`, 'read-only Story 1.0 action controls');
+    await evaluate(client, openSection('capabilities'));
+    const routeCapabilityInspection = await waitFor(client, `(() => {
+      const existing = document.getElementById('author-capability-existing');
+      const add = document.getElementById('author-capability-add-select');
+      const existingValues = [...existing.options].map(({ value }) => value);
+      const addValues = [...add.options].map(({ value }) => value);
+      if (!existingValues.includes('route-comparison-v1') || addValues.includes('route-comparison-v1') || addValues.includes('urban-context-v1')) return null;
+      existing.value = 'route-comparison-v1';
+      existing.dispatchEvent(new Event('change', { bubbles: true }));
+      return Boolean(document.getElementById('author-capability-setting-adapter'))
+        && Boolean(document.querySelector('[id^="author-capability-role-"]'));
+    })()`, 'Route capability inspection');
+    prB = { authoredRevision, legacyControls, datasetEdited, tableCellEdited, routeCapabilityInspection };
+  }
   if (consoleIssues.length) throw new Error(`Unexpected browser console issues: ${JSON.stringify(consoleIssues)}`);
 
   console.log(JSON.stringify({
@@ -207,6 +393,25 @@ try {
     desktopMobilePresets: true,
     mapLibreInstances: finalState.canvasCount,
     console: 'clean',
+    ...(prB ? {
+      visibleAuthoring: true,
+      cameraCapture: true,
+      provenance: true,
+      datasets: ['line', 'point', 'table'],
+      image: true,
+      metric: true,
+      focusActions: true,
+      coordinateFocus: true,
+      semanticActionTargets: true,
+      privateTargetUnavailable: true,
+      storyReorder: true,
+      blockActionReorder: true,
+      existingDatasetEdited: prB.datasetEdited,
+      tableCellEdited: prB.tableCellEdited,
+      routeCapabilityInspection: prB.routeCapabilityInspection,
+      contentBlocks: ['table', 'chart', 'image', 'legend'],
+      legacyControls: prB.legacyControls
+    } : {}),
     revisions: { first: firstRevision, heading: headingRevision, repaired: repairedRevision, secondNew: secondNewRevision }
   }));
 } finally {

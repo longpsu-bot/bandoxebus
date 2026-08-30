@@ -140,3 +140,15 @@ test('action parameter schemas own the canonical action type contract', () => {
     /additionalProperties/i
   );
 });
+
+test('trusted gui.addable metadata accepts only boolean values', () => {
+  const valid = cloneEntry().descriptor;
+  valid.gui.addable = true;
+  assert.equal(validateCapabilityDescriptor(valid), valid);
+
+  assertDescriptorIssue(
+    (descriptor) => { descriptor.gui.addable = 'yes'; },
+    '$.gui.addable',
+    /boolean/i
+  );
+});

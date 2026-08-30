@@ -7,7 +7,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; background: #07101c; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { border: 1px solid #31415b; border-radius: .45rem; background: #17243a; color: inherit; padding: .55rem .8rem; }
 button:disabled { opacity: .5; }
 button:not(:disabled) { cursor: pointer; }
@@ -41,6 +41,18 @@ button[aria-pressed="true"], .navigation-item.is-current { border-color: #4cc9f0
 .navigation-item { width: 100%; text-align: left; }
 .editor-inspector label { display: block; margin: 1rem 0 .35rem; font-weight: 650; }
 .editor-inspector input { width: 100%; border: 1px solid #31415b; border-radius: .4rem; background: #07101c; color: inherit; padding: .6rem; }
+.editor-inspector select { width: 100%; border: 1px solid #31415b; border-radius: .4rem; background: #07101c; color: inherit; padding: .6rem; }
+.tailored-inspector { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #26354d; }
+.tailored-inspector h3 { margin: 0 0 .75rem; }
+.tailored-inspector label { display: grid; gap: .35rem; }
+.tailored-inspector input[readonly] { color: #9fb0c7; background: #111d30; }
+.tailored-inspector button { width: 100%; margin-top: .75rem; }
+.tailored-inspector output { display: block; margin-top: .65rem; color: #9fdced; font-size: .78rem; line-height: 1.4; }
+.authoring-panel { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #26354d; }
+.authoring-panel h3 { margin: 0 0 .5rem; }
+.authoring-panel label { display: grid; gap: .35rem; }
+.authoring-panel button { width: 100%; margin-top: .75rem; }
+.authoring-status { min-height: 2.5rem; color: #9fdced; }
 
 .editor-preview { min-width: 0; padding: 1rem; background: #101a2a; }
 .preview-toolbar { display: flex; justify-content: center; gap: .5rem; margin-bottom: .75rem; }
