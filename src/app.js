@@ -1076,12 +1076,21 @@ function routeCapabilityContexts() {
   };
 }
 
-async function initialize() {
-  renderMetrics();
-  bindTabs();
-  bindControls();
-  return startApplication({
-    manifestUrl: './project.json',
+export function createProductionApplicationOptions({
+  manifestUrl = './project.json',
+  fetchImpl = fetch,
+  resolveAssetUrl,
+  signal,
+  owner,
+  replaceExisting = false
+} = {}) {
+  return {
+    manifestUrl,
+    fetchImpl,
+    resolveAssetUrl,
+    signal,
+    owner,
+    replaceExisting,
     capabilityRegistry: INSTALLED_CAPABILITY_REGISTRY,
     maplibregl,
     documentRef: document,
@@ -1089,7 +1098,18 @@ async function initialize() {
     createMap: createRouteMap,
     bindStoryExperience: bindRouteStoryExperience,
     capabilityContexts: routeCapabilityContexts()
-  });
+  };
+}
+
+export function startProductionApplication(transport = {}) {
+  return startApplication(createProductionApplicationOptions(transport));
+}
+
+async function initialize() {
+  renderMetrics();
+  bindTabs();
+  bindControls();
+  return startProductionApplication();
 }
 
 initialize().catch((error) => {
