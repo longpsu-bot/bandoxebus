@@ -154,11 +154,14 @@ function bindingsFor(manifest) {
 }
 
 function validateAndNormalizeStory(rawStory, manifest, capabilities) {
-  if (!['1.0', '1.1'].includes(rawStory?.schemaVersion)) {
+  if (!['1.0', '1.1', '1.2'].includes(rawStory?.schemaVersion)) {
     throw new ProjectLoadError('STORY_VERSION_UNSUPPORTED', '$.schemaVersion', `Unsupported Story schemaVersion: ${rawStory?.schemaVersion ?? ''}.`);
   }
-  if (rawStory.schemaVersion === '1.1') {
-    validateStoryDefinition(rawStory, { actionContracts: canonicalStoryContracts(capabilities), contentDescriptors: Object.values(capabilities.contentDescriptors) });
+  if (rawStory.schemaVersion === '1.1' || rawStory.schemaVersion === '1.2') {
+    validateStoryDefinition(rawStory, {
+      actionContracts: canonicalStoryContracts(capabilities),
+      contentDescriptors: Object.values(capabilities.contentDescriptors)
+    });
     return rawStory;
   }
   const normalizers = storyNormalizers(capabilities, Object.keys(manifest.focusTargets));
