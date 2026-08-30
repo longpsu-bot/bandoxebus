@@ -122,7 +122,7 @@ Opening, editing an unrelated resource, saving, exporting, or previewing a Story
 
 The canonical Route 61-2 Story 1.0 file remains byte-identical unless a later explicitly approved change says otherwise.
 
-Story 1.0 and 1.1 continue to render through their existing structured presentation layouts. V1.1 may keep the certified structured/legacy inspector available for those versions, but freeform Scene manipulation is enabled only for Story 1.2 `freeform-16x9` content.
+Story 1.0 and 1.1 continue to render through their existing structured presentation layouts. V1.1 preserves the certified structured/legacy inspector for those versions; freeform Scene manipulation is enabled only for Story 1.2 `freeform-16x9` content.
 
 A future explicit migration tool is a separate product decision.
 
@@ -196,6 +196,10 @@ The bottom filmstrip shows ordered Scenes with ordinal and a concise label deriv
 
 The filmstrip supports selection, add, duplicate, delete, and reorder. Reordering writes `story.states` array order. Existing accessible Move Previous/Move Next behavior remains available as a keyboard-safe fallback even if drag reordering is added.
 
+**Add Scene** creates an empty overlay composition and copies the active Scene's saved camera, interaction policy, and layer-visibility snapshot so the author starts from the current map context. Its transition is the V1.1 default `ease` at `900ms`. If there is no active Scene, the camera comes from `project.map.initialView`, interaction defaults to `locked`, and every existing project layer starts hidden unless the selected template explicitly seeds another state.
+
+**Duplicate Scene** copies the entire active Scene, then generates a new stable Scene ID. Deleting the only remaining Scene is disallowed because Stories remain non-empty.
+
 ### 7.4 Properties panel
 
 The Properties panel is strictly contextual:
@@ -254,16 +258,7 @@ The existing strict preview origin/source/envelope checks remain in force. No ra
 
 Story 1.2 is the only new production authoring schema required for freeform Scene composition.
 
-The root shape remains conceptually unchanged:
-
-```json
-{
-  "schemaVersion": "1.2",
-  "id": "example-story",
-  "title": "Example story",
-  "states": []
-}
-```
+The Story root keeps the existing required concepts: `schemaVersion`, `id`, `title`, and a **non-empty** ordered `states` array. Story 1.2 changes the version value to `"1.2"`; it does not add a parallel root document model.
 
 Story 1.2 states continue to use the existing `id`, `content`, and `map` structural concepts. The new fields are version-gated and do not change validation of Story 1.0/1.1.
 
@@ -344,9 +339,9 @@ The editor's Select/Map authoring mode is not this property and is never seriali
 
 `instant` must use `durationMs: 0`.
 
-For `fly` and `ease`, the duration is explicit production data. Editor/template defaults may choose a conventional value, but runtime behavior does not depend on an unversioned hidden duration.
+The V1.1 default for a newly created Scene is `ease` with `durationMs: 900`; templates may explicitly author another valid transition. Runtime behavior therefore never depends on an unversioned hidden duration.
 
-When reduced motion is requested by the platform, the runtime may render an authored `fly`/`ease` transition as instant while leaving authored data unchanged.
+When reduced motion is requested by the platform, the runtime must render authored `fly`/`ease` transitions as instant while leaving authored data unchanged.
 
 ### 9.5 Layer visibility snapshot
 
@@ -359,7 +354,7 @@ The Scene-controllable set is composed of project GeoJSON resources that are ren
 Cross-resource production validation must reject:
 
 - unknown dataset IDs;
-- non-map/table/image resource IDs;
+- table-dataset IDs or other IDs that are not Scene-controllable map resources;
 - missing visibility entries for Scene-controllable project layers.
 
 When a new map layer is added through V1.1, the editor updates all Story 1.2 Scenes atomically so the project remains explicit and valid. The new layer is visible in the active Scene and hidden in other existing Story 1.2 Scenes unless a template-specific creation operation explicitly defines another initial snapshot. Legacy Story 1.0/1.1 data is untouched.
@@ -507,14 +502,14 @@ Typography controls are fully supported for Text objects. Box appearance is supp
 
 The V1.1 Add menu exposes these product-level object families:
 
-- **Text** — backed by existing `heading` or `paragraph` semantic blocks;
+- **Text** — backed by existing `heading` or `paragraph` semantic blocks; the Text family offers `Heading` and `Body text` subtypes rather than inventing a new semantic block type;
 - **Metric** — backed by existing `stat-group` semantic block;
 - **Chart** — existing Chart.js-backed `chart` block;
 - **Table** — existing normalized `table` block;
 - **Image** — existing declared-asset `image` block;
 - **Legend** — existing `legend` block.
 
-The Story 1.2 validator may continue to accept other existing core semantic block types inside a composition envelope for compatibility/extensibility, but they are not separate primary Add-menu objects in V1.1.
+Story 1.2 accepts every existing `CORE_CONTENT_PACK_V1` semantic block type inside a composition envelope so renderer/descriptor compatibility stays complete. The primary Add menu exposes only the six product-level families above in V1.1.
 
 PR B proves the composition system with Text before rich objects are enabled.
 
@@ -749,6 +744,8 @@ A template creates ordinary project content once. It has no runtime role after p
 
 No `templateId`, template engine metadata, or template-specific runtime branch is persisted.
 
+Every new V1.1 Studio project defaults to Story 1.2. Story 1.1 remains supported for existing/imported projects but is no longer the default new-project Story format.
+
 V1.1 creation choices are intentionally limited to:
 
 1. **Blank map story**;
@@ -804,7 +801,7 @@ Scroll Story is Mapbox-style storytelling:
 - trusted capability enter/exit effects may run;
 - no editor chrome.
 
-On a non-16:9 desktop viewport, the map may remain full-bleed while overlay geometry is resolved against the largest centered 16:9 composition-safe rectangle. The required V1.1 certification viewports are both effectively 16:9, so certified output is exact to the authored composition.
+On a non-16:9 desktop viewport, the map remains full-bleed while overlay geometry is resolved against the largest centered 16:9 composition-safe rectangle. The required V1.1 certification viewports are both effectively 16:9, so certified output is exact to the authored composition.
 
 Scroll containers must not cause `zoom-only` or `explore` map interaction to trap ordinary page scrolling. Cooperative map gestures remain mandatory.
 
@@ -927,8 +924,8 @@ The approved work is intentionally staged. Each PR must be reviewable and must p
 
 Scope:
 
-- neutral generic production shell;
-- Route 61-2 assumptions removed from generic shell/app path;
+- introduce the neutral generic production shell path and prove it with a blank Story 1.2 project;
+- keep any still-required Route 61-2 legacy entry/adapter isolated from those neutral modules until PR C rather than forcing the full Route 61-2 conversion into PR A;
 - Story 1.2 base validation/contract;
 - declarative camera;
 - explicit camera capture/restore authoring behavior;
@@ -937,9 +934,9 @@ Scope:
 - authored transition;
 - Scene switching/restoration;
 - minimal desktop Scene filmstrip;
-- trusted capability host/layer-control seam required to keep project-specific behavior out of the shell.
+- trusted capability host/layer-control seam required to keep future project-specific behavior out of the neutral shell.
 
-Do not build rich freeform composition in this PR.
+Do not build rich freeform composition or perform the full Route 61-2 reference-project conversion in this PR.
 
 ### PR B — Desktop PowerPoint compositor
 
@@ -971,7 +968,7 @@ Scope:
 - Route proposal template;
 - Network/service plan template;
 - Import existing project entry point;
-- Route 61-2 fully consuming the neutral shell through trusted capabilities/project data;
+- move Route 61-2 fully onto the neutral shell through trusted capabilities/project data;
 - separate Story 1.2 Route 61-2 reference artifact only if needed, without modifying the canonical Story 1.0 artifact.
 
 ### PR D — Desktop outputs + certification
@@ -1008,7 +1005,7 @@ The following are required before Map Story Studio V1.1 desktop can be considere
 
 ### 26.2 Generic-shell gates
 
-A blank Story 1.2 project loaded through the same production shell has:
+A blank Story 1.2 project loaded through the same neutral production shell has:
 
 - one MapLibre map;
 - no Existing/Proposed/Difference tabs;
@@ -1016,9 +1013,9 @@ A blank Story 1.2 project loaded through the same production shell has:
 - no bus simulation controls;
 - no industrial/urban controls;
 - no Route 61-2 labels;
-- no Route 61-2 modules required by the generic shell path.
+- no Route 61-2 modules required by the neutral shell path.
 
-Route 61-2 loaded through that same shell still presents its trusted domain behavior.
+By PR C/D, Route 61-2 loaded through that same shell still presents its trusted domain behavior.
 
 ### 26.3 Camera gates
 
