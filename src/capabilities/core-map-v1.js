@@ -114,6 +114,11 @@ export function createCoreMapCapability(context = {}) {
       reducedMotion: context.reducedMotion,
       shellPadding: context.shellPadding
     });
+    const sceneLayers = Object.freeze({
+      ids: Object.freeze([...datasets.keys()]),
+      setVisible: (id, visible) => controller.setVisibility(id, visible),
+      reset: () => controller.reset()
+    });
     return Object.freeze({
       handlers: Object.freeze({
         'map.focus': ({ target, camera = {} }) => controller.focus(target, camera),
@@ -121,6 +126,7 @@ export function createCoreMapCapability(context = {}) {
         'map.set-emphasis': ({ target, active }) => controller.setEmphasis(target, active),
         'map.clear-emphasis': () => controller.clearEmphasis()
       }),
+      sceneLayers,
       reset: () => controller.reset(),
       destroy: () => controller.destroy(),
       targets: focusRegistry
