@@ -90,6 +90,32 @@ test('bridge queues the newest valid snapshot until the production iframe is rea
   bridge.dispose();
 });
 
+test('bridge initiates a correlated handshake when attached after the iframe loaded', () => {
+  const windowRef = fakeWindow();
+  const messages = [];
+  const frame = { postMessage(message) { messages.push(message); } };
+  const iframe = {
+    contentWindow: frame,
+    contentDocument: { readyState: 'complete' },
+    addEventListener() {},
+    removeEventListener() {}
+  };
+
+  const bridge = createPreviewBridge({ iframe, windowRef, origin: windowRef.location.origin });
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'editor-preview:hello');
+  assert.equal(typeof messages[0].requestId, 'string');
+  bridge.start({ revision: 1, snapshot: { revision: 1, entries: [] } });
+  windowRef.emit('message', {
+    source: frame,
+    origin: windowRef.location.origin,
+    data: envelope('ready', 0, {}, null)
+  });
+  assert.equal(messages.at(-1).type, 'editor-preview:start');
+  bridge.dispose();
+});
+
 test('reset accepts a fresh revision zero session and correlates lifecycle events by start request', () => {
   const windowRef = fakeWindow();
   const messages = [];

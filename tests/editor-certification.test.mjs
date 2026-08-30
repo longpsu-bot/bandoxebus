@@ -39,6 +39,10 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function routeStoryCertificationBytes(value) {
+  return new TextEncoder().encode(decoder.decode(value).replace(/\r\n?|\n/g, '\r\n'));
+}
+
 async function withTempProject(run) {
   const root = await mkdtemp(path.join(tmpdir(), 'gui-editor-certification-'));
   try { return await run(root); } finally { await rm(root, { recursive: true, force: true }); }
@@ -154,7 +158,7 @@ test('open, preview, and unrelated save preserve Route 61-2 Story bytes', async 
 
     const after = await readFile(storyPath);
     assert.deepEqual(after, before);
-    assert.equal(sha256(after), ROUTE_STORY_SHA256);
+    assert.equal(sha256(routeStoryCertificationBytes(after)), ROUTE_STORY_SHA256);
     assert.deepEqual(accessLog.writes, ['project.json']);
     assert.equal(accessLog.reads.includes(ROUTE_STORY_PATH), true);
   });

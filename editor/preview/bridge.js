@@ -109,6 +109,7 @@ export function createPreviewBridge({
   let currentStartRequestId = null;
   let readyRequestId = null;
   let requireReadyRequest = false;
+  let canRetryReadyHandshake = false;
   let ready = false;
   let queuedStart = null;
 
@@ -127,7 +128,14 @@ export function createPreviewBridge({
     const data = event.data;
     if (!validEnvelope(data, EVENT_TYPES) || !validEventPayload(data)) return;
     if (data.type === 'editor-preview:ready') {
-      if (requireReadyRequest && (!readyRequestId || data.requestId !== readyRequestId)) return;
+      if (requireReadyRequest && (!readyRequestId || data.requestId !== readyRequestId)) {
+        if (canRetryReadyHandshake && data.requestId === null) {
+          canRetryReadyHandshake = false;
+          post(envelope('editor-preview:hello', currentRevision, readyRequestId));
+        }
+        return;
+      }
+      canRetryReadyHandshake = false;
       ready = true;
       flush();
       onEvent(data);
@@ -140,13 +148,14 @@ export function createPreviewBridge({
 
   function handleLoad() {
     ready = false;
-    requireReadyRequest = true;
+    canRetryReadyHandshake = true;
     readyRequestId = `request-${++requestNumber}`;
     post(envelope('editor-preview:hello', currentRevision, readyRequestId));
   }
 
   windowRef.addEventListener('message', handleMessage);
   iframe.addEventListener?.('load', handleLoad);
+  if (iframe.contentDocument?.readyState === 'complete') handleLoad();
 
   function start(lastValid) {
     validatePreviewSnapshot(lastValid.snapshot);
@@ -169,6 +178,7 @@ export function createPreviewBridge({
     currentStartRequestId = null;
     readyRequestId = null;
     requireReadyRequest = true;
+    canRetryReadyHandshake = false;
     ready = false;
     queuedStart = null;
     iframe.src = iframe.dataset.previewSrc;
