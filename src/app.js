@@ -1109,6 +1109,14 @@ async function initialize() {
   renderMetrics();
   bindTabs();
   bindControls();
+  if (new URLSearchParams(window.location.search).get('editorPreview') === '1') {
+    const { startEditorPreviewHost } = await import('../editor/preview/package-resolver.js');
+    return startEditorPreviewHost({
+      windowRef: window,
+      startProductionApplication,
+      expectedOrigin: window.location.origin
+    });
+  }
   return startProductionApplication();
 }
 

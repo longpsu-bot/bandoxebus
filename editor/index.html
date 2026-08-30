@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>GUI Editor V1</title>
+  <link rel="stylesheet" href="./editor.css">
+</head>
+<body>
+  <header class="editor-topbar">
+    <div>
+      <p class="editor-kicker">GUI Editor V1</p>
+      <h1>Project package</h1>
+    </div>
+    <div class="editor-actions" aria-label="Project commands">
+      <button id="new-project" type="button">New</button>
+      <button id="validate-project" type="button" disabled>Validate</button>
+      <span id="preview-status" role="status" aria-live="polite">Preview waiting</span>
+      <span id="dirty-status">No project</span>
+    </div>
+  </header>
+
+  <div class="editor-layout">
+    <nav class="editor-navigation" aria-label="Project navigation">
+      <h2>Project</h2>
+      <button type="button" class="navigation-item is-current" aria-current="page">Overview</button>
+      <p>PR A provides the package and preview spine. Full navigation arrives in PR B.</p>
+    </nav>
+
+    <main class="editor-preview" aria-label="Production preview workspace">
+      <div class="preview-toolbar" aria-label="Preview size">
+        <button id="preview-desktop" type="button" aria-pressed="true">Desktop</button>
+        <button id="preview-mobile" type="button" aria-pressed="false">Mobile</button>
+      </div>
+      <div id="preview-frame" class="preview-frame preview-frame--desktop">
+        <iframe
+          id="production-preview"
+          title="Production project preview"
+          sandbox="allow-scripts allow-same-origin"
+          src="about:blank"
+          data-preview-src="../?editorPreview=1"></iframe>
+        <div id="preview-paused" class="preview-paused" hidden>Preview paused at the last valid revision.</div>
+      </div>
+    </main>
+
+    <aside class="editor-inspector" aria-label="Minimal project inspector">
+      <h2>Inspector</h2>
+      <label for="story-heading">Story heading</label>
+      <input id="story-heading" type="text" disabled>
+      <p>Updates real Story 1.1 authored data.</p>
+      <label for="project-locale">Project locale</label>
+      <input id="project-locale" type="text" disabled>
+      <p>Uses the locked production locale contract. Empty locale is invalid.</p>
+    </aside>
+  </div>
+
+  <section class="validation-drawer" aria-labelledby="validation-heading">
+    <div>
+      <h2 id="validation-heading">Validation</h2>
+      <p id="validation-status" role="status" aria-live="polite">Create a project to validate.</p>
+    </div>
+    <ul id="validation-errors"></ul>
+  </section>
+
+  <script type="module" src="./editor.js"></script>
+</body>
+</html>

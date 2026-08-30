@@ -84,3 +84,119 @@ export function createPreviewPackageResolver(snapshot, {
 
   return { ...transport, resolveAssetUrl, revoke };
 }
+
+const PREVIEW_PROTOCOL_VERSION = 1;
+
+function waitForProductionSurface(runtime) {
+  const map = runtime?.map;
+  if (!map || typeof map.once !== 'function' || map.loaded?.()) return Promise.resolve();
+  return new Promise((resolve) => map.once('load', resolve));
+}
+
+export function startEditorPreviewHost({
+  windowRef = globalThis.window,
+  startProductionApplication,
+  expectedOrigin = windowRef.location.origin,
+  createResolver = createPreviewPackageResolver
+}) {
+  const owner = {};
+  let activeRuntime = null;
+  let activeResolver = null;
+  let activeSnapshot = null;
+  let disposed = false;
+  let replacement = Promise.resolve();
+
+  function post(type, revision = activeSnapshot?.revision ?? 0, payload = {}, requestId = null) {
+    windowRef.parent?.postMessage({
+      protocol: PREVIEW_PROTOCOL_VERSION,
+      type: `editor-preview:${type}`,
+      revision,
+      requestId,
+      payload
+    }, expectedOrigin);
+  }
+
+  async function replace(snapshot, requestId = null) {
+    if (disposed) return;
+    await activeRuntime?.destroy?.();
+    activeRuntime = null;
+    activeResolver?.revoke();
+    activeResolver = null;
+
+    const resolver = createResolver(structuredClone(snapshot));
+    try {
+      const runtime = await startProductionApplication({
+        manifestUrl: resolver.manifestUrl,
+        fetchImpl: resolver.fetchImpl,
+        resolveAssetUrl: resolver.resolveAssetUrl,
+        owner,
+        replaceExisting: true
+      });
+      await waitForProductionSurface(runtime);
+      if (disposed) {
+        await runtime?.destroy?.();
+        resolver.revoke();
+        return;
+      }
+      activeSnapshot = structuredClone(snapshot);
+      activeResolver = resolver;
+      activeRuntime = runtime;
+      post('loaded', snapshot.revision, {}, requestId);
+    } catch (error) {
+      resolver.revoke();
+      post('runtime-error', snapshot.revision, {
+        code: error?.code ?? 'PREVIEW_START_FAILED',
+        path: error?.path ?? '$',
+        message: error?.message ?? String(error)
+      }, requestId);
+      throw error;
+    }
+  }
+
+  function start(snapshot, requestId = null) {
+    replacement = replacement.then(() => replace(snapshot, requestId));
+    return replacement;
+  }
+
+  function handleCommand(data) {
+    const { name } = data.payload ?? {};
+    if (name === 'enter-story') windowRef.document.getElementById('presentation-open')?.click();
+    else if (name === 'explore') windowRef.document.getElementById('story-explore')?.click();
+    else if (name === 'restart' && activeSnapshot) void start(activeSnapshot, data.requestId);
+    else if (name === 'viewport') post('state', activeSnapshot?.revision ?? 0, { viewport: data.payload.payload }, data.requestId);
+  }
+
+  function handleMessage(event) {
+    if (event.source !== windowRef.parent || event.origin !== expectedOrigin) return;
+    const data = event.data;
+    if (!data || data.protocol !== PREVIEW_PROTOCOL_VERSION) return;
+    if (data.type === 'editor-preview:hello') {
+      post('ready', 0, {}, data.requestId);
+      return;
+    }
+    if (data.type === 'editor-preview:start') {
+      if (!data.payload || data.payload.revision !== data.revision) return;
+      if (activeSnapshot && data.revision <= activeSnapshot.revision) return;
+      void start(data.payload, data.requestId);
+      return;
+    }
+    if (data.type === 'editor-preview:command' && data.revision === activeSnapshot?.revision) handleCommand(data);
+  }
+
+  windowRef.addEventListener('message', handleMessage);
+  post('ready');
+
+  function dispose() {
+    disposed = true;
+    windowRef.removeEventListener('message', handleMessage);
+    replacement = replacement.then(async () => {
+      await activeRuntime?.destroy?.();
+      activeRuntime = null;
+      activeResolver?.revoke();
+      activeResolver = null;
+    });
+    return replacement;
+  }
+
+  return { start, dispose };
+}
