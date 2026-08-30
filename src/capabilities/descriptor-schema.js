@@ -189,6 +189,14 @@ function validateLifecycle(lifecycle) {
   });
 }
 
+function validateGui(gui) {
+  if (gui === undefined) return;
+  if (!isPlainObject(gui)) fail('$.gui', 'GUI metadata must be a serializable object.');
+  if (gui.addable !== undefined && typeof gui.addable !== 'boolean') {
+    fail('$.gui.addable', 'GUI addable metadata must be boolean.');
+  }
+}
+
 export function validateCapabilityDescriptor(descriptor) {
   assertSerializable(descriptor, '$');
   if (!isPlainObject(descriptor)) fail('$', 'Capability descriptor must be a plain object.');
@@ -208,6 +216,7 @@ export function validateCapabilityDescriptor(descriptor) {
   validateLegacyActions(descriptor.legacyActions);
   validateLifecycle(descriptor.lifecycle);
   validateSchemaFragment(descriptor.settingsSchema, '$.settingsSchema');
+  validateGui(descriptor.gui);
   return descriptor;
 }
 
