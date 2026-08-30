@@ -2,6 +2,8 @@ import { INSTALLED_CAPABILITY_REGISTRY } from '../../src/capabilities/installed-
 import { loadProject } from '../../src/project/project-loader.js';
 import { createPackageFetch } from '../preview/package-resolver.js';
 
+const decoder = new TextDecoder();
+
 function deepFreeze(value) {
   if (ArrayBuffer.isView(value)) return value;
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -21,6 +23,54 @@ export function toProductionDiagnostic(error, {
     message: error?.message ?? String(error),
     packagePath,
     revision
+  });
+}
+
+function isPathPrefix(prefix, path) {
+  return prefix === '$'
+    || path === prefix
+    || path.startsWith(`${prefix}.`)
+    || path.startsWith(`${prefix}[`);
+}
+
+export function createValidationNavigationIndex(records = []) {
+  const entries = records.map(({ packagePath, path, selection, controlId }) => Object.freeze({
+    packagePath,
+    path,
+    selection: structuredClone(selection),
+    controlId
+  })).sort((left, right) => right.path.length - left.path.length);
+  return Object.freeze({
+    resolve(diagnostic) {
+      const match = entries.find((entry) => (
+        entry.packagePath === diagnostic.packagePath
+        && isPathPrefix(entry.path, diagnostic.path)
+      ));
+      return match ? {
+        selection: structuredClone(match.selection),
+        controlId: match.controlId
+      } : null;
+    }
+  });
+}
+
+export function createSourceRepairModel({ packageStore, draftStore, packagePath }) {
+  const entry = packageStore.get(packagePath);
+  if (!entry?.managed || !(
+    entry.mediaType === 'application/json'
+    || entry.mediaType === 'application/geo+json'
+    || entry.path.endsWith('.json')
+    || entry.path.endsWith('.geojson')
+  )) {
+    throw new TypeError(`Source repair requires a known managed JSON file: ${packagePath}`);
+  }
+  return Object.freeze({
+    get text() { return decoder.decode(packageStore.get(packagePath).currentBytes); },
+    get parseable() { return draftStore.get(packagePath) !== undefined; },
+    replace(text) {
+      const value = draftStore.replaceText(packagePath, text);
+      return { parseable: value !== undefined, value };
+    }
   });
 }
 

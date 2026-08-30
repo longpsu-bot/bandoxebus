@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0",
+  "id": "invalid-reference",
+  "title": "Invalid reference repair fixture",
+  "locale": "en-US",
+  "stories": {
+    "primary": "main",
+    "items": [
+      { "id": "main", "src": "./stories/main.story.json" }
+    ]
+  },
+  "map": {
+    "basemap": "openfreemap-dark",
+    "initialView": { "center": [106.6, 11], "zoom": 11, "pitch": 0, "bearing": 0 }
+  },
+  "datasets": {},
+  "assets": {},
+  "focusTargets": {
+    "overview": {
+      "type": "datasets",
+      "datasets": ["missing-route"]
+    }
+  },
+  "capabilities": [],
+  "attribution": {}
+}

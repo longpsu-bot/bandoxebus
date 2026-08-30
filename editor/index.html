@@ -15,6 +15,12 @@
     </div>
     <div class="editor-actions" aria-label="Project commands">
       <button id="new-project" type="button">New</button>
+      <button id="open-folder" type="button">Open Folder</button>
+      <label class="file-command" for="import-zip">Import ZIP
+        <input id="import-zip" type="file" accept=".zip,application/zip">
+      </label>
+      <button id="save-project" type="button" disabled>Save</button>
+      <button id="export-project-zip" type="button" disabled>Export Project ZIP</button>
       <button id="validate-project" type="button" disabled>Validate</button>
       <span id="preview-status" role="status" aria-live="polite">Preview waiting</span>
       <span id="dirty-status">No project</span>
@@ -44,14 +50,14 @@
       </div>
     </main>
 
-    <aside class="editor-inspector" aria-label="Minimal project inspector">
-      <h2>Inspector</h2>
+    <aside class="editor-inspector" aria-labelledby="inspector-heading">
+      <h2 id="inspector-heading">Inspector</h2>
       <label for="story-heading">Story heading</label>
-      <input id="story-heading" type="text" disabled>
-      <p>Updates real Story 1.1 authored data.</p>
+      <input id="story-heading" type="text" required aria-describedby="story-heading-help" aria-errormessage="validation-status" disabled>
+      <p id="story-heading-help">Updates real Story 1.1 authored data.</p>
       <label for="project-locale">Project locale</label>
-      <input id="project-locale" type="text" disabled>
-      <p>Uses the locked production locale contract. Empty locale is invalid.</p>
+      <input id="project-locale" type="text" required aria-describedby="project-locale-help" aria-errormessage="validation-status" disabled>
+      <p id="project-locale-help">Uses the locked production locale contract. Empty locale is invalid.</p>
     </aside>
   </div>
 
@@ -62,6 +68,8 @@
     </div>
     <ul id="validation-errors"></ul>
   </section>
+
+  <p id="ordering-announcements" class="visually-hidden" role="status" aria-live="polite"></p>
 
   <script type="module" src="./editor.js"></script>
 </body>

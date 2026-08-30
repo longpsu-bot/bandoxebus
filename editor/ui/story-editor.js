@@ -95,6 +95,7 @@ export function createStoryEditor({
           contentDescriptors,
           actionDescriptors,
           catalogs,
+          announce,
           save(next) { persist(id, next); }
         });
       },
@@ -136,7 +137,7 @@ export function createStoryEditor({
           const next = clone(current());
           next.states = moveArrayItem(next.states, options.from, options.to);
           persist(id, next);
-          announce(`State moved to position ${options.to + 1}.`);
+          announce(`State moved to position ${options.to + 1} of ${next.states.length}.`);
           return clone(next.states);
         }
         if (name === 'set-layout') {
@@ -196,7 +197,7 @@ export function createStoryEditor({
       }
       if (name === 'move-story') {
         mutateManifest((draft) => { draft.stories.items = moveArrayItem(draft.stories.items, options.from, options.to); });
-        announce(`Story moved to position ${options.to + 1}.`);
+        announce(`Story moved to position ${options.to + 1} of ${manifest.stories.items.length}.`);
         return clone(manifest.stories.items);
       }
       if (name === 'set-primary') {
