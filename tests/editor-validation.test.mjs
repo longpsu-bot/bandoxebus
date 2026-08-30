@@ -45,17 +45,17 @@ test('invalid draft keeps the previous valid preview snapshot', async () => {
   await firstRun;
   const first = harness.coordinator.lastValid;
 
-  harness.draftStore.mutate('project.json', (manifest) => { manifest.title = ''; });
+  harness.draftStore.mutate('project.json', (manifest) => { manifest.locale = ''; });
   const invalidRun = harness.coordinator.validateNow();
-  harness.calls[1].pending.reject(new ProjectLoadError('PROJECT_MANIFEST_INVALID', '$.title', 'Title is required.'));
+  harness.calls[1].pending.reject(new ProjectLoadError('PROJECT_MANIFEST_INVALID', '$.locale', 'Locale format is invalid.'));
   await invalidRun;
 
   assert.equal(harness.coordinator.lastValid, first);
   assert.equal(harness.coordinator.status, 'invalid');
   assert.deepEqual(harness.coordinator.diagnostics[0], {
     code: 'PROJECT_MANIFEST_INVALID',
-    path: '$.title',
-    message: 'Title is required.',
+    path: '$.locale',
+    message: 'Locale format is invalid.',
     packagePath: 'project.json',
     revision: 1
   });
@@ -64,8 +64,9 @@ test('invalid draft keeps the previous valid preview snapshot', async () => {
 
 test('first invalid revision has no last-valid project', async () => {
   const harness = validationHarness();
+  harness.draftStore.mutate('project.json', (manifest) => { manifest.locale = ''; });
   const run = harness.coordinator.validateNow();
-  harness.calls[0].pending.reject(new ProjectLoadError('PROJECT_MANIFEST_INVALID', '$.title', 'Title is required.'));
+  harness.calls[0].pending.reject(new ProjectLoadError('PROJECT_MANIFEST_INVALID', '$.locale', 'Locale format is invalid.'));
   await run;
 
   assert.equal(harness.coordinator.status, 'invalid');
@@ -92,19 +93,36 @@ test('a stale validation completion cannot win and a mutation aborts its signal'
   harness.coordinator.dispose();
 });
 
+test('a package revision change during validation cannot promote a stale snapshot', async () => {
+  const harness = validationHarness();
+  const run = harness.coordinator.validateNow();
+
+  harness.packageStore.setManaged('data/route.geojson', {
+    bytes: new TextEncoder().encode('{"type":"FeatureCollection","features":[]}\n'),
+    mediaType: 'application/geo+json',
+    kind: 'dataset'
+  });
+  harness.calls[0].pending.resolve({ manifest: { title: 'Stale' } });
+  await run;
+
+  assert.equal(harness.coordinator.lastValid, null);
+  harness.coordinator.dispose();
+});
+
 test('a valid repair promotes a structured-cloned newer snapshot', async () => {
   const harness = validationHarness();
+  harness.draftStore.mutate('project.json', (manifest) => { manifest.locale = ''; });
   const firstRun = harness.coordinator.validateNow();
-  harness.calls[0].pending.reject(new ProjectLoadError('PROJECT_MANIFEST_INVALID', '$.title', 'Title is required.'));
+  harness.calls[0].pending.reject(new ProjectLoadError('PROJECT_MANIFEST_INVALID', '$.locale', 'Locale format is invalid.'));
   await firstRun;
 
-  harness.draftStore.mutate('project.json', (manifest) => { manifest.title = 'Repaired'; });
+  harness.draftStore.mutate('project.json', (manifest) => { manifest.locale = 'en-US'; });
   const repairRun = harness.coordinator.validateNow();
-  harness.calls[1].pending.resolve({ manifest: { title: 'Repaired' } });
+  harness.calls[1].pending.resolve({ manifest: { locale: 'en-US' } });
   await repairRun;
 
   const promoted = harness.coordinator.lastValid;
-  assert.equal(promoted.revision, 1);
+  assert.equal(promoted.revision, 2);
   assert.equal(harness.coordinator.status, 'valid');
   harness.packageStore.get('project.json').currentBytes[0] = 0;
   assert.notEqual(promoted.snapshot.entries.find(({ path }) => path === 'project.json').bytes[0], 0);

@@ -56,6 +56,58 @@ test('draft changes serialize only the mutated file and track byte dirtiness', (
   assert.equal(serializedManifest.endsWith('\n'), true);
 });
 
+test('draft revision always matches its package snapshot after a JSON mutation', () => {
+  const packageStore = createPackageStore({
+    origin: { kind: 'memory', label: 'New project' },
+    entries: createNewProjectEntries()
+  });
+  const draftStore = createDraftStore({ packageStore });
+
+  draftStore.mutate('project.json', (manifest) => { manifest.locale = 'vi-VN'; });
+
+  assert.equal(draftStore.revision, packageStore.revision);
+  assert.equal(draftStore.revision, draftStore.snapshot().revision);
+});
+
+test('a no-op draft mutation cannot split draft and snapshot revisions', () => {
+  const packageStore = createPackageStore({
+    origin: { kind: 'memory', label: 'New project' },
+    entries: createNewProjectEntries()
+  });
+  const draftStore = createDraftStore({ packageStore });
+  let notifiedRevision = null;
+  draftStore.subscribe(({ revision }) => { notifiedRevision = revision; });
+
+  draftStore.mutate('project.json', () => {});
+
+  assert.equal(packageStore.revision, 0);
+  assert.equal(draftStore.revision, draftStore.snapshot().revision);
+  assert.equal(notifiedRevision, packageStore.revision);
+});
+
+test('managed resource creation and manifest declaration share one package revision', () => {
+  const packageStore = createPackageStore({
+    origin: { kind: 'memory', label: 'New project' },
+    entries: createNewProjectEntries()
+  });
+  const draftStore = createDraftStore({ packageStore });
+
+  packageStore.setManaged('data/route.geojson', {
+    bytes: encoder.encode('{"type":"FeatureCollection","features":[]}\n'),
+    mediaType: 'application/geo+json',
+    kind: 'dataset'
+  });
+  draftStore.mutate('project.json', (manifest) => {
+    manifest.datasets.route = {
+      type: 'geojson', geometry: 'line', src: './data/route.geojson', label: 'Route'
+    };
+  });
+
+  assert.equal(packageStore.revision, 2);
+  assert.equal(draftStore.revision, packageStore.revision);
+  assert.equal(draftStore.snapshot().revision, packageStore.revision);
+});
+
 test('a package snapshot exposes fetch-compatible managed resources', async () => {
   const store = createPackageStore({
     origin: { kind: 'memory', label: 'New project' },

@@ -48,7 +48,6 @@ export function createDraftStore({ packageStore }) {
   const values = new Map();
   const parseDiagnostics = new Map();
   const listeners = new Set();
-  let revision = 0;
 
   function refresh(path) {
     const entry = packageStore.get(path);
@@ -66,7 +65,7 @@ export function createDraftStore({ packageStore }) {
   for (const entry of packageStore.list()) refresh(entry.path);
 
   function notify(path) {
-    const state = { path, revision };
+    const state = { path, revision: packageStore.revision };
     for (const listener of listeners) listener(state);
   }
 
@@ -80,7 +79,6 @@ export function createDraftStore({ packageStore }) {
     if (!entry || !isJsonEntry(entry)) throw new TypeError(`Unknown JSON package path: ${path}`);
     packageStore.setCurrentBytes(path, encoder.encode(String(text)));
     refresh(path);
-    revision += 1;
     notify(path);
     return get(path);
   }
@@ -105,7 +103,7 @@ export function createDraftStore({ packageStore }) {
     replaceText,
     snapshot: () => packageStore.snapshot(),
     subscribe,
-    get revision() { return revision; },
+    get revision() { return packageStore.revision; },
     get diagnostics() { return [...parseDiagnostics.values()]; }
   };
 }

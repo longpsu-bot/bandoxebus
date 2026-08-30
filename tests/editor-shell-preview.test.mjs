@@ -21,8 +21,36 @@ function fakeWindow() {
   };
 }
 
-function envelope(type, revision, payload = {}) {
-  return { protocol: PREVIEW_PROTOCOL_VERSION, type: `editor-preview:${type}`, revision, requestId: `request-${revision}`, payload };
+function envelope(type, revision, payload = {}, requestId = `request-${revision}`) {
+  return { protocol: PREVIEW_PROTOCOL_VERSION, type: `editor-preview:${type}`, revision, requestId, payload };
+}
+
+function failingPreviewHostHarness() {
+  const events = [];
+  const messages = [];
+  const attempts = new Map();
+  const windowRef = fakeWindow();
+  windowRef.parent = { postMessage(message) { messages.push(message); } };
+  const host = startEditorPreviewHost({
+    windowRef,
+    expectedOrigin: windowRef.location.origin,
+    createResolver(snapshot) {
+      return {
+        manifestUrl: new URL(`https://editor.example/${snapshot.revision}/project.json`),
+        fetchImpl() {},
+        resolveAssetUrl() {},
+        revoke() { events.push(`revoke:${snapshot.revision}`); }
+      };
+    },
+    async startProductionApplication({ manifestUrl }) {
+      const revision = Number(manifestUrl.pathname.split('/').at(-2));
+      attempts.set(revision, (attempts.get(revision) ?? 0) + 1);
+      events.push(`start:${revision}`);
+      if (revision === 2 && attempts.get(revision) === 1) throw new Error('revision 2 failed');
+      return { destroy() { events.push(`destroy:${revision}`); } };
+    }
+  });
+  return { host, windowRef, events, messages };
 }
 
 test('bridge accepts only the known iframe, origin, version, and newest revision', () => {
@@ -59,6 +87,92 @@ test('bridge queues the newest valid snapshot until the production iframe is rea
   assert.equal(messages[0].message.type, 'editor-preview:start');
   assert.equal(messages[0].message.payload.entries[0].bytes[0], 1);
   assert.equal(messages[0].origin, windowRef.location.origin);
+  bridge.dispose();
+});
+
+test('reset accepts a fresh revision zero session and correlates lifecycle events by start request', () => {
+  const windowRef = fakeWindow();
+  const messages = [];
+  let loadListener;
+  const frame = { postMessage(message) { messages.push(message); } };
+  const iframe = {
+    contentWindow: frame,
+    dataset: { previewSrc: '../?editorPreview=1' },
+    src: '',
+    addEventListener(type, listener) { if (type === 'load') loadListener = listener; },
+    removeEventListener() {}
+  };
+  const events = [];
+  const bridge = createPreviewBridge({
+    iframe,
+    windowRef,
+    origin: windowRef.location.origin,
+    onEvent: (event) => events.push(event)
+  });
+  windowRef.emit('message', { source: frame, origin: windowRef.location.origin, data: envelope('ready', 0) });
+  bridge.start({ revision: 3, snapshot: { revision: 3, entries: [] } });
+  const requestX = messages.at(-1).requestId;
+
+  bridge.reset();
+  loadListener();
+  const hello = messages.at(-1);
+  windowRef.emit('message', {
+    source: frame,
+    origin: windowRef.location.origin,
+    data: envelope('ready', 0, {}, hello.requestId)
+  });
+  bridge.start({ revision: 0, snapshot: { revision: 0, entries: [] } });
+  const requestY = messages.at(-1).requestId;
+  assert.notEqual(requestY, requestX);
+  assert.equal(iframe.src, iframe.dataset.previewSrc);
+
+  windowRef.emit('message', {
+    source: frame,
+    origin: windowRef.location.origin,
+    data: envelope('loaded', 0, {}, requestX)
+  });
+  windowRef.emit('message', {
+    source: frame,
+    origin: windowRef.location.origin,
+    data: envelope('loaded', 0, {}, requestY)
+  });
+
+  assert.deepEqual(events.filter(({ type }) => type === 'editor-preview:loaded').map(({ requestId }) => requestId), [requestY]);
+  bridge.dispose();
+});
+
+test('reset waits for the replacement iframe load handshake before flushing Start', () => {
+  const windowRef = fakeWindow();
+  const messages = [];
+  let loadListener;
+  const frame = { postMessage(message) { messages.push(message); } };
+  const iframe = {
+    contentWindow: frame,
+    dataset: { previewSrc: '../?editorPreview=1' },
+    src: '',
+    addEventListener(type, listener) { if (type === 'load') loadListener = listener; },
+    removeEventListener() {}
+  };
+  const bridge = createPreviewBridge({ iframe, windowRef, origin: windowRef.location.origin });
+
+  bridge.reset();
+  bridge.start({ revision: 0, snapshot: { revision: 0, entries: [] } });
+  windowRef.emit('message', {
+    source: frame,
+    origin: windowRef.location.origin,
+    data: envelope('ready', 0, {}, null)
+  });
+  assert.equal(messages.some(({ type }) => type === 'editor-preview:start'), false);
+
+  loadListener();
+  const hello = messages.find(({ type }) => type === 'editor-preview:hello');
+  windowRef.emit('message', {
+    source: frame,
+    origin: windowRef.location.origin,
+    data: envelope('ready', 0, {}, hello.requestId)
+  });
+
+  assert.equal(messages.filter(({ type }) => type === 'editor-preview:start').length, 1);
   bridge.dispose();
 });
 
@@ -124,6 +238,40 @@ test('preview host reports loaded only after the production map load lifecycle',
   loadListener();
   await starting;
   assert.equal(messages.some(({ type }) => type === 'editor-preview:loaded'), true);
+  await host.dispose();
+});
+
+test('a rejected replacement reports its error but does not poison a later start', async () => {
+  const { host, events, messages } = failingPreviewHostHarness();
+  await host.start({ revision: 1, entries: [] }, 'start-1');
+
+  await assert.rejects(host.start({ revision: 2, entries: [] }, 'start-2'), /revision 2 failed/);
+  await host.start({ revision: 3, entries: [] }, 'start-3');
+
+  assert.equal(messages.some(({ type, revision, requestId }) => (
+    type === 'editor-preview:runtime-error' && revision === 2 && requestId === 'start-2'
+  )), true);
+  assert.deepEqual(events, [
+    'start:1', 'destroy:1', 'revoke:1', 'start:2', 'revoke:2', 'start:3'
+  ]);
+  await host.dispose();
+});
+
+test('restart retries the latest requested snapshot after its first start failed', async () => {
+  const { host, windowRef, events } = failingPreviewHostHarness();
+  await host.start({ revision: 1, entries: [] }, 'start-1');
+  await assert.rejects(host.start({ revision: 2, entries: [] }, 'start-2'), /revision 2 failed/);
+
+  windowRef.emit('message', {
+    source: windowRef.parent,
+    origin: windowRef.location.origin,
+    data: envelope('command', 2, { name: 'restart', payload: {} }, 'restart-2')
+  });
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+
+  assert.deepEqual(events, [
+    'start:1', 'destroy:1', 'revoke:1', 'start:2', 'revoke:2', 'start:2'
+  ]);
   await host.dispose();
 });
 

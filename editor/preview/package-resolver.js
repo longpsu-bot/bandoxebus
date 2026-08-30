@@ -103,6 +103,7 @@ export function startEditorPreviewHost({
   let activeRuntime = null;
   let activeResolver = null;
   let activeSnapshot = null;
+  let latestRequestedSnapshot = null;
   let disposed = false;
   let replacement = Promise.resolve();
 
@@ -122,6 +123,7 @@ export function startEditorPreviewHost({
     activeRuntime = null;
     activeResolver?.revoke();
     activeResolver = null;
+    activeSnapshot = null;
 
     const resolver = createResolver(structuredClone(snapshot));
     try {
@@ -154,15 +156,20 @@ export function startEditorPreviewHost({
   }
 
   function start(snapshot, requestId = null) {
-    replacement = replacement.then(() => replace(snapshot, requestId));
-    return replacement;
+    const requestedSnapshot = structuredClone(snapshot);
+    latestRequestedSnapshot = requestedSnapshot;
+    const operation = replacement.then(() => replace(requestedSnapshot, requestId));
+    replacement = operation.catch(() => {});
+    return operation;
   }
 
   function handleCommand(data) {
     const { name } = data.payload ?? {};
     if (name === 'enter-story') windowRef.document.getElementById('presentation-open')?.click();
     else if (name === 'explore') windowRef.document.getElementById('story-explore')?.click();
-    else if (name === 'restart' && activeSnapshot) void start(activeSnapshot, data.requestId);
+    else if (name === 'restart' && latestRequestedSnapshot) {
+      void start(latestRequestedSnapshot, data.requestId).catch(() => {});
+    }
     else if (name === 'viewport') post('state', activeSnapshot?.revision ?? 0, { viewport: data.payload.payload }, data.requestId);
   }
 
@@ -176,11 +183,11 @@ export function startEditorPreviewHost({
     }
     if (data.type === 'editor-preview:start') {
       if (!data.payload || data.payload.revision !== data.revision) return;
-      if (activeSnapshot && data.revision <= activeSnapshot.revision) return;
-      void start(data.payload, data.requestId);
+      if (latestRequestedSnapshot && data.revision <= latestRequestedSnapshot.revision) return;
+      void start(data.payload, data.requestId).catch(() => {});
       return;
     }
-    if (data.type === 'editor-preview:command' && data.revision === activeSnapshot?.revision) handleCommand(data);
+    if (data.type === 'editor-preview:command' && data.revision === latestRequestedSnapshot?.revision) handleCommand(data);
   }
 
   windowRef.addEventListener('message', handleMessage);

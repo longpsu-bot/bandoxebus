@@ -88,6 +88,7 @@ export function createEditor({
 
   async function newProject() {
     validation?.dispose();
+    bridge.reset();
     packageStore = createPackageStore({
       origin: { kind: 'memory', label: 'New project' },
       entries: createNewProjectEntries({ id: 'new-project', title: 'New project', locale: 'en-US' })

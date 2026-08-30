@@ -164,6 +164,22 @@ try {
   await evaluate(client, `document.getElementById('preview-desktop').click()`);
   await waitFor(client, `document.getElementById('preview-frame').classList.contains('preview-frame--desktop')`, 'desktop preview preset');
 
+  await evaluate(client, `document.getElementById('new-project').click()`);
+  const secondNewRevisionState = await waitFor(client, `(() => {
+    const frame = document.getElementById('production-preview');
+    const revision = Number(frame.dataset.previewRevision);
+    const canvasCount = frame.contentDocument?.querySelectorAll('.maplibregl-canvas').length ?? 0;
+    return revision === 0 && canvasCount === 1 ? { revision } : null;
+  })()`, 'second New production preview');
+  const secondNewRevision = secondNewRevisionState.revision;
+  await evaluate(client, `document.getElementById('production-preview').contentDocument.getElementById('presentation-open').click()`);
+  await waitFor(client, `(() => {
+    const child = document.getElementById('production-preview').contentDocument;
+    const storyText = child?.getElementById('story-shell-steps')?.textContent ?? '';
+    return child?.getElementById('story-shell')?.hidden === false
+      && /New project/.test(storyText) && !/Updated project/.test(storyText);
+  })()`, 'fresh second New Story');
+
   const finalState = await evaluate(client, `(() => {
     const frame = document.getElementById('production-preview');
     return {
@@ -174,7 +190,7 @@ try {
       desktopWidth: document.getElementById('preview-frame').getBoundingClientRect().width
     };
   })()`);
-  if (finalState.revision !== repairedRevision || finalState.canvasCount !== 1 || finalState.locale !== 'en-US') {
+  if (finalState.revision !== secondNewRevision || finalState.canvasCount !== 1 || finalState.locale !== 'en-US') {
     throw new Error(`Unexpected final editor state: ${JSON.stringify(finalState)}`);
   }
   if (consoleIssues.length) throw new Error(`Unexpected browser console issues: ${JSON.stringify(consoleIssues)}`);
@@ -187,10 +203,11 @@ try {
     invalidSnapshotSent: false,
     lastValidRetained: true,
     repairRefresh: true,
+    secondNew: true,
     desktopMobilePresets: true,
     mapLibreInstances: finalState.canvasCount,
     console: 'clean',
-    revisions: { first: firstRevision, heading: headingRevision, repaired: repairedRevision }
+    revisions: { first: firstRevision, heading: headingRevision, repaired: repairedRevision, secondNew: secondNewRevision }
   }));
 } finally {
   client.close();

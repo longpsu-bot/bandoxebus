@@ -7,6 +7,10 @@ const EVENT_TYPES = new Set([
   'editor-preview:state',
   'editor-preview:camera'
 ]);
+const START_RESPONSE_TYPES = new Set([
+  'editor-preview:loaded',
+  'editor-preview:runtime-error'
+]);
 
 function envelope(type, revision, requestId, payload = {}) {
   return { protocol: PREVIEW_PROTOCOL_VERSION, type, revision, requestId, payload };
@@ -20,6 +24,9 @@ export function createPreviewBridge({
 }) {
   let currentRevision = -1;
   let requestNumber = 0;
+  let currentStartRequestId = null;
+  let readyRequestId = null;
+  let requireReadyRequest = false;
   let ready = false;
   let queuedStart = null;
 
@@ -38,18 +45,22 @@ export function createPreviewBridge({
     const data = event.data;
     if (!data || data.protocol !== PREVIEW_PROTOCOL_VERSION || !EVENT_TYPES.has(data.type)) return;
     if (data.type === 'editor-preview:ready') {
+      if (requireReadyRequest && (!readyRequestId || data.requestId !== readyRequestId)) return;
       ready = true;
       flush();
       onEvent(data);
       return;
     }
     if (data.revision !== currentRevision) return;
+    if (START_RESPONSE_TYPES.has(data.type) && data.requestId !== currentStartRequestId) return;
     onEvent(data);
   }
 
   function handleLoad() {
     ready = false;
-    post(envelope('editor-preview:hello', currentRevision, `request-${++requestNumber}`));
+    requireReadyRequest = true;
+    readyRequestId = `request-${++requestNumber}`;
+    post(envelope('editor-preview:hello', currentRevision, readyRequestId));
   }
 
   windowRef.addEventListener('message', handleMessage);
@@ -57,13 +68,24 @@ export function createPreviewBridge({
 
   function start(lastValid) {
     currentRevision = lastValid.revision;
+    currentStartRequestId = `request-${++requestNumber}`;
     queuedStart = envelope(
       'editor-preview:start',
       lastValid.revision,
-      `request-${++requestNumber}`,
+      currentStartRequestId,
       structuredClone(lastValid.snapshot)
     );
     flush();
+  }
+
+  function reset() {
+    currentRevision = -1;
+    currentStartRequestId = null;
+    readyRequestId = null;
+    requireReadyRequest = true;
+    ready = false;
+    queuedStart = null;
+    iframe.src = iframe.dataset.previewSrc;
   }
 
   function command(name, payload = {}) {
@@ -79,5 +101,5 @@ export function createPreviewBridge({
     queuedStart = null;
   }
 
-  return { start, command, dispose, get revision() { return currentRevision; } };
+  return { start, reset, command, dispose, get revision() { return currentRevision; } };
 }
