@@ -301,3 +301,42 @@ test('exported ordinary project mounts into unchanged loadProject and normal pro
     }
   });
 });
+
+test('PR A blank fixture is a production-valid neutral Story 1.2 project', async () => {
+  const fixtureRoot = path.join(repositoryRoot, 'tests', 'fixtures', 'story-1.2-blank');
+  const entries = await declaredEntriesFromRoot(fixtureRoot);
+  const store = createPackageStore({
+    origin: { kind: 'memory', label: 'Story 1.2 blank certification' },
+    entries
+  });
+  const project = await loadSnapshot(store);
+
+  assert.equal(project.story.schemaVersion, '1.2');
+  assert.equal(project.story.states.length, 1);
+  assert.deepEqual(project.story.states[0].content, {
+    layout: 'freeform-16x9',
+    blocks: []
+  });
+  assert.deepEqual(project.story.states[0].map.layerVisibility, {});
+  assert.deepEqual(project.manifest.datasets, {});
+});
+
+test('PR A browser gate certifies bounded Studio revisions and compatibility', async () => {
+  const source = await readFile(
+    path.join(repositoryRoot, 'scripts', 'map-story-studio-browser-smoke.mjs'),
+    'utf8'
+  );
+
+  for (const required of [
+    'MAP_STORY_STUDIO_PR_A_RESULT: PASS',
+    'maplibregl-canvas',
+    'studio-scene-list',
+    'Capture Camera',
+    'Restore Saved Camera',
+    '390',
+    '844',
+    'Route 61-2',
+    'previewRevision',
+    'consoleIssues'
+  ]) assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
