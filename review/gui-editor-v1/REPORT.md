@@ -73,8 +73,13 @@ Browser console: CLEAN (zero unexpected errors).
 
 ## Final regression and architecture audit
 
-- Task-focused tests: 97/97 PASS across the four planned commands.
-- Full `npm test`: 360/360 PASS, zero failures.
+- New managed folder resource focused tests: 28/28 PASS.
+- Newly authored resource is dirty before Save and remains in the change set until its write succeeds.
+- Missing nested folder segments and the resource file are explicitly created; existing files continue to open without create permission.
+- New resource bytes are written before `project.json`; recursive enumeration calls: 0.
+- Failed new-resource creation skips `project.json` and retains both dirty entries and their bytes.
+- Reopen through the Folder adapter resolves the created resource with the unchanged production loader.
+- Full `npm test`: 364/364 PASS, zero failures.
 - Established source syntax: 24/24 PASS.
 - `git diff --check`: PASS.
 - Route Story diff from the required base: empty.
@@ -85,6 +90,8 @@ Browser console: CLEAN (zero unexpected errors).
 - Folder recursive enumeration: NO.
 - ZIP traversal and normalized duplicates: REJECTED.
 - Unknown ZIP safe pass-through: PRESERVED.
+
+NEW_MANAGED_FOLDER_RESOURCE_SAVE: PASS
 
 BASELINE_AUTHORING_CONTRACT_V1: LOCKED
 

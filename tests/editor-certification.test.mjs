@@ -76,18 +76,29 @@ function nodeDirectoryHandle(root, accessLog = { reads: [], writes: [] }, prefix
   return {
     name: prefix ? prefix.split('/').at(-2) : path.basename(root),
     async getDirectoryHandle(segment, options = {}) {
-      assert.equal(options.create, false);
       const relative = `${prefix}${segment}/`;
-      const details = await stat(path.join(root, ...relative.split('/').filter(Boolean)));
+      const filename = path.join(root, ...relative.split('/').filter(Boolean));
+      let details = await stat(filename).catch(() => null);
+      if (!details && options.create === true) {
+        await mkdir(filename);
+        accessLog.createdDirectories ??= [];
+        accessLog.createdDirectories.push(relative.slice(0, -1));
+        details = await stat(filename);
+      }
+      if (!details) throw new DOMException(`Missing directory: ${relative}`, 'NotFoundError');
       if (!details.isDirectory()) throw new DOMException(`Not a directory: ${relative}`, 'NotFoundError');
       return nodeDirectoryHandle(root, accessLog, relative);
     },
     async getFileHandle(segment, options = {}) {
-      assert.equal(options.create, false);
       const relative = `${prefix}${segment}`;
       const filename = path.join(root, ...relative.split('/'));
       const details = await stat(filename).catch(() => null);
-      if (!details?.isFile()) throw new DOMException(`Missing file: ${relative}`, 'NotFoundError');
+      if (!details && options.create === true) {
+        accessLog.createdFiles ??= [];
+        accessLog.createdFiles.push(relative);
+      } else if (!details?.isFile()) {
+        throw new DOMException(`Missing file: ${relative}`, 'NotFoundError');
+      }
       return {
         name: segment,
         async getFile() {
@@ -192,6 +203,49 @@ test('supported Story 1.0 content editing preserves schema version and exact leg
     const changed = draftStore.get(ROUTE_STORY_PATH);
     assert.equal(changed.schemaVersion, '1.0');
     assert.deepEqual(changed.states.map(({ map }) => map), originalActions);
+  });
+});
+
+test('new folder resource is created, reopened, and resolved by the production loader', async () => {
+  await withTempProject(async (temporaryRoot) => {
+    await copyDeclaredProject(repositoryRoot, temporaryRoot);
+    const accessLog = { reads: [], writes: [], createdDirectories: [], createdFiles: [] };
+    const adapter = createFolderStorageAdapter({ directoryHandle: nodeDirectoryHandle(temporaryRoot, accessLog) });
+    const opened = await adapter.open();
+    const packageStore = createPackageStore(opened);
+    const draftStore = createDraftStore({ packageStore });
+    const resourcePath = 'data/gui-editor-certification/new-route.geojson';
+    const resource = new TextEncoder().encode('{"type":"FeatureCollection","features":[]}\n');
+
+    packageStore.setManaged(resourcePath, {
+      bytes: resource,
+      mediaType: 'application/geo+json',
+      kind: 'dataset'
+    });
+    draftStore.mutate('project.json', (manifest) => {
+      manifest.datasets['gui-editor-certification'] = {
+        type: 'geojson',
+        geometry: 'line',
+        src: `./${resourcePath}`,
+        label: 'GUI Editor certification'
+      };
+    });
+
+    const result = await adapter.writeChanges(packageStore.changeSet());
+    packageStore.markWritten(result.written);
+    const reopened = await adapter.open();
+    const reopenedStore = createPackageStore(reopened);
+    const project = await loadSnapshot(reopenedStore);
+
+    assert.deepEqual(result.written, [resourcePath, 'project.json']);
+    assert.deepEqual(accessLog.createdDirectories, ['data/gui-editor-certification']);
+    assert.deepEqual(accessLog.createdFiles, [resourcePath]);
+    assert.deepEqual(new Uint8Array(await readFile(path.join(temporaryRoot, ...resourcePath.split('/')))), resource);
+    assert.equal(reopened.entries.some(({ path: entryPath }) => entryPath === resourcePath), true);
+    assert.deepEqual(project.resources.get('gui-editor-certification').value, {
+      type: 'FeatureCollection',
+      features: []
+    });
   });
 });
 

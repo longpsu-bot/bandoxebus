@@ -55,6 +55,26 @@ async function getFileHandle(directoryHandle, path) {
   return directory.getFileHandle(filename, { create: false });
 }
 
+async function getWritableFileHandle(directoryHandle, path) {
+  const segments = normalizePackagePath(path).split('/');
+  const filename = segments.pop();
+  let directory = directoryHandle;
+  for (const segment of segments) {
+    try {
+      directory = await directory.getDirectoryHandle(segment, { create: false });
+    } catch (error) {
+      if (error?.name !== 'NotFoundError') throw error;
+      directory = await directory.getDirectoryHandle(segment, { create: true });
+    }
+  }
+  try {
+    return await directory.getFileHandle(filename, { create: false });
+  } catch (error) {
+    if (error?.name !== 'NotFoundError') throw error;
+    return directory.getFileHandle(filename, { create: true });
+  }
+}
+
 async function readEntry(directoryHandle, descriptor) {
   const handle = await getFileHandle(directoryHandle, descriptor.path);
   const file = await handle.getFile();
@@ -108,7 +128,7 @@ export function createFolderStorageAdapter({
 
   async function writeOne(change, result) {
     try {
-      const handle = await getFileHandle(directoryHandle, change.path);
+      const handle = await getWritableFileHandle(directoryHandle, change.path);
       const writable = await handle.createWritable();
       await writable.write(change.currentBytes);
       await writable.close();

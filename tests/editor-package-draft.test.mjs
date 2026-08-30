@@ -108,6 +108,31 @@ test('managed resource creation and manifest declaration share one package revis
   assert.equal(draftStore.snapshot().revision, packageStore.revision);
 });
 
+test('new managed folder resource stays dirty until it is written', () => {
+  const store = createPackageStore({
+    origin: { kind: 'folder', label: 'Existing folder' },
+    entries: [{
+      path: 'project.json',
+      bytes: encoder.encode('{"schemaVersion":"1.0"}\n'),
+      mediaType: 'application/json',
+      kind: 'manifest',
+      managed: true
+    }]
+  });
+
+  store.setManaged('data/new.geojson', {
+    bytes: encoder.encode('{"type":"FeatureCollection","features":[]}\n'),
+    mediaType: 'application/geo+json',
+    kind: 'dataset'
+  });
+
+  assert.equal(store.dirty, true);
+  assert.deepEqual(store.changeSet().map(({ path }) => path), ['data/new.geojson']);
+  store.markWritten(['data/new.geojson']);
+  assert.equal(store.dirty, false);
+  assert.deepEqual(store.changeSet(), []);
+});
+
 test('a package snapshot exposes fetch-compatible managed resources', async () => {
   const store = createPackageStore({
     origin: { kind: 'memory', label: 'New project' },

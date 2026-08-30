@@ -120,7 +120,8 @@ export function createPackageStore({ origin, entries = [] }) {
       currentBytes,
       mediaType: input.mediaType ?? 'application/octet-stream',
       kind: input.kind ?? 'resource',
-      managed: input.managed !== false
+      managed: input.managed !== false,
+      persisted: true
     });
   }
 
@@ -147,8 +148,10 @@ export function createPackageStore({ origin, entries = [] }) {
     const normalized = normalizePackagePath(path);
     const existing = records.get(normalized);
     if (existing) {
+      const persisted = existing.persisted;
       existing.managed = true;
       Object.assign(existing, descriptor, { path: normalized, managed: true });
+      existing.persisted = persisted;
       revision += 1;
       return existing;
     }
@@ -159,7 +162,8 @@ export function createPackageStore({ origin, entries = [] }) {
       currentBytes: entryBytes.slice(),
       mediaType: descriptor.mediaType ?? 'application/octet-stream',
       kind: descriptor.kind ?? 'resource',
-      managed: true
+      managed: true,
+      persisted: false
     };
     records.set(normalized, entry);
     revision += 1;
@@ -191,13 +195,16 @@ export function createPackageStore({ origin, entries = [] }) {
   }
 
   function changeSet() {
-    return list().filter((entry) => !equalBytes(entry.originalBytes, entry.currentBytes));
+    return list().filter((entry) => !entry.persisted || !equalBytes(entry.originalBytes, entry.currentBytes));
   }
 
   function markWritten(paths) {
     for (const path of paths) {
       const entry = records.get(normalizePackagePath(path));
-      if (entry) entry.originalBytes = entry.currentBytes.slice();
+      if (entry) {
+        entry.originalBytes = entry.currentBytes.slice();
+        entry.persisted = true;
+      }
     }
   }
 
