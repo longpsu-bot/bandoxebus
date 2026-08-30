@@ -1,5 +1,6 @@
 import { STORY_10_CONTENT_TYPES } from '../../src/content/content-descriptors.js';
 import { createStableId, moveArrayItem } from '../core/draft-store.js';
+import { createContentActionEditor } from './content-actions.js';
 
 const LAYOUTS = Object.freeze(['hero', 'metrics', 'narrative', 'map-focus']);
 
@@ -48,7 +49,10 @@ export function createStoryEditor({
   mutateManifest,
   writeStory,
   removeStory,
-  announce = () => {}
+  announce = () => {},
+  contentDescriptors = [],
+  actionDescriptors = [],
+  catalogs = {}
 }) {
   function persist(id, next) {
     writeStory(id, clone(next));
@@ -76,6 +80,16 @@ export function createStoryEditor({
     return {
       id,
       layoutOptions: () => [...LAYOUTS],
+      authoring() {
+        if (current().schemaVersion !== '1.1') throw new TypeError('Canonical content/action authoring requires Story 1.1.');
+        return createContentActionEditor({
+          story: current(),
+          contentDescriptors,
+          actionDescriptors,
+          catalogs,
+          save(next) { persist(id, next); }
+        });
+      },
       legacyActions(stateIndex) {
         if (current().schemaVersion !== '1.0') return [];
         return legacyActionModels(current().states[stateIndex]);

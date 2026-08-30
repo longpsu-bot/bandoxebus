@@ -4,6 +4,7 @@ import { createValidationCoordinator } from './core/validation.js';
 import { createPreviewBridge } from './preview/bridge.js';
 import { renderEntityInspector } from './ui/inspectors.js';
 import { createStoryEditor } from './ui/story-editor.js';
+import { INSTALLED_CAPABILITY_REGISTRY } from '../src/capabilities/installed-capabilities.js';
 
 export function createEditor({
   documentRef = globalThis.document,
@@ -98,9 +99,28 @@ export function createEditor({
       id,
       draftStore.get(src.replace(/^\.\//, ''))
     ]));
+    const selectedIds = new Set(['core-content-v1', 'core-map-v1', ...manifest.capabilities.map(({ id }) => id)]);
+    const selectedDescriptors = INSTALLED_CAPABILITY_REGISTRY.catalog().filter(({ id }) => selectedIds.has(id));
+    const tables = Object.entries(manifest.datasets)
+      .filter(([, descriptor]) => descriptor.type === 'table-json')
+      .map(([id, descriptor]) => ({ id, columns: draftStore.get(descriptor.src.replace(/^\.\//, ''))?.columns ?? [] }));
+    const metricFile = manifest.metrics ? draftStore.get(manifest.metrics.src.replace(/^\.\//, '')) : null;
+    const catalogs = {
+      tables,
+      assets: Object.keys(manifest.assets).map((id) => ({ id })),
+      metrics: [
+        ...Object.entries(metricFile?.metrics ?? {}).map(([id, metric]) => ({ id, label: metric.label, format: metric.format })),
+        ...selectedDescriptors.flatMap(({ metrics }) => metrics)
+      ],
+      targets: [...new Set([...Object.keys(manifest.datasets), ...Object.keys(manifest.focusTargets)])].map((id) => ({ id })),
+      attribution: Object.keys(manifest.attribution).map((id) => ({ id }))
+    };
     return createStoryEditor({
       manifest,
       stories,
+      contentDescriptors: selectedDescriptors.flatMap(({ content }) => content),
+      actionDescriptors: selectedDescriptors.flatMap(({ actions }) => actions),
+      catalogs,
       mutateManifest(updater) {
         draftStore.mutate('project.json', updater);
         renderDirty();
