@@ -1,8 +1,11 @@
+import { PREVIEW_PROTOCOL_VERSION, validatePreviewSnapshot } from './bridge.js';
+
 const DEFAULT_PACKAGE_ORIGIN = globalThis.location?.origin ?? 'http://localhost';
 
 export function createPackageFetch(snapshot, {
   baseUrl = new URL('/__editor_package__/', DEFAULT_PACKAGE_ORIGIN)
 } = {}) {
+  validatePreviewSnapshot(snapshot);
   const packageBase = new URL(baseUrl);
   const entries = new Map(snapshot.entries.map((entry) => [entry.path, {
     ...entry,
@@ -85,7 +88,46 @@ export function createPreviewPackageResolver(snapshot, {
   return { ...transport, resolveAssetUrl, revoke };
 }
 
-const PREVIEW_PROTOCOL_VERSION = 1;
+function boundedText(value, fallback, maxLength) {
+  return String(value ?? fallback).slice(0, maxLength);
+}
+
+export function toRuntimeErrorPayload(error) {
+  return {
+    code: boundedText(error?.code, 'PREVIEW_START_FAILED', 128),
+    path: boundedText(error?.path, '$', 2048),
+    message: boundedText(error?.message, error, 4096)
+  };
+}
+
+function exactKeys(value, keys) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function validIncomingEnvelope(data, type) {
+  return exactKeys(data, ['protocol', 'type', 'revision', 'requestId', 'payload'])
+    && data.protocol === PREVIEW_PROTOCOL_VERSION
+    && data.type === type
+    && Number.isInteger(data.revision)
+    && data.revision >= -1
+    && typeof data.requestId === 'string'
+    && data.requestId.length > 0
+    && data.requestId.length <= 128
+    && data.payload && typeof data.payload === 'object' && !Array.isArray(data.payload);
+}
+
+function validCommand(data) {
+  if (!validIncomingEnvelope(data, 'editor-preview:command')
+    || !exactKeys(data.payload, ['name', 'payload'])
+    || !exactKeys(data.payload.payload, data.payload.name === 'viewport' ? ['preset', 'reducedMotion'] : [])) return false;
+  if (!['enter-story', 'explore', 'restart', 'viewport'].includes(data.payload.name)) return false;
+  return data.payload.name !== 'viewport'
+    || (['desktop', 'mobile'].includes(data.payload.payload.preset)
+      && typeof data.payload.payload.reducedMotion === 'boolean');
+}
 
 function waitForProductionSurface(runtime) {
   const map = runtime?.map;
@@ -128,6 +170,7 @@ export function startEditorPreviewHost({
     activeResolver = null;
     activeSnapshot = null;
 
+    validatePreviewSnapshot(snapshot);
     const resolver = createResolver(structuredClone(snapshot));
     try {
       const runtime = await startProductionApplication({
@@ -170,11 +213,7 @@ export function startEditorPreviewHost({
       }
     } catch (error) {
       resolver.revoke();
-      post('runtime-error', snapshot.revision, {
-        code: error?.code ?? 'PREVIEW_START_FAILED',
-        path: error?.path ?? '$',
-        message: error?.message ?? String(error)
-      }, requestId);
+      post('runtime-error', snapshot.revision, toRuntimeErrorPayload(error), requestId);
       throw error;
     }
   }
@@ -194,24 +233,32 @@ export function startEditorPreviewHost({
     else if (name === 'restart' && latestRequestedSnapshot) {
       void start(latestRequestedSnapshot, data.requestId).catch(() => {});
     }
-    else if (name === 'viewport') post('state', activeSnapshot?.revision ?? 0, { viewport: data.payload.payload }, data.requestId);
+    else if (name === 'viewport') {
+      const viewport = data.payload.payload;
+      const root = windowRef.document?.documentElement;
+      if (root?.dataset) root.dataset.reducedMotion = String(viewport.reducedMotion);
+      post('state', activeSnapshot?.revision ?? 0, { viewport }, data.requestId);
+    }
   }
 
   function handleMessage(event) {
     if (event.source !== windowRef.parent || event.origin !== expectedOrigin) return;
     const data = event.data;
-    if (!data || data.protocol !== PREVIEW_PROTOCOL_VERSION) return;
+    if (!data || typeof data !== 'object') return;
     if (data.type === 'editor-preview:hello') {
+      if (!validIncomingEnvelope(data, 'editor-preview:hello') || !exactKeys(data.payload, [])) return;
       post('ready', 0, {}, data.requestId);
       return;
     }
     if (data.type === 'editor-preview:start') {
-      if (!data.payload || data.payload.revision !== data.revision) return;
+      if (!validIncomingEnvelope(data, 'editor-preview:start')) return;
+      try { validatePreviewSnapshot(data.payload); } catch { return; }
+      if (data.payload.revision !== data.revision) return;
       if (latestRequestedSnapshot && data.revision <= latestRequestedSnapshot.revision) return;
       void start(data.payload, data.requestId).catch(() => {});
       return;
     }
-    if (data.type === 'editor-preview:command' && data.revision === latestRequestedSnapshot?.revision) handleCommand(data);
+    if (validCommand(data) && data.revision === latestRequestedSnapshot?.revision) handleCommand(data);
   }
 
   windowRef.addEventListener('message', handleMessage);

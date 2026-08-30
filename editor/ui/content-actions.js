@@ -78,6 +78,7 @@ export function createContentActionEditor({
   contentDescriptors,
   actionDescriptors,
   catalogs = {},
+  announce = () => {},
   save
 }) {
   let current = clone(story);
@@ -189,6 +190,7 @@ export function createContentActionEditor({
         selected.content.blocks.splice(options.blockIndex + 1, 0, clone(block));
       } else if (name === 'move-block') {
         selected.content.blocks = moveArrayItem(selected.content.blocks, options.from, options.to);
+        announce(`Block moved to position ${options.to + 1} of ${selected.content.blocks.length}.`);
       } else if (name === 'delete-block') {
         if (selected.content.blocks.length === 1) throw new TypeError('A Story state must contain at least one block.');
         selected.content.blocks.splice(options.blockIndex, 1);
@@ -204,6 +206,7 @@ export function createContentActionEditor({
         selected.map[options.phase].splice(options.actionIndex + 1, 0, clone(action));
       } else if (name === 'move-action') {
         selected.map[options.phase] = moveArrayItem(selected.map[options.phase], options.from, options.to);
+        announce(`Action moved to position ${options.to + 1} of ${selected.map[options.phase].length}.`);
       } else if (name === 'delete-action') {
         selected.map[options.phase].splice(options.actionIndex, 1);
       } else throw new TypeError(`Unknown content/action command: ${name}`);

@@ -1,6 +1,10 @@
 import { createDraftStore } from './core/draft-store.js';
 import { createNewProjectEntries, createPackageStore } from './core/package-store.js';
-import { createValidationCoordinator } from './core/validation.js';
+import {
+  createSourceRepairModel,
+  createValidationCoordinator,
+  createValidationNavigationIndex
+} from './core/validation.js';
 import { createPreviewBridge } from './preview/bridge.js';
 import { renderEntityInspector } from './ui/inspectors.js';
 import { createStoryEditor } from './ui/story-editor.js';
@@ -12,6 +16,8 @@ import {
   createMemoryStorageAdapter,
   createZipStorageAdapter
 } from './storage/adapters.js';
+
+const decoder = new TextDecoder();
 
 export async function savePackageChanges({
   adapter,
@@ -46,6 +52,10 @@ export function createEditor({
 } = {}) {
   const elements = {
     newProject: documentRef.getElementById('new-project'),
+    openFolder: documentRef.getElementById('open-folder'),
+    importZip: documentRef.getElementById('import-zip'),
+    save: documentRef.getElementById('save-project'),
+    exportZip: documentRef.getElementById('export-project-zip'),
     validate: documentRef.getElementById('validate-project'),
     previewStatus: documentRef.getElementById('preview-status'),
     dirtyStatus: documentRef.getElementById('dirty-status'),
@@ -57,7 +67,8 @@ export function createEditor({
     frame: documentRef.getElementById('preview-frame'),
     paused: documentRef.getElementById('preview-paused'),
     desktop: documentRef.getElementById('preview-desktop'),
-    mobile: documentRef.getElementById('preview-mobile')
+    mobile: documentRef.getElementById('preview-mobile'),
+    orderingAnnouncements: documentRef.getElementById('ordering-announcements')
   };
   elements.inspector = documentRef.querySelector?.('.editor-inspector') ?? null;
   elements.navigation = documentRef.querySelector?.('.editor-navigation') ?? null;
@@ -65,6 +76,7 @@ export function createEditor({
   let storageAdapter = null;
   let draftStore = null;
   let validation = null;
+  let navigationIndex = createValidationNavigationIndex();
   let lastSentRevision = -1;
   let previewTelemetry = null;
   let primaryStoryPath = null;
@@ -74,6 +86,7 @@ export function createEditor({
   let actionPhaseSelection = 'enter';
   let blockSelection = 0;
   let actionSelection = '';
+  let viewportPreset = 'desktop';
 
   function inspect(kind, options = {}) {
     if (!draftStore || !packageStore) throw new TypeError('Create or open a project before authoring.');
@@ -198,6 +211,7 @@ export function createEditor({
       },
       announce(message) {
         elements.validationStatus.textContent = message;
+        if (elements.orderingAnnouncements) elements.orderingAnnouncements.textContent = message;
       },
       ...options
     });
@@ -216,6 +230,20 @@ export function createEditor({
 
   function labeled(panel, text, control) {
     const label = node('label', text);
+    const status = panel.querySelector?.('.authoring-status')
+      ?? elements.inspector.querySelector?.('.authoring-status');
+    const requiredIds = new Set([
+      'author-dataset-id', 'author-dataset-label', 'author-dataset-file',
+      'author-asset-id', 'author-asset-file', 'author-metric-id', 'author-metric-label',
+      'author-focus-id', 'author-attribution-id', 'author-attribution-name',
+      'author-story-title', 'author-state-title'
+    ]);
+    if (requiredIds.has(control.id)) control.required = true;
+    if (status?.id) {
+      control.setAttribute('aria-describedby', status.id);
+      control.setAttribute('aria-errormessage', status.id);
+    }
+    if (!control.hasAttribute?.('aria-required')) control.setAttribute('aria-required', String(Boolean(control.required)));
     label.append(control);
     panel.append(label);
     return control;
@@ -225,7 +253,7 @@ export function createEditor({
     elements.inspector.querySelector?.('.authoring-panel')?.remove();
     const panel = node('section', undefined, { className: 'authoring-panel' });
     panel.append(node('h3', title));
-    const status = node('p', '', { role: 'status', 'aria-live': 'polite', className: 'authoring-status' });
+    const status = node('p', '', { id: 'authoring-status', role: 'status', 'aria-live': 'polite', className: 'authoring-status' });
     panel.append(status);
     elements.inspector.append(panel);
     return { panel, status };
@@ -263,13 +291,21 @@ export function createEditor({
     status.textContent = error ? error.message : message;
   }
 
-  function refreshPanel(render, message) {
+  function focusControl(id) {
+    if (!id) return;
+    documentRef.getElementById(id)?.focus?.();
+  }
+
+  function refreshPanel(render, message, { focusId } = {}) {
     render();
     const status = elements.inspector.querySelector?.('.authoring-status');
     if (status) status.textContent = message;
+    focusControl(focusId);
   }
 
-  function scalarControl(panel, labelText, id, value, onChange, { type = 'text', options, readOnly = false } = {}) {
+  function scalarControl(panel, labelText, id, value, onChange, {
+    type = 'text', options, readOnly = false, required = false
+  } = {}) {
     const control = options
       ? selectInput(id, options.map((item) => [item.value ?? item, item.label ?? item.value ?? item]))
       : type === 'checkbox' ? checkboxInput(id, Boolean(value))
@@ -277,6 +313,8 @@ export function createEditor({
     if (type !== 'checkbox') control.value = value ?? '';
     control.readOnly = readOnly;
     control.disabled = readOnly;
+    control.required = required;
+    control.setAttribute('aria-required', String(required));
     if (!readOnly) control.addEventListener('change', () => {
       const next = type === 'checkbox' ? control.checked
         : ['number', 'integer'].includes(type) && control.value !== '' ? Number(control.value) : control.value;
@@ -303,7 +341,7 @@ export function createEditor({
       const input = scalarControl(container, relative, id, control.kind === 'array' ? (control.value ?? []).join(', ') : control.value, (value) => {
         const normalized = control.kind === 'array' ? value.split(',').map((item) => item.trim()).filter(Boolean) : value;
         onChange(relative, normalized);
-      }, { type, options: control.options });
+      }, { type, options: control.options, required: control.required === true });
       inputs.push({ control, relative, input });
     }
     return {
@@ -629,7 +667,12 @@ export function createEditor({
     storySelect.value = storyItems.some(({ id }) => id === storySelection) ? storySelection : currentManifest.stories.primary;
     storySelection = storySelect.value;
     const selectedItem = storyItems.find(({ id }) => id === storySelect.value);
-    const selectedStory = draftStore.get(selectedItem.src.replace(/^\.\//, ''));
+    const selectedStoryPath = selectedItem.src.replace(/^\.\//, '');
+    const selectedStory = draftStore.get(selectedStoryPath);
+    if (!selectedStory) {
+      renderSourceRepair(selectedStoryPath);
+      return;
+    }
     const storyModel = editor.story(storySelect.value);
     panel.append(node('p', `Primary Story: ${currentManifest.stories.primary} · Selected schema ${selectedStory.schemaVersion}`));
     storySelect.addEventListener('change', () => {
@@ -642,10 +685,20 @@ export function createEditor({
     const storyTitle = labeled(panel, 'New Story title', textInput('author-story-title', 'New Story'));
     panel.append(
       button('Add Story', 'author-story-add', () => {
-        try { editor.command('add-story', { title: storyTitle.value }); refreshPanel(renderStoryPanel, 'Added Story.'); } catch (error) { setStatus(status, '', error); }
+        try {
+          const created = editor.command('add-story', { title: storyTitle.value });
+          storySelection = created.id;
+          stateSelection = 0;
+          refreshPanel(renderStoryPanel, 'Added Story.', { focusId: 'author-state-layout' });
+        } catch (error) { setStatus(status, '', error); }
       }),
       button('Remove Story', 'author-story-remove', () => {
-        try { editor.command('remove-story', storySelect.value); refreshPanel(renderStoryPanel, 'Removed Story.'); } catch (error) { setStatus(status, '', error); }
+        try {
+          const neighbor = storyItems[storyPosition + 1] ?? storyItems[storyPosition - 1];
+          editor.command('remove-story', storySelect.value);
+          storySelection = neighbor?.id ?? null;
+          refreshPanel(renderStoryPanel, 'Removed Story.', { focusId: 'author-story-select' });
+        } catch (error) { setStatus(status, '', error); }
       }),
       button('Set primary', 'author-story-primary', () => {
         editor.command('set-primary', storySelect.value); refreshPanel(renderStoryPanel, `Set ${storySelect.value} primary.`);
@@ -653,8 +706,8 @@ export function createEditor({
     );
     const storyPosition = storyItems.findIndex(({ id }) => id === storySelect.value);
     panel.append(
-      button('Move Story Up', 'author-story-up', () => { if (storyPosition > 0) { editor.command('move-story', { from: storyPosition, to: storyPosition - 1 }); refreshPanel(renderStoryPanel, 'Moved Story up.'); } }),
-      button('Move Story Down', 'author-story-down', () => { if (storyPosition < storyItems.length - 1) { editor.command('move-story', { from: storyPosition, to: storyPosition + 1 }); refreshPanel(renderStoryPanel, 'Moved Story down.'); } })
+      button('Move Story Up', 'author-story-up', () => { if (storyPosition > 0) { editor.command('move-story', { from: storyPosition, to: storyPosition - 1 }); refreshPanel(renderStoryPanel, 'Moved Story up.', { focusId: 'author-story-up' }); } }),
+      button('Move Story Down', 'author-story-down', () => { if (storyPosition < storyItems.length - 1) { editor.command('move-story', { from: storyPosition, to: storyPosition + 1 }); refreshPanel(renderStoryPanel, 'Moved Story down.', { focusId: 'author-story-down' }); } })
     );
 
     const stateIndex = labeled(panel, 'State', selectInput('author-state-index', selectedStory.states.map((state, index) => [String(index), `${index + 1}. ${state.id}`])));
@@ -669,13 +722,17 @@ export function createEditor({
     const state = selectedStory.states[Number(stateIndex.value)];
     const title = labeled(panel, 'New state title', textInput('author-state-title', 'Details'));
     panel.append(button('Add state', 'author-state-add', () => {
-      try { storyModel.command('add-state', { title: title.value }); refreshPanel(renderStoryPanel, 'Added state.'); } catch (error) { setStatus(status, '', error); }
+      try {
+        storyModel.command('add-state', { title: title.value });
+        stateSelection = selectedStory.states.length;
+        refreshPanel(renderStoryPanel, 'Added state.', { focusId: 'author-state-layout' });
+      } catch (error) { setStatus(status, '', error); }
     }));
     if (selectedStory.schemaVersion === '1.1') panel.append(
-      button('Duplicate state', 'author-state-duplicate', () => { storyModel.command('duplicate-state', Number(stateIndex.value)); refreshPanel(renderStoryPanel, 'Duplicated state.'); }),
-      button('Delete state', 'author-state-delete', () => { try { storyModel.command('delete-state', Number(stateIndex.value)); refreshPanel(renderStoryPanel, 'Deleted state.'); } catch (error) { setStatus(status, '', error); } }),
-      button('Move state up', 'author-state-up', () => { const from = Number(stateIndex.value); if (from > 0) { storyModel.command('move-state', { from, to: from - 1 }); refreshPanel(renderStoryPanel, 'Moved state up.'); } }),
-      button('Move state down', 'author-state-down', () => { const from = Number(stateIndex.value); if (from < selectedStory.states.length - 1) { storyModel.command('move-state', { from, to: from + 1 }); refreshPanel(renderStoryPanel, 'Moved state down.'); } })
+      button('Duplicate state', 'author-state-duplicate', () => { stateSelection = Number(stateIndex.value) + 1; storyModel.command('duplicate-state', Number(stateIndex.value)); refreshPanel(renderStoryPanel, 'Duplicated state.', { focusId: 'author-state-layout' }); }),
+      button('Delete state', 'author-state-delete', () => { try { stateSelection = Math.min(Number(stateIndex.value), selectedStory.states.length - 2); storyModel.command('delete-state', Number(stateIndex.value)); refreshPanel(renderStoryPanel, 'Deleted state.', { focusId: 'author-state-index' }); } catch (error) { setStatus(status, '', error); } }),
+      button('Move state up', 'author-state-up', () => { const from = Number(stateIndex.value); if (from > 0) { stateSelection = from - 1; storyModel.command('move-state', { from, to: from - 1 }); refreshPanel(renderStoryPanel, 'Moved state up.', { focusId: 'author-state-up' }); } }),
+      button('Move state down', 'author-state-down', () => { const from = Number(stateIndex.value); if (from < selectedStory.states.length - 1) { stateSelection = from + 1; storyModel.command('move-state', { from, to: from + 1 }); refreshPanel(renderStoryPanel, 'Moved state down.', { focusId: 'author-state-down' }); } })
     );
     scalarControl(panel, 'Layout', 'author-state-layout', state.content.layout, (layout) => storyModel.command('set-layout', { stateIndex: Number(stateIndex.value), layout }), { options: storyModel.layoutOptions().map((value) => ({ value, label: value })) });
     scalarControl(panel, 'Presenter note', 'author-state-note', state.content.presenterNote ?? '', (note) => storyModel.command('set-presenter-note', { stateIndex: Number(stateIndex.value), note }));
@@ -687,7 +744,8 @@ export function createEditor({
       panel.append(button('Add content block', 'author-block-add', () => {
         try {
           authoring.command('add-block', { stateIndex: Number(stateIndex.value), type: blockType.value });
-          refreshPanel(renderStoryPanel, `Added ${blockType.value} block.`);
+          blockSelection = state.content.blocks.length;
+          refreshPanel(renderStoryPanel, `Added ${blockType.value} block.`, { focusId: 'author-block-existing' });
         } catch (error) { setStatus(status, '', error); }
       }));
     }
@@ -721,9 +779,9 @@ export function createEditor({
     }
     if (authoring) blockInspector.append(
       button('Duplicate block', 'author-block-duplicate', () => { authoring.command('duplicate-block', { stateIndex: Number(stateIndex.value), blockIndex }); refreshPanel(renderStoryPanel, 'Duplicated block.'); }),
-      button('Delete block', 'author-block-delete', () => { try { authoring.command('delete-block', { stateIndex: Number(stateIndex.value), blockIndex }); refreshPanel(renderStoryPanel, 'Deleted block.'); } catch (error) { setStatus(status, '', error); } }),
-      button('Move Block Up', 'author-block-up', () => { if (blockIndex > 0) { authoring.command('move-block', { stateIndex: Number(stateIndex.value), from: blockIndex, to: blockIndex - 1 }); refreshPanel(renderStoryPanel, 'Moved block up.'); } }),
-      button('Move Block Down', 'author-block-down', () => { if (blockIndex < state.content.blocks.length - 1) { authoring.command('move-block', { stateIndex: Number(stateIndex.value), from: blockIndex, to: blockIndex + 1 }); refreshPanel(renderStoryPanel, 'Moved block down.'); } })
+      button('Delete block', 'author-block-delete', () => { try { blockSelection = Math.max(0, Math.min(blockIndex, state.content.blocks.length - 2)); authoring.command('delete-block', { stateIndex: Number(stateIndex.value), blockIndex }); refreshPanel(renderStoryPanel, 'Deleted block.', { focusId: 'author-block-existing' }); } catch (error) { setStatus(status, '', error); } }),
+      button('Move Block Up', 'author-block-up', () => { if (blockIndex > 0) { blockSelection = blockIndex - 1; authoring.command('move-block', { stateIndex: Number(stateIndex.value), from: blockIndex, to: blockIndex - 1 }); refreshPanel(renderStoryPanel, 'Moved block up.', { focusId: 'author-block-up' }); } }),
+      button('Move Block Down', 'author-block-down', () => { if (blockIndex < state.content.blocks.length - 1) { blockSelection = blockIndex + 1; authoring.command('move-block', { stateIndex: Number(stateIndex.value), from: blockIndex, to: blockIndex + 1 }); refreshPanel(renderStoryPanel, 'Moved block down.', { focusId: 'author-block-down' }); } })
     );
 
     if (selectedStory.schemaVersion === '1.0') {
@@ -761,7 +819,8 @@ export function createEditor({
       try {
         if (!addValues) throw Object.assign(new Error('The selected action has no safe GUI schema.'), { code: 'GUI_SCHEMA_UNSUPPORTED' });
         authoring.command('add-action', { stateIndex: Number(stateIndex.value), phase: phase.value, type: actionType.value, values: addValues.values() });
-        refreshPanel(renderStoryPanel, `Added ${actionType.value}.`);
+        actionSelection = String(state.map[phase.value].length);
+        refreshPanel(renderStoryPanel, `Added ${actionType.value}.`, { focusId: 'author-action-existing' });
       } catch (error) { setStatus(status, '', error); }
     }));
     const actions = state.map[phase.value];
@@ -781,9 +840,9 @@ export function createEditor({
       });
       actionInspector.append(
         button('Duplicate action', 'author-action-duplicate', () => { authoring.command('duplicate-action', { stateIndex: Number(stateIndex.value), phase: phase.value, actionIndex }); refreshPanel(renderStoryPanel, 'Duplicated action.'); }),
-        button('Delete action', 'author-action-delete', () => { authoring.command('delete-action', { stateIndex: Number(stateIndex.value), phase: phase.value, actionIndex }); refreshPanel(renderStoryPanel, 'Deleted action.'); }),
-        button('Move Action Up', 'author-action-up', () => { if (actionIndex > 0) { authoring.command('move-action', { stateIndex: Number(stateIndex.value), phase: phase.value, from: actionIndex, to: actionIndex - 1 }); refreshPanel(renderStoryPanel, 'Moved action up.'); } }),
-        button('Move Action Down', 'author-action-down', () => { if (actionIndex < state.map[phase.value].length - 1) { authoring.command('move-action', { stateIndex: Number(stateIndex.value), phase: phase.value, from: actionIndex, to: actionIndex + 1 }); refreshPanel(renderStoryPanel, 'Moved action down.'); } })
+        button('Delete action', 'author-action-delete', () => { actionSelection = state.map[phase.value].length > 1 ? String(Math.min(actionIndex, state.map[phase.value].length - 2)) : ''; authoring.command('delete-action', { stateIndex: Number(stateIndex.value), phase: phase.value, actionIndex }); refreshPanel(renderStoryPanel, 'Deleted action.', { focusId: 'author-action-existing' }); }),
+        button('Move Action Up', 'author-action-up', () => { if (actionIndex > 0) { actionSelection = String(actionIndex - 1); authoring.command('move-action', { stateIndex: Number(stateIndex.value), phase: phase.value, from: actionIndex, to: actionIndex - 1 }); refreshPanel(renderStoryPanel, 'Moved action up.', { focusId: 'author-action-up' }); } }),
+        button('Move Action Down', 'author-action-down', () => { if (actionIndex < state.map[phase.value].length - 1) { actionSelection = String(actionIndex + 1); authoring.command('move-action', { stateIndex: Number(stateIndex.value), phase: phase.value, from: actionIndex, to: actionIndex + 1 }); refreshPanel(renderStoryPanel, 'Moved action down.', { focusId: 'author-action-down' }); } })
       );
     }
     actionSelect.addEventListener('change', () => { actionSelection = actionSelect.value; refreshPanel(renderStoryPanel, actionSelection === '' ? 'No action selected.' : `Selected action ${Number(actionSelection) + 1}.`); });
@@ -887,6 +946,7 @@ export function createEditor({
     onEvent(event) {
       if (event.type === 'editor-preview:ready') {
         if (!packageStore) elements.previewStatus.textContent = 'Preview ready';
+        setViewport(viewportPreset);
       } else if (event.type === 'editor-preview:loaded') {
         elements.iframe.dataset.previewRevision = String(event.revision);
         elements.previewStatus.textContent = `Preview revision ${event.revision}`;
@@ -906,16 +966,131 @@ export function createEditor({
     elements.dirtyStatus.textContent = packageStore?.dirty ? 'Unsaved changes' : 'No unsaved changes';
   }
 
+  function buildNavigationIndex() {
+    const manifest = draftStore?.get('project.json');
+    const records = [{
+      packagePath: 'project.json', path: '$', selection: { section: 'project' }, controlId: 'author-project-title'
+    }];
+    if (!manifest) return createValidationNavigationIndex(records);
+    records.push({
+      packagePath: 'project.json', path: '$.locale', selection: { section: 'project' }, controlId: 'project-locale'
+    });
+    for (const [registry, section, controlId] of [
+      ['datasets', 'datasets', 'author-dataset-existing'],
+      ['assets', 'assets', 'author-asset-existing'],
+      ['focusTargets', 'focus', 'author-focus-existing'],
+      ['attribution', 'attribution', 'author-attribution-existing']
+    ]) {
+      for (const id of Object.keys(manifest[registry] ?? {})) records.push({
+        packagePath: 'project.json',
+        path: `$.${registry}.${id}`,
+        selection: { section, entityId: id },
+        controlId
+      });
+    }
+    for (const item of manifest.stories?.items ?? []) {
+      const packagePath = item.src.replace(/^\.\//, '');
+      const story = draftStore.get(packagePath);
+      records.push({
+        packagePath, path: '$', selection: { section: 'stories', storyId: item.id }, controlId: 'author-story-select'
+      });
+      for (const [stateIndex, state] of (story?.states ?? []).entries()) {
+        records.push({
+          packagePath,
+          path: `$.states[${stateIndex}]`,
+          selection: { section: 'stories', storyId: item.id, stateIndex },
+          controlId: 'author-state-index'
+        });
+        for (const [blockIndex] of (state.content?.blocks ?? []).entries()) records.push({
+          packagePath,
+          path: `$.states[${stateIndex}].content.blocks[${blockIndex}]`,
+          selection: { section: 'stories', storyId: item.id, stateIndex, blockIndex },
+          controlId: 'author-block-existing'
+        });
+        for (const phase of ['enter', 'exit']) {
+          for (const [actionIndex] of (state.map?.[phase] ?? []).entries()) records.push({
+            packagePath,
+            path: `$.states[${stateIndex}].map.${phase}[${actionIndex}]`,
+            selection: { section: 'stories', storyId: item.id, stateIndex, phase, actionIndex },
+            controlId: 'author-action-existing'
+          });
+        }
+      }
+    }
+    return createValidationNavigationIndex(records);
+  }
+
+  function renderSourceRepair(packagePath) {
+    const model = createSourceRepairModel({ packageStore, draftStore, packagePath });
+    const { panel, status } = authoringPanel(`Repair ${packagePath}`);
+    const textarea = node('textarea', undefined, {
+      id: 'source-repair-text',
+      spellcheck: 'false',
+      'aria-describedby': 'source-repair-help authoring-status',
+      'aria-errormessage': 'authoring-status',
+      'aria-required': 'true'
+    });
+    textarea.value = model.text;
+    const label = node('label', `Production JSON source for ${packagePath}`);
+    label.append(textarea);
+    panel.append(label, node('p', 'Repair only this known production JSON file. Tailored controls return when it parses.', { id: 'source-repair-help' }));
+    status.textContent = 'JSON syntax must be repaired before tailored controls are available.';
+    textarea.addEventListener('input', () => {
+      const result = model.replace(textarea.value);
+      renderDirty();
+      if (!result.parseable) {
+        status.textContent = 'JSON syntax is still invalid.';
+        return;
+      }
+      validation?.schedule();
+      initializeDraftControls();
+      focusControl(packagePath === 'project.json' ? 'project-locale' : 'author-story-select');
+    });
+    textarea.focus?.();
+  }
+
+  function navigateDiagnostic(diagnostic) {
+    if (!draftStore.get(diagnostic.packagePath)) {
+      renderSourceRepair(diagnostic.packagePath);
+      return;
+    }
+    const target = navigationIndex.resolve(diagnostic);
+    if (!target) return;
+    const selection = target.selection;
+    activeSection = selection.section;
+    if (selection.storyId) storySelection = selection.storyId;
+    if (Number.isInteger(selection.stateIndex)) stateSelection = selection.stateIndex;
+    if (Number.isInteger(selection.blockIndex)) blockSelection = selection.blockIndex;
+    if (selection.phase) actionPhaseSelection = selection.phase;
+    if (Number.isInteger(selection.actionIndex)) actionSelection = String(selection.actionIndex);
+    const navigation = elements.navigation.querySelector?.(`[data-section="${selection.section}"]`);
+    navigation?.click();
+    const control = documentRef.getElementById(target.controlId);
+    if (selection.entityId && control) {
+      control.value = selection.entityId;
+      control.dispatchEvent?.(new windowRef.Event('change', { bubbles: true }));
+    }
+    focusControl(target.controlId);
+  }
+
   function renderDiagnostics(items) {
     elements.validationErrors.replaceChildren();
     for (const diagnostic of items) {
       const item = documentRef.createElement('li');
-      item.textContent = `${diagnostic.packagePath} ${diagnostic.path}: ${diagnostic.message}`;
+      const control = node('button', `${diagnostic.code} · ${diagnostic.packagePath} ${diagnostic.path}: ${diagnostic.message}`, {
+        type: 'button',
+        'aria-label': `Open ${diagnostic.code} at ${diagnostic.packagePath} ${diagnostic.path}`
+      });
+      control.addEventListener('click', () => navigateDiagnostic(diagnostic));
+      item.append(control);
       elements.validationErrors.append(item);
     }
+    elements.locale.setAttribute('aria-invalid', String(items.some(({ packagePath, path }) => packagePath === 'project.json' && path === '$.locale')));
+    elements.heading.setAttribute('aria-invalid', String(items.some(({ packagePath, path }) => packagePath === primaryStoryPath && path.includes('.content'))));
   }
 
   function handleValidationChange(state) {
+    navigationIndex = buildNavigationIndex();
     renderDirty();
     renderDiagnostics(state.diagnostics);
     if (state.status === 'validating') {
@@ -942,7 +1117,33 @@ export function createEditor({
     }
   }
 
-  async function startEntries({ origin, entries, adapter = null }) {
+  function initializeDraftControls() {
+    const manifest = draftStore.get('project.json');
+    elements.locale.disabled = !manifest;
+    elements.validate.disabled = false;
+    elements.exportZip.disabled = !manifest;
+    elements.save.disabled = !storageAdapter?.capabilities?.writeInPlace;
+    elements.save.textContent = storageAdapter?.capabilities?.writeInPlace ? 'Save' : 'Use Export Project ZIP';
+    if (!manifest) {
+      primaryStoryPath = null;
+      elements.heading.disabled = true;
+      elements.locale.value = '';
+      elements.heading.value = '';
+      renderSourceRepair('project.json');
+      return false;
+    }
+    elements.locale.value = manifest.locale ?? '';
+    const primary = manifest.stories?.items?.find(({ id }) => id === manifest.stories.primary);
+    primaryStoryPath = primary?.src?.replace(/^\.\//, '') ?? null;
+    const primaryStory = primaryStoryPath ? draftStore.get(primaryStoryPath) : undefined;
+    elements.heading.disabled = !primaryStory;
+    elements.heading.value = primaryStory?.states?.[0]?.content?.blocks?.find(({ type }) => type === 'heading')?.text ?? '';
+    renderAuthoringNavigation();
+    if (primaryStoryPath && !primaryStory) renderSourceRepair(primaryStoryPath);
+    return true;
+  }
+
+  async function startEntries({ origin, capabilities, entries, adapter = null }) {
     validation?.dispose();
     bridge.reset();
     packageStore = createPackageStore({
@@ -959,15 +1160,11 @@ export function createEditor({
     actionPhaseSelection = 'enter';
     blockSelection = 0;
     actionSelection = '';
-    const manifest = draftStore.get('project.json');
-    primaryStoryPath = manifest.stories.items.find(({ id }) => id === manifest.stories.primary).src.replace(/^\.\//, '');
-    const story = draftStore.get(primaryStoryPath);
-    elements.locale.disabled = false;
-    elements.heading.disabled = false;
-    elements.validate.disabled = false;
-    elements.locale.value = manifest.locale;
-    elements.heading.value = story.states[0].content.blocks.find(({ type }) => type === 'heading')?.text ?? '';
-    renderAuthoringNavigation();
+    if (storageAdapter && !storageAdapter.capabilities && capabilities) {
+      storageAdapter = { ...storageAdapter, capabilities };
+    }
+    initializeDraftControls();
+    navigationIndex = buildNavigationIndex();
     renderDirty();
     return validation.validateNow();
   }
@@ -1021,13 +1218,53 @@ export function createEditor({
 
   function setViewport(preset) {
     const mobile = preset === 'mobile';
+    viewportPreset = mobile ? 'mobile' : 'desktop';
     elements.frame.classList.toggle('preview-frame--desktop', !mobile);
     elements.frame.classList.toggle('preview-frame--mobile', mobile);
     elements.desktop.setAttribute('aria-pressed', String(!mobile));
     elements.mobile.setAttribute('aria-pressed', String(mobile));
+    bridge.command('viewport', {
+      preset: viewportPreset,
+      reducedMotion: Boolean(windowRef.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+    });
   }
 
   elements.newProject.addEventListener('click', () => { void newProject(); });
+  elements.openFolder.disabled = !canOpenFolder(windowRef);
+  elements.openFolder.addEventListener('click', () => {
+    void openFolder().catch((error) => { elements.validationStatus.textContent = error.message; });
+  });
+  elements.importZip.addEventListener('change', () => {
+    const file = elements.importZip.files?.[0];
+    if (!file) return;
+    void importZip(file, { label: file.name }).catch((error) => {
+      elements.validationStatus.textContent = error.message;
+    });
+  });
+  elements.save.addEventListener('click', () => {
+    void save().then((result) => {
+      const failed = result.failed.length;
+      elements.validationStatus.textContent = failed
+        ? `Save wrote ${result.written.length} file(s); ${failed} failed; ${result.skipped.length} skipped.`
+        : `Saved ${result.written.length} changed file(s).`;
+    }).catch((error) => { elements.validationStatus.textContent = error.message; });
+  });
+  elements.exportZip.addEventListener('click', () => {
+    void exportZip().then((zipBytes) => {
+      const urlApi = windowRef.URL ?? globalThis.URL;
+      const url = urlApi.createObjectURL(new Blob([zipBytes], { type: 'application/zip' }));
+      const link = documentRef.createElement('a');
+      link.href = url;
+      link.download = 'project.zip';
+      link.textContent = 'Download project ZIP';
+      link.hidden = true;
+      documentRef.body.append(link);
+      link.click();
+      link.remove();
+      urlApi.revokeObjectURL(url);
+      elements.validationStatus.textContent = 'Exported production project ZIP.';
+    }).catch((error) => { elements.validationStatus.textContent = error.message; });
+  });
   elements.validate.addEventListener('click', () => { void validation?.validateNow(); });
   elements.heading.addEventListener('input', () => {
     if (!draftStore || !primaryStoryPath) return;

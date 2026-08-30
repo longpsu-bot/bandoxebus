@@ -1,4 +1,5 @@
 export const PREVIEW_PROTOCOL_VERSION = 1;
+export const PREVIEW_PACKAGE_MAX_BYTES = 256 * 1024 * 1024;
 
 const EVENT_TYPES = new Set([
   'editor-preview:ready',
@@ -11,6 +12,87 @@ const START_RESPONSE_TYPES = new Set([
   'editor-preview:loaded',
   'editor-preview:runtime-error'
 ]);
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasExactKeys(value, keys) {
+  if (!isRecord(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function isRequestId(value) {
+  return value === null || (typeof value === 'string' && value.length > 0 && value.length <= 128);
+}
+
+function validEnvelope(data, types) {
+  return hasExactKeys(data, ['protocol', 'type', 'revision', 'requestId', 'payload'])
+    && data.protocol === PREVIEW_PROTOCOL_VERSION
+    && types.has(data.type)
+    && Number.isInteger(data.revision)
+    && data.revision >= -1
+    && isRequestId(data.requestId)
+    && isRecord(data.payload);
+}
+
+function validRuntimeError(payload) {
+  return hasExactKeys(payload, ['code', 'path', 'message'])
+    && typeof payload.code === 'string' && payload.code.length <= 128
+    && typeof payload.path === 'string' && payload.path.length <= 2048
+    && typeof payload.message === 'string' && payload.message.length <= 4096;
+}
+
+function validEventPayload(data) {
+  if (data.type === 'editor-preview:ready' || data.type === 'editor-preview:loaded') {
+    return hasExactKeys(data.payload, []);
+  }
+  if (data.type === 'editor-preview:runtime-error') return validRuntimeError(data.payload);
+  if (data.type === 'editor-preview:state') return hasExactKeys(data.payload, ['viewport']);
+  if (data.type === 'editor-preview:camera') {
+    return hasExactKeys(data.payload, ['center', 'zoom', 'pitch', 'bearing', 'bounds']);
+  }
+  return false;
+}
+
+export function isPreviewPackageWithinLimit(entries, maxBytes = PREVIEW_PACKAGE_MAX_BYTES) {
+  let total = 0;
+  for (const entry of entries ?? []) {
+    const length = entry?.bytes?.byteLength;
+    if (!Number.isSafeInteger(length) || length < 0) return false;
+    total += length;
+    if (total > maxBytes) return false;
+  }
+  return true;
+}
+
+export function validatePreviewSnapshot(snapshot) {
+  if (!hasExactKeys(snapshot, ['revision', 'entries'])
+    || !Number.isInteger(snapshot.revision) || snapshot.revision < 0
+    || !Array.isArray(snapshot.entries)
+    || !snapshot.entries.every((entry) => (
+      hasExactKeys(entry, ['path', 'bytes', 'mediaType', 'kind'])
+      && typeof entry.path === 'string'
+      && entry.bytes instanceof Uint8Array
+      && typeof entry.mediaType === 'string'
+      && typeof entry.kind === 'string'
+    ))
+    || !isPreviewPackageWithinLimit(snapshot.entries)) {
+    throw new TypeError('Invalid or oversized preview snapshot.');
+  }
+  return snapshot;
+}
+
+function validCommandPayload(payload) {
+  if (!hasExactKeys(payload, ['name', 'payload']) || !isRecord(payload.payload)) return false;
+  if (!['enter-story', 'explore', 'restart', 'viewport'].includes(payload.name)) return false;
+  if (payload.name !== 'viewport') return hasExactKeys(payload.payload, []);
+  return hasExactKeys(payload.payload, ['preset', 'reducedMotion'])
+    && ['desktop', 'mobile'].includes(payload.payload.preset)
+    && typeof payload.payload.reducedMotion === 'boolean';
+}
 
 function envelope(type, revision, requestId, payload = {}) {
   return { protocol: PREVIEW_PROTOCOL_VERSION, type, revision, requestId, payload };
@@ -43,7 +125,7 @@ export function createPreviewBridge({
   function handleMessage(event) {
     if (event.source !== iframe.contentWindow || event.origin !== origin) return;
     const data = event.data;
-    if (!data || data.protocol !== PREVIEW_PROTOCOL_VERSION || !EVENT_TYPES.has(data.type)) return;
+    if (!validEnvelope(data, EVENT_TYPES) || !validEventPayload(data)) return;
     if (data.type === 'editor-preview:ready') {
       if (requireReadyRequest && (!readyRequestId || data.requestId !== readyRequestId)) return;
       ready = true;
@@ -67,6 +149,10 @@ export function createPreviewBridge({
   iframe.addEventListener?.('load', handleLoad);
 
   function start(lastValid) {
+    validatePreviewSnapshot(lastValid.snapshot);
+    if (lastValid.revision !== lastValid.snapshot.revision) {
+      throw new TypeError('Preview snapshot revision does not match last-valid revision.');
+    }
     currentRevision = lastValid.revision;
     currentStartRequestId = `request-${++requestNumber}`;
     queuedStart = envelope(
@@ -92,7 +178,9 @@ export function createPreviewBridge({
     if (!['enter-story', 'explore', 'restart', 'viewport'].includes(name)) {
       throw new TypeError(`Unsupported preview command: ${name}`);
     }
-    post(envelope('editor-preview:command', currentRevision, `request-${++requestNumber}`, { name, payload }));
+    const commandPayload = { name, payload };
+    if (!validCommandPayload(commandPayload)) throw new TypeError(`Invalid preview command payload: ${name}`);
+    post(envelope('editor-preview:command', currentRevision, `request-${++requestNumber}`, commandPayload));
   }
 
   function dispose() {

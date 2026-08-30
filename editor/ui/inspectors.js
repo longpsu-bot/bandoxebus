@@ -804,8 +804,13 @@ function renderProjectFields(model, { container, documentRef }) {
     label.textContent = labelText;
     const input = documentRef.createElement('input');
     input.type = control.inputType;
+    input.id = `author-project-${path.replaceAll('.', '-')}`;
     input.value = control.value ?? '';
     input.readOnly = control.readOnly;
+    input.required = ['title', 'locale'].includes(path);
+    input.setAttribute('aria-required', String(input.required));
+    input.setAttribute('aria-describedby', 'validation-status');
+    input.setAttribute('aria-errormessage', 'validation-status');
     input.dataset.path = path;
     if (path === 'map.minZoom' || path === 'map.maxZoom') {
       input.min = '0';
