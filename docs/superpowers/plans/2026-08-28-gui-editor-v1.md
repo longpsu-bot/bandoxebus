@@ -366,7 +366,7 @@ git commit -m "feat: validate editor drafts with last-valid promotion"
 ### Task 4: Add in-memory fetch/image transport and the narrow production asset hook
 
 **Files:**
-- Create: `editor/preview/package-resolver.js`
+- Modify: `editor/preview/package-resolver.js`
 - Modify: `src/project/project-loader.js`
 - Create: `tests/editor-package-resolver.test.mjs`
 - Modify: `tests/project-loader.test.mjs`
