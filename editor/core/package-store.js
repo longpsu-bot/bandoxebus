@@ -202,7 +202,7 @@ export function createPackageStore({ origin, entries = [] }) {
   }
 
   return {
-    origin: structuredClone(origin),
+    origin: origin?.kind === 'folder' ? { ...origin } : structuredClone(origin),
     get,
     list,
     setCurrentBytes,

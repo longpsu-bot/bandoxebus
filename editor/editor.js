@@ -6,6 +6,31 @@ import { renderEntityInspector } from './ui/inspectors.js';
 import { createStoryEditor } from './ui/story-editor.js';
 import { INSTALLED_CAPABILITY_REGISTRY } from '../src/capabilities/installed-capabilities.js';
 import { STORY_10_CONTENT_TYPES } from '../src/content/content-descriptors.js';
+import {
+  canOpenFolder,
+  createFolderStorageAdapter,
+  createMemoryStorageAdapter
+} from './storage/adapters.js';
+
+export async function savePackageChanges({
+  adapter,
+  packageStore,
+  validation,
+  confirmInvalid = async () => false
+}) {
+  if (!adapter?.writeChanges) throw new TypeError('The active project cannot be saved in place.');
+  const changeSet = packageStore.changeSet();
+  if (!changeSet.length) return { written: [], failed: [], skipped: [] };
+  if (validation?.status === 'invalid') {
+    const approved = await confirmInvalid(validation.diagnostics ?? []);
+    if (!approved) {
+      return { written: [], failed: [], skipped: changeSet.map(({ path }) => path) };
+    }
+  }
+  const result = await adapter.writeChanges(changeSet);
+  packageStore.markWritten(result.written);
+  return result;
+}
 
 export function createEditor({
   documentRef = globalThis.document,
@@ -29,6 +54,7 @@ export function createEditor({
   elements.inspector = documentRef.querySelector?.('.editor-inspector') ?? null;
   elements.navigation = documentRef.querySelector?.('.editor-navigation') ?? null;
   let packageStore = null;
+  let storageAdapter = null;
   let draftStore = null;
   let validation = null;
   let lastSentRevision = -1;
@@ -908,13 +934,14 @@ export function createEditor({
     }
   }
 
-  async function startEntries({ origin, entries }) {
+  async function startEntries({ origin, entries, adapter = null }) {
     validation?.dispose();
     bridge.reset();
     packageStore = createPackageStore({
       origin,
       entries
     });
+    storageAdapter = adapter;
     draftStore = createDraftStore({ packageStore });
     validation = createValidationCoordinator({ draftStore, onChange: handleValidationChange });
     lastSentRevision = -1;
@@ -938,14 +965,42 @@ export function createEditor({
   }
 
   async function newProject() {
-    return startEntries({
-      origin: { kind: 'memory', label: 'New project' },
+    const adapter = createMemoryStorageAdapter({
+      label: 'New project',
       entries: createNewProjectEntries({ id: 'new-project', title: 'New project', locale: 'en-US' })
     });
+    return openStorage(adapter);
   }
 
   async function openEntries(entries, { label = 'Memory package' } = {}) {
-    return startEntries({ origin: { kind: 'memory', label }, entries });
+    return openStorage(createMemoryStorageAdapter({ entries, label }));
+  }
+
+  async function openStorage(adapter) {
+    const opened = await adapter.open();
+    return startEntries({ ...opened, adapter });
+  }
+
+  async function openFolder(directoryHandle) {
+    let selected = directoryHandle;
+    if (!selected) {
+      if (!canOpenFolder(windowRef)) throw new TypeError('Folder Open is unavailable in this browser.');
+      selected = await windowRef.showDirectoryPicker({ mode: 'readwrite' });
+    }
+    return openStorage(createFolderStorageAdapter({ directoryHandle: selected }));
+  }
+
+  async function save({ confirmInvalid } = {}) {
+    const result = await savePackageChanges({
+      adapter: storageAdapter,
+      packageStore,
+      validation,
+      confirmInvalid: confirmInvalid ?? (async () => windowRef.confirm(
+        'This project has production validation errors. Save the invalid draft to the selected folder anyway?'
+      ))
+    });
+    renderDirty();
+    return result;
   }
 
   function setViewport(preset) {
@@ -979,8 +1034,9 @@ export function createEditor({
     bridge.dispose();
   }
 
-  return { newProject, openEntries, setViewport, inspect, editStories, dispose };
+  return { newProject, openEntries, openFolder, save, setViewport, inspect, editStories, dispose };
 }
 
-const editor = createEditor();
-if (globalThis.window) globalThis.window.__GUI_EDITOR__ = editor;
+if (globalThis.document && globalThis.window) {
+  globalThis.window.__GUI_EDITOR__ = createEditor();
+}
