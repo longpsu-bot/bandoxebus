@@ -19,7 +19,7 @@ function json(entries, path) {
   return JSON.parse(decoder.decode(entry.bytes ?? entry.currentBytes));
 }
 
-test('New Project is production-shaped Story 1.1 with a fixed basemap', () => {
+test('New Project is production-shaped Story 1.2 with a fixed basemap and empty Scene', () => {
   const entries = createNewProjectEntries({ id: 'corridor-plan', title: 'Corridor plan', locale: 'en-US' });
   const manifest = json(entries, 'project.json');
   const story = json(entries, 'stories/main.story.json');
@@ -29,9 +29,20 @@ test('New Project is production-shaped Story 1.1 with a fixed basemap', () => {
   assert.equal(manifest.map.basemap, 'openfreemap-dark');
   assert.deepEqual(manifest.capabilities, []);
   assert.equal('gui' in manifest, false);
-  assert.equal(story.schemaVersion, '1.1');
+  assert.equal(story.schemaVersion, '1.2');
   assert.equal(story.states.length, 1);
-  assert.deepEqual(story.states[0].map, { enter: [], exit: [] });
+  assert.deepEqual(story.states[0], {
+    id: 'opening',
+    content: { layout: 'freeform-16x9', blocks: [] },
+    map: {
+      camera: manifest.map.initialView,
+      interaction: 'locked',
+      transition: { type: 'ease', durationMs: 900 },
+      layerVisibility: {},
+      enter: [],
+      exit: []
+    }
+  });
 });
 
 test('draft changes serialize only the mutated file and track byte dirtiness', () => {
