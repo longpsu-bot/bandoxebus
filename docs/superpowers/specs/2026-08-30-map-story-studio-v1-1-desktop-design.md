@@ -1,6 +1,6 @@
 # Map Story Studio V1.1 — Desktop Architectural Design
 
-Status: proposed for human review
+Status: approved for implementation planning
 
 Date: 2026-08-30
 
@@ -10,6 +10,8 @@ Locked production authority: `docs/baseline-authoring-contract-v1.md`
 
 GUI Editor V1 certification: `review/gui-editor-v1/REPORT.md`
 
+Human approval: 2026-08-30, with the four contract-hardening rules incorporated below.
+
 ## 1. Decision summary
 
 Map Story Studio V1.1 changes the product from a schema-oriented project editor into a desktop-first visual Scene authoring environment while preserving the certified production architecture underneath it.
@@ -18,33 +20,31 @@ The product model is:
 
 > PowerPoint-like authoring + Mapbox/MapLibre-style storytelling output.
 
-A Scene is still a Story state. There is no second slide runtime and no GUI-only document model. Story Schema 1.2 additively extends the production Story format so that a Scene can declaratively own its camera, interaction policy, transition, project-layer visibility, and a constrained freeform 16:9 overlay composition.
+A Scene is still a Story state. There is no second slide runtime and no GUI-only document model. Story Schema 1.2 additively extends the production Story format so a Scene can declaratively own its camera, interaction policy, transition, project-layer visibility, and constrained freeform 16:9 overlay composition.
 
-The editor remains a client of the existing package store, draft store, production validators, production project loader, trusted capability registry, storage adapters, and shared production preview. The V1.1 work changes the authoring surface and adds a shared Scene compositor/state controller; it does not replace the certified V1 persistence or project-loading spine.
+The editor remains a client of the existing package store, draft store, production validators, production project loader, trusted capability registry, storage adapters, and shared production preview. V1.1 changes the authoring surface and adds a shared Scene state/composition layer; it does not replace the certified V1 persistence or project-loading spine.
 
 The generic production shell becomes neutral. Route 61-2 remains a reference project and compatibility fixture, but route comparison, POI emphasis, urban context, simulation, and other route-specific behavior must live in trusted capabilities or Route 61-2 project data rather than generic shell markup or generic application logic.
 
-V1.1 is desktop/projector first. Mobile authoring and mobile-specific authored layouts are explicitly deferred.
+V1.1 is desktop/projector first. Mobile authoring and Story 1.2 mobile-specific authored layouts are deferred. Existing Story 1.0/1.1 mobile production compatibility remains protected by regression smoke coverage.
 
 ## 2. Repository evidence and current boundary
-
-The approved direction is compatible with the current repository and addresses a concrete architectural debt.
 
 At the authoritative base:
 
 - `BASELINE_AUTHORING_CONTRACT_V1` is locked.
 - `PROJECT_MANIFEST_V1` remains the project manifest authority.
-- Story Schema 1.0 and 1.1 are the supported production Story versions.
-- `CORE_CONTENT_PACK_V1` owns the semantic content descriptors and production renderers.
+- Story Schema 1.0 and 1.1 are supported production Story versions.
+- `CORE_CONTENT_PACK_V1` owns semantic content descriptors and production renderers.
 - `COMMON_MAP_ACTIONS_V1` owns the existing semantic map actions.
 - `DATA_METRIC_BINDING_V1` owns table/static/computed metric binding and locale formatting.
 - `CAPABILITY_EXTENSION_BOUNDARY_V1` owns trusted domain-specific extensions.
 - GUI Editor V1 has certified folder/ZIP persistence, production validation, last-valid preview behavior, package export/reopen, and no GUI-only schema.
-- `src/application.js` and `src/project/bootstrap.js` already provide a useful generic load/bootstrap seam.
-- `src/story-schema.js` cleanly versions Story validation.
+- `src/application.js` and `src/project/bootstrap.js` already provide a generic load/bootstrap seam.
+- `src/story-schema.js` already versions Story validation.
 - `src/content/content-descriptors.js` already provides reusable semantic descriptors for heading/paragraph, metrics, chart, table, image, legend, and the other existing content types.
 
-The present production entry path is not yet neutral. `src/app.js` still constructs Route 61-2 route/stops/POI data, comparison state, transport metrics, industrial context, route reveal behavior, bus simulation behavior, and project-specific control state. V1.1 removes those assumptions from the generic shell without breaking the existing Route 61-2 Story 1.0 artifact.
+The present production entry path is not neutral. `src/app.js` still constructs Route 61-2 route/stops/POI data, comparison state, transport metrics, industrial context, reveal behavior, simulation behavior, and project-specific control state. V1.1 removes those assumptions from the neutral shell without changing the canonical Route 61-2 Story 1.0 artifact.
 
 ## 3. Product goals
 
@@ -59,11 +59,11 @@ The primary authoring concepts are:
 
 The normal user should not have to understand metrics namespaces, focus-target registries, capability internals, action arrays, block arrays, Story version mechanics, attribution wiring, validator paths, or raw schema vocabulary in order to create an ordinary Story 1.2 project.
 
-Those concepts remain available only where required by engine behavior, imported legacy projects, trusted capability configuration, or Problems/Advanced surfaces.
+Those concepts remain available only where required by imported legacy projects, trusted capability configuration, or Problems/Advanced surfaces.
 
 The authoritative composition is 16:9 and targets:
 
-- desktop authoring at approximately 1440×900 or larger;
+- desktop authoring around 1440×900 or larger;
 - 1920×1080 projector/presentation output;
 - 1366×768 laptop output.
 
@@ -71,13 +71,13 @@ The authoritative composition is 16:9 and targets:
 
 V1.1 does not become a general presentation/design application.
 
-The following are out of scope:
+Out of scope:
 
 - mobile editor UI;
-- mobile-specific authored Scene layouts;
+- Story 1.2 mobile-specific authored Scene layouts;
 - arbitrary vector drawing or shapes;
 - freehand drawing;
-- rotation of overlay objects;
+- overlay rotation;
 - grouping;
 - master slides;
 - SmartArt;
@@ -85,7 +85,7 @@ The following are out of scope:
 - arbitrary CSS;
 - arbitrary JavaScript or executable authored configuration;
 - raw MapLibre style expressions or private source/layer IDs;
-- visual programming of capabilities;
+- visual capability programming;
 - arbitrary plugin installation from project content;
 - GIS geometry editing, route snapping, spatial analysis, or QGIS replacement;
 - automatic Story 1.0/1.1 migration;
@@ -94,11 +94,11 @@ The following are out of scope:
 - a second editor-only content renderer;
 - backend/cloud project persistence or multi-user collaboration.
 
-Image cropping/focal-point editing is also deferred. V1.1 image objects use bounded declared assets and a deterministic `contain` fit inside their authored frame.
+Image cropping/focal-point editing is deferred. V1.1 image objects use bounded declared assets and deterministic `contain` fit inside the authored frame.
+
+Mobile deferral does **not** authorize regressions to the existing Story 1.0/1.1 mobile production experience. The previously certified 390×844 path remains a compatibility smoke gate.
 
 ## 5. Locked invariants and compatibility policy
-
-The following are architectural gates, not preferences.
 
 ### 5.1 Existing contracts remain authoritative
 
@@ -118,11 +118,11 @@ Story 1.2 is an additive Story minor version. It does not redefine Story 1.0 or 
 
 ### 5.2 No silent migration
 
-Opening, editing an unrelated resource, saving, exporting, or previewing a Story 1.0 or 1.1 project must not change its Story `schemaVersion` or rewrite it as Story 1.2.
+Opening, previewing, editing an unrelated resource, saving, or exporting a Story 1.0 or 1.1 project must not change its Story `schemaVersion` or rewrite it as Story 1.2.
 
 The canonical Route 61-2 Story 1.0 file remains byte-identical unless a later explicitly approved change says otherwise.
 
-Story 1.0 and 1.1 continue to render through their existing structured presentation layouts. V1.1 preserves the certified structured/legacy inspector for those versions; freeform Scene manipulation is enabled only for Story 1.2 `freeform-16x9` content.
+Story 1.0 and 1.1 continue to render through their existing structured presentation layouts. V1.1 preserves the certified structured/legacy inspector for those versions. Freeform Scene manipulation is enabled only for Story 1.2 `freeform-16x9` content.
 
 A future explicit migration tool is a separate product decision.
 
@@ -130,11 +130,11 @@ A future explicit migration tool is a separate product decision.
 
 Every saved V1.1 authoring change is production Story 1.2, existing project-manifest data, an existing bounded resource descriptor, or trusted capability settings.
 
-Selection, hover, handles, unsaved working camera, alignment guides, panel widths, current editor mode, preview state, history stacks, and storage handles remain editor-only memory and never enter project JSON.
+Selection, hover, handles, uncaptured working camera, alignment guides, panel widths, current editor mode, preview state, history stacks, and storage handles remain editor-only memory and never enter project JSON.
 
 ### 5.4 One runtime and one semantic renderer set
 
-Editor authoring, scroll-story output, and presentation output share the production Scene/state controller and production content renderers.
+Editor authoring, Scroll Story, and Presentation mode share the production Scene-state controller, compositor, and semantic content renderers.
 
 The editor may add authoring affordances around the production Scene surface, but it must not simulate or independently reimplement the rendered result.
 
@@ -144,20 +144,20 @@ The editor may add authoring affordances around the production Scene surface, bu
 | --- | --- |
 | Project | Existing `PROJECT_MANIFEST_V1` package plus declared resources |
 | Scene | Story `state` |
-| Layers panel | Map-renderable project datasets/resources exposed through stable project IDs |
+| Layers panel | Scene-controllable project map datasets/resources exposed through stable project IDs |
 | Overlay object | Story 1.2 composed semantic block envelope |
 | Canvas | Shared live MapLibre Scene surface with 16:9 overlay coordinate space |
 | Properties | Contextual authoring controls that write production values |
 | Preview Story | Scroll-story experience using the current last-valid package snapshot |
 | Present | Projector/presentation experience using the same Scene sequence |
 | Problems | Production validation diagnostics plus non-fatal authoring/layout warnings |
-| Advanced | Legacy Story/action/capability details that are not routine V1.1 authoring concepts |
+| Advanced | Legacy Story/action/capability details not needed for routine V1.1 authoring |
 
-The GUI term **Scene** must not cause a second data model. Scene ordering is still `story.states` array order and Scene IDs are existing Story state IDs.
+The GUI term **Scene** must not create a second data model. Scene ordering is `story.states` array order and Scene IDs are existing Story state IDs.
 
 ## 7. Desktop workspace
 
-The target shell is:
+Target shell:
 
 ```text
 ┌───────────────────────────────────────────────────────────────┐
@@ -180,40 +180,40 @@ The canvas is the primary work surface.
 
 The normal top bar contains project open/create commands, Undo, Redo, Preview Story, Present, Save/Export as appropriate, and compact validation/dirty status.
 
-Validation is not a primary authoring destination. Fatal errors and warnings surface through a Problems affordance/drawer that reuses the certified production-diagnostic navigation infrastructure.
+Fatal errors and warnings surface through a Problems affordance/drawer that reuses the certified production-diagnostic navigation infrastructure. Validation internals are not the normal authoring destination.
 
 ### 7.2 Layers panel
 
-The Layers panel shows human labels for project-level map resources. Internal stable dataset IDs may be visible only in Advanced/details UI.
+The Layers panel shows human labels for project-level Scene-controllable map resources. Stable dataset IDs are exposed only in Advanced/details UI.
 
 A visibility checkbox edits the active Scene's declarative layer-visibility snapshot immediately.
 
-Selecting a layer changes the Properties panel to global project-layer properties such as label and bounded render style. Global style edits affect that layer in every Scene; visibility remains Scene-specific.
+Selecting a layer changes Properties to global project-layer properties such as label and bounded render style. Global style edits affect that layer in every Scene; visibility remains Scene-specific.
 
 ### 7.3 Scene filmstrip
 
 The bottom filmstrip shows ordered Scenes with ordinal and a concise label derived from visible content where possible. Empty Scenes fall back to `Scene N`.
 
-The filmstrip supports selection, add, duplicate, delete, and reorder. Reordering writes `story.states` array order. Existing accessible Move Previous/Move Next behavior remains available as a keyboard-safe fallback even if drag reordering is added.
+The filmstrip supports selection, add, duplicate, delete, and reorder. Reordering writes `story.states` array order. Accessible Move Previous/Move Next remains available as a keyboard-safe fallback if drag reordering is added.
 
-**Add Scene** creates an empty overlay composition and copies the active Scene's saved camera, interaction policy, and layer-visibility snapshot so the author starts from the current map context. Its transition is the V1.1 default `ease` at `900ms`. If there is no active Scene, the camera comes from `project.map.initialView`, interaction defaults to `locked`, and every existing project layer starts hidden unless the selected template explicitly seeds another state.
+**Add Scene** creates an empty overlay composition and copies the active Scene's saved camera, interaction policy, and layer-visibility snapshot. Its transition defaults to `ease` at `900ms`. If there is no active Scene, camera comes from `project.map.initialView`, interaction defaults to `locked`, and existing project layers start hidden unless a selected template explicitly seeds another valid state.
 
 **Duplicate Scene** copies the entire active Scene, then generates a new stable Scene ID. Deleting the only remaining Scene is disallowed because Stories remain non-empty.
 
 ### 7.4 Properties panel
 
-The Properties panel is strictly contextual:
+Properties is contextual:
 
-- no selection: Scene properties;
+- no overlay/layer selection: Scene properties;
 - selected overlay: semantic content + frame/appearance controls;
-- selected layer: project layer properties and active-Scene visibility;
-- Map mode/camera changed: camera status and Capture/Restore controls.
+- selected layer: project layer properties + active-Scene visibility;
+- Map mode with camera divergence: camera status + Capture/Restore controls.
 
 Engine-oriented fields remain demoted.
 
 ## 8. Shared production/editor architecture
 
-The certified GUI Editor V1 package, draft, validation, storage, and preview boundaries remain valuable and should be extended rather than replaced.
+The certified GUI Editor V1 package, draft, validation, storage, and preview boundaries remain and are extended rather than replaced.
 
 ```mermaid
 flowchart LR
@@ -222,10 +222,10 @@ flowchart LR
     D --> V[Existing production validation coordinator]
     V --> LV[Last-valid package snapshot]
     LV --> PB[Existing preview bridge]
-    PB --> S[Shared Scene Surface]
+    PB --> S[Shared Scene surface]
     S --> M[One MapLibre map]
     S --> C[Scene compositor]
-    S --> SC[Scene state controller]
+    S --> SC[Scene-state controller]
     SC --> LR[Project layer runtime]
     SC --> CR[Trusted capability instances]
     C --> R[Existing semantic content renderers]
@@ -234,11 +234,11 @@ flowchart LR
     D --> P[Existing folder/ZIP persistence]
 ```
 
-The editor parent remains package/draft authority. The embedded/shared Scene surface remains rendering authority.
+The editor parent remains package/draft authority. The shared Scene surface remains rendering authority.
 
 ### 8.1 Authoring interaction adapter
 
-The editor may not create a parallel renderer merely to support drag/resize.
+The editor may not create a parallel renderer to support drag/resize.
 
 A thin authoring adapter is active only in editor-preview mode. It may:
 
@@ -246,25 +246,25 @@ A thin authoring adapter is active only in editor-preview mode. It may:
 - perform transient drag/resize visuals;
 - expose direct text editing for supported Text objects;
 - report a camera working snapshot;
-- emit bounded authoring intents such as `commit frame`, `commit text`, or `capture camera` to the parent editor.
+- emit bounded authoring intents such as `commit-frame`, `commit-text`, or `capture-camera` to the parent editor.
 
-The parent editor commits those intents as Story 1.2 production-data mutations, then revalidates and advances the last-valid preview normally.
+The parent editor commits those intents as Story 1.2 production-data mutations, revalidates, and advances the last-valid preview normally.
 
-Transient pointer movement is not authored state. A drag/resize becomes one authored mutation on pointer-up rather than hundreds of package revisions.
+Transient pointer movement is not authored state. A drag/resize becomes one authored mutation at interaction end rather than hundreds of package revisions.
 
 The existing strict preview origin/source/envelope checks remain in force. No raw DOM, MapLibre object, function, or file handle crosses the bridge.
 
 ## 9. Story Schema 1.2 contract
 
-Story 1.2 is the only new production authoring schema required for freeform Scene composition.
+Story 1.2 is the only new production authoring schema required for V1.1.
 
-The Story root keeps the existing required concepts: `schemaVersion`, `id`, `title`, and a **non-empty** ordered `states` array. Story 1.2 changes the version value to `"1.2"`; it does not add a parallel root document model.
+The Story root keeps the existing required concepts: `schemaVersion`, `id`, `title`, and a non-empty ordered `states` array. Story 1.2 changes only the versioned vocabulary required by Scene state/composition; it does not add a parallel root document model.
 
-Story 1.2 states continue to use the existing `id`, `content`, and `map` structural concepts. The new fields are version-gated and do not change validation of Story 1.0/1.1.
+Story 1.2 states continue to use `id`, `content`, and `map` structural concepts. New fields are version-gated and do not change Story 1.0/1.1 validation.
+
+**Approval hardening:** the complete Story 1.2 production contract is introduced in PR A, including the composition-envelope schema and the minimal read-only production compositor required to render every schema-valid envelope through existing semantic renderers. PR B adds visual authoring/direct manipulation over this already-valid contract and must not revise Story 1.2 schema semantics.
 
 ### 9.1 Story 1.2 Scene shape
-
-A Story 1.2 Scene is conceptually:
 
 ```json
 {
@@ -299,20 +299,22 @@ A Story 1.2 Scene is conceptually:
 
 `map.enter` and `map.exit` remain the trusted action lifecycle for special behavior. New Story 1.2 projects may legitimately use empty arrays.
 
-Unlike Story 1.0/1.1, Story 1.2 `freeform-16x9` permits `content.blocks` to be empty so a genuinely blank map Scene is valid.
+Unlike Story 1.0/1.1, `freeform-16x9` permits `content.blocks` to be empty so a genuinely blank map Scene is valid.
 
 ### 9.2 Declarative camera
 
-`map.camera` is required for a Story 1.2 freeform Scene and contains:
+`map.camera` is required for a Story 1.2 freeform Scene:
 
-- `center`: exactly two finite numbers `[lng, lat]` within normal geographic bounds;
-- `zoom`: 0–24;
-- `pitch`: 0–72;
-- `bearing`: -360–360.
+- `center`: exactly `[lng, lat]`;
+- longitude: finite number in `[-180, 180]`;
+- latitude: finite number in `[-90, 90]`;
+- `zoom`: finite number in `[0, 24]`;
+- `pitch`: finite number in `[0, 72]`;
+- `bearing`: finite number in `[-360, 360]`.
 
 Captured bearing is normalized to a canonical equivalent before writing so repeated capture does not create meaningless numeric drift.
 
-The project manifest `map.initialView` remains the initial/fallback map view and the source for the first blank Scene. Once a Story 1.2 Scene is active, the Scene camera is authoritative.
+The project manifest `map.initialView` remains the initial/fallback map view and source for the first blank Scene. Once a Story 1.2 Scene is active, the Scene camera is authoritative.
 
 ### 9.3 Interaction policy
 
@@ -324,44 +326,43 @@ The project manifest `map.initialView` remains the initial/fallback map view and
 
 `locked` disables user map navigation.
 
-`zoom-only` allows bounded zoom interaction but no free pan, pitch, or rotation. In scroll-story output, normal wheel scrolling must remain available for page/Scene navigation; zoom uses cooperative gestures or explicit zoom controls rather than trapping ordinary scroll.
+`zoom-only` allows bounded zoom but no free pan, pitch, or rotation. In Scroll Story, normal wheel scrolling remains available for page/Scene navigation; zoom uses cooperative gestures or explicit controls rather than trapping ordinary scroll.
 
-`explore` allows normal MapLibre exploration appropriate to the active output while retaining cooperative scrolling in scroll-story mode.
+`explore` allows normal MapLibre exploration appropriate to the active output while retaining cooperative scrolling in Scroll Story.
 
-The editor's Select/Map authoring mode is not this property and is never serialized.
+Editor Select/Map authoring mode is not this property and is never serialized.
 
 ### 9.4 Transition
 
-`map.transition` is required and contains:
+`map.transition` is required:
 
 - `type`: `fly`, `ease`, or `instant`;
-- `durationMs`: integer 0–10000.
+- `durationMs`: integer in `[0, 10000]`;
+- `instant` requires `durationMs: 0`.
 
-`instant` must use `durationMs: 0`.
+New Scenes default to `ease` with `durationMs: 900`; templates may explicitly author another valid value.
 
-The V1.1 default for a newly created Scene is `ease` with `durationMs: 900`; templates may explicitly author another valid transition. Runtime behavior therefore never depends on an unversioned hidden duration.
-
-When reduced motion is requested by the platform, the runtime must render authored `fly`/`ease` transitions as instant while leaving authored data unchanged.
+When reduced motion is requested by the platform, runtime renders authored `fly`/`ease` transitions as instant while leaving authored data unchanged.
 
 ### 9.5 Layer visibility snapshot
 
 `map.layerVisibility` maps stable project dataset IDs to booleans. It never contains private MapLibre source IDs or layer IDs.
 
-For each Story 1.2 Scene, it is a complete snapshot of the project's Scene-controllable map-layer resources. This produces deterministic back/forward navigation and prevents visibility leakage from a prior Scene.
+For each Story 1.2 Scene it is a complete snapshot of Scene-controllable project map resources. This produces deterministic back/forward navigation and prevents state leakage.
 
-The Scene-controllable set is composed of project GeoJSON resources that are rendered by the core map renderer or explicitly claimed as renderable project resources by a trusted installed capability.
+The Scene-controllable set consists of project GeoJSON resources rendered by core map or explicitly claimed as renderable project resources by a trusted installed capability.
 
-Cross-resource production validation must reject:
+Cross-resource production validation rejects:
 
 - unknown dataset IDs;
 - table-dataset IDs or other IDs that are not Scene-controllable map resources;
 - missing visibility entries for Scene-controllable project layers.
 
-When a new map layer is added through V1.1, the editor updates all Story 1.2 Scenes atomically so the project remains explicit and valid. The new layer is visible in the active Scene and hidden in other existing Story 1.2 Scenes unless a template-specific creation operation explicitly defines another initial snapshot. Legacy Story 1.0/1.1 data is untouched.
+When a new map layer is added through V1.1, the editor updates every Story 1.2 Scene atomically. The new layer is visible in the active Scene and hidden in other existing Story 1.2 Scenes unless a template-specific creation operation explicitly authors another valid snapshot. Legacy Story 1.0/1.1 data is untouched.
 
 ### 9.6 Special actions remain actions
 
-Routine Scene camera, layer visibility, interaction, and transition are not authored as action arrays in normal V1.1 UI.
+Routine camera, layer visibility, interaction, and transition are not authored as action arrays in normal V1.1 UI.
 
 Trusted actions remain for special/domain behavior such as:
 
@@ -372,15 +373,11 @@ Trusted actions remain for special/domain behavior such as:
 - vehicle simulation;
 - future specialized effects.
 
-`COMMON_MAP_ACTIONS_V1` remains valid and supported, especially for Story 1.0/1.1 compatibility. If an advanced Story 1.2 author deliberately uses a core map action that overlaps declarative Scene state, activation order is deterministic: the declarative Scene baseline is applied first, then `map.enter` actions run and may intentionally override it. The normal V1.1 GUI does not author such overlapping routine actions.
+`COMMON_MAP_ACTIONS_V1` remains valid and supported, especially for Story 1.0/1.1 compatibility. If an advanced Story 1.2 author deliberately uses an action overlapping declarative Scene state, declarative baseline is applied first and `map.enter` runs afterward, allowing a trusted action to intentionally refine/override that baseline. Normal V1.1 GUI does not author overlapping routine actions.
 
 ## 10. Composed semantic blocks
 
-Story 1.2 does not add a replacement semantic content system.
-
-Instead, each item in `content.blocks` is a **composition envelope** around an existing semantic block.
-
-Conceptually:
+Story 1.2 does not add a replacement content system. Each `content.blocks` item is a composition envelope around an existing semantic block.
 
 ```json
 {
@@ -420,142 +417,144 @@ Conceptually:
 
 The nested `block` is validated by the existing semantic descriptor for its `type`. The envelope is validated by Story 1.2 composition rules.
 
-This separation is deliberate:
+This separation ensures:
 
-- Story 1.0/1.1 block descriptors do not gain editor-only fields;
-- existing table/chart/image/legend/metric renderers remain reusable;
+- Story 1.0/1.1 block descriptors do not gain GUI-only fields;
+- table/chart/image/legend/metric renderers remain reusable;
 - freeform position/appearance is a compositor concern;
 - semantic data remains semantic data.
 
 ### 10.1 Stable composed-block ID
 
-Each composition envelope requires a stable lowercase ID unique within its Scene. The ID is production data because it provides deterministic DOM identity and authoring selection without relying on array index.
-
-The normal GUI does not require users to edit this ID.
+Each envelope requires a stable lowercase ID unique within its Scene. It is production data for deterministic DOM identity and editor selection; normal UI does not require manual ID editing.
 
 ### 10.2 Frame contract
 
-`frame` is required and contains:
+`frame` is required:
 
-- `x`: normalized horizontal origin 0–1;
-- `y`: normalized vertical origin 0–1;
-- `width`: normalized width greater than 0 and at most 1;
-- `height`: normalized height greater than 0 and at most 1;
-- `z`: integer stacking order 0–9999.
+- `x`: normalized horizontal origin `[0, 1]`;
+- `y`: normalized vertical origin `[0, 1]`;
+- `width`: normalized `(0, 1]`;
+- `height`: normalized `(0, 1]`;
+- `z`: integer `[0, 9999]`.
 
-Production validation additionally enforces:
+Production validation also enforces `x + width <= 1` and `y + height <= 1`. V1.1 does not author off-canvas objects. Equal `z` values use Story array order as deterministic tie-breaker.
 
-- `x + width <= 1`;
-- `y + height <= 1`.
-
-V1.1 does not author off-canvas objects.
-
-If two objects have the same `z`, Story array order is the deterministic tie-breaker.
-
-Users never type normalized coordinates in normal UI. Drag, resize, alignment, and keyboard nudge commands write these values.
+Users manipulate these values visually; normal UI never requires typing normalized coordinates.
 
 ### 10.3 16:9 design coordinate system
 
 Frame geometry is normalized against the 16:9 Scene.
 
-Appearance measurements that need physical size, such as font size, border width, radius, and padding, use **design pixels** referenced to a 1920×1080 logical Scene. The compositor scales them uniformly with the rendered 16:9 Scene width.
+Appearance measurements such as font size, border width, radius, and padding use design pixels referenced to a 1920×1080 logical Scene. The compositor scales them uniformly with rendered 16:9 Scene width.
 
-This keeps authored typography and box treatment proportional when the same Scene is shown at 1920×1080, 1366×768, or as a smaller editor canvas.
+The map renders natively at actual MapLibre viewport size. Camera values remain standard MapLibre camera values.
 
-The map itself renders natively at the actual MapLibre viewport size; authored camera values remain standard MapLibre camera values rather than design-pixel abstractions.
+### 10.4 Appearance contract and frozen defaults
 
-### 10.4 Appearance contract
+`appearance` is optional, but omission must be deterministic.
 
-`appearance` is optional. Omitted fields use production compositor defaults rather than hidden editor-specific styling.
+Story 1.2 owns a frozen/versioned compositor-default token set. It is production runtime authority, not ambient editor CSS. A compatible Story 1.2 implementation may refactor CSS internally but must preserve the token output. Changing default visual semantics requires an explicit compatible-contract decision rather than an incidental stylesheet change.
+
+The default token set includes, at minimum:
+
+- transparent box fill;
+- object opacity `1`;
+- transparent border with width `0`;
+- radius `0`;
+- padding `0` unless the semantic renderer's Story 1.2 token explicitly requires bounded internal spacing;
+- font family token `sans`;
+- non-italic text;
+- left alignment;
+- line height `1.2` unless a semantic-type token explicitly overrides it;
+- semantic-type font-size/weight tokens pinned by Story 1.2 compositor tests.
+
+This allows semantic renderers to retain type-appropriate heading/body/table/legend treatment without depending on unrelated page CSS.
 
 `appearance.box` may contain only bounded values for:
 
 - `fill`: bounded hex color, including alpha;
-- `opacity`: 0–1 for the whole object;
+- `opacity`: `[0, 1]`;
 - `borderColor`: bounded hex color, including alpha;
-- `borderWidth`: 0–16 design px;
-- `radius`: 0–128 design px;
-- `padding`: 0–160 design px.
+- `borderWidth`: `[0, 16]` design px;
+- `radius`: `[0, 128]` design px;
+- `padding`: `[0, 160]` design px.
 
 `appearance.text` may contain only:
 
 - `fontFamily`: approved application token;
-- `fontSize`: 8–256 design px;
+- `fontSize`: `[8, 256]` design px;
 - `bold`: boolean;
 - `italic`: boolean;
 - `color`: bounded hex color, including alpha;
 - `align`: `left`, `center`, or `right`;
-- `lineHeight`: 0.8–2.5.
+- `lineHeight`: `[0.8, 2.5]`.
 
-The initial V1.1 font-family tokens are:
+Initial font tokens:
 
 - `sans` — current Inter/system sans stack;
 - `arial` — Arial/Helvetica-style sans stack;
 - `times-new-roman` — Times New Roman/Times-style serif stack;
 - `georgia` — Georgia-style serif stack.
 
-No authored font URL, `@font-face`, arbitrary CSS family string, or remote stylesheet is permitted.
+No authored font URL, `@font-face`, arbitrary family string, CSS URL, or remote stylesheet is permitted.
 
-Typography controls are fully supported for Text objects. Box appearance is supported for all overlay objects. Metric/table/legend text may inherit safe wrapper typography where the existing semantic renderer naturally supports inheritance, but V1.1 does not add arbitrary styling of chart internals or table cells. Chart series styling remains the existing bounded semantic chart descriptor.
+Typography controls are fully supported for Text. Box appearance applies to all overlays. Metric/table/legend text may inherit safe wrapper typography where existing semantic rendering permits it. V1.1 does not add arbitrary chart-internal or table-cell styling; chart series styling remains the existing bounded chart descriptor.
 
-### 10.5 Initial visible object families
+### 10.5 Product-level object families
 
-The V1.1 Add menu exposes these product-level object families:
+V1.1 Add menu exposes:
 
-- **Text** — backed by existing `heading` or `paragraph` semantic blocks; the Text family offers `Heading` and `Body text` subtypes rather than inventing a new semantic block type;
-- **Metric** — backed by existing `stat-group` semantic block;
-- **Chart** — existing Chart.js-backed `chart` block;
-- **Table** — existing normalized `table` block;
-- **Image** — existing declared-asset `image` block;
-- **Legend** — existing `legend` block.
+- **Text** — existing `heading` or `paragraph`, with Heading and Body text subtypes;
+- **Metric** — existing `stat-group`;
+- **Chart** — existing Chart.js-backed `chart`;
+- **Table** — existing normalized `table`;
+- **Image** — existing declared-asset `image`;
+- **Legend** — existing `legend`.
 
-Story 1.2 accepts every existing `CORE_CONTENT_PACK_V1` semantic block type inside a composition envelope so renderer/descriptor compatibility stays complete. The primary Add menu exposes only the six product-level families above in V1.1.
+Story 1.2 accepts every existing `CORE_CONTENT_PACK_V1` semantic block type inside a composition envelope so descriptor/renderer compatibility remains complete. Only the six product families above are primary V1.1 Add-menu choices.
 
-PR B proves the composition system with Text before rich objects are enabled.
+PR A provides read-only production envelope rendering. PR B proves visual composition/authoring with Text. PR C enables rich-object authoring workflows without changing Story 1.2 schema.
 
 ## 11. Camera authoring — explicit capture only
 
-Camera authoring is a first-class product feature and must never use implicit save-on-map-move behavior.
+Camera authoring is first-class and never uses implicit save-on-map-move.
 
 ### 11.1 Editor interaction modes
 
-The editor has two transient authoring modes.
+**Select mode** — default:
 
-**Select mode** is the default:
-
-- overlay selection is enabled;
-- drag and resize are enabled;
-- direct text editing is enabled;
-- alignment commands are enabled;
-- ordinary map pan/rotate/pitch is disabled so the canvas cannot move accidentally.
+- select overlays;
+- drag/resize;
+- direct text editing;
+- alignment commands;
+- map pan/rotate/pitch disabled to prevent accidental map movement.
 
 **Map mode**:
 
-- overlay manipulation is suspended;
-- pan, zoom, pitch, and rotate are enabled for authoring exploration;
-- the active Scene's saved camera remains unchanged until explicit capture.
+- overlay manipulation suspended;
+- pan/zoom/pitch/rotate enabled for authoring exploration;
+- saved Scene camera unchanged until explicit capture.
 
 These modes are editor state only.
 
 ### 11.2 Working camera lifecycle
 
-On entering or while using Map mode:
+1. Compare live map camera with active Scene saved camera.
+2. If different, show `Camera changed · not captured`.
+3. **Capture Camera** reads live camera, normalizes/clamps it to Story 1.2 contract, and commits one Scene mutation.
+4. **Restore Saved Camera** returns live map to authored Scene camera with zero Story mutation.
+5. Switching Scenes discards uncaptured working camera and restores the target Scene saved camera.
 
-1. the editor compares the live map camera with the active Scene's saved camera;
-2. if they differ, the canvas shows an obvious `Camera changed · not captured` status;
-3. **Capture Camera** reads the live MapLibre camera, normalizes/clamps it to the Story 1.2 camera contract, and commits one Scene mutation;
-4. **Restore Saved Camera** returns the live map to the authored Scene camera without changing Story data;
-5. switching Scenes discards any uncaptured working camera and restores the target Scene's saved camera.
-
-No pan, zoom, rotate, pitch, `moveend`, or other MapLibre event is allowed to mutate authored camera data directly.
+No MapLibre `move`, `moveend`, zoom, rotate, or pitch event may directly mutate authored camera data.
 
 Capture Camera is one undoable authoring command.
 
-### 11.3 Scene switching during authoring
+### 11.3 Authoring Scene switching
 
-Normal editor Scene switching restores the saved Scene camera, saved layer-visibility snapshot, saved overlay composition, and Scene properties immediately. The editor does not force the author to sit through the configured presentation transition during routine editing.
+Normal editor Scene switching restores saved camera, layer visibility, overlay composition, and Scene properties immediately. It does not force the author to wait through presentation transitions.
 
-Preview Story and Present honor the configured transition.
+Preview Story and Present honor authored transitions.
 
 ## 12. Project Layers and Scene visibility
 
@@ -563,83 +562,77 @@ Layers remain project resources rather than Scene-local duplicated data.
 
 ### 12.1 Project-layer runtime boundary
 
-The generic runtime needs a small semantic layer-control boundary keyed by project dataset ID.
+Generic runtime needs a small semantic layer-control boundary keyed by project dataset ID.
 
 Core map rendering registers each ordinary project GeoJSON layer with operations equivalent to:
 
 - `setVisible(datasetId, boolean)`;
-- `reset()`/restore baseline as needed;
-- destroy lifecycle.
+- `reset()`;
+- lifecycle `destroy()`.
 
-A trusted capability that claims rendering responsibility for a project dataset must register the same stable project dataset ID with the Scene layer controller. It may internally control multiple MapLibre sources/layers, but those private IDs never leave trusted code.
+A trusted capability claiming rendering responsibility for a project dataset must register the same stable project dataset ID with Scene layer control. It may internally control multiple MapLibre sources/layers, but private IDs never leave trusted code.
 
-This is glue around the existing capability boundary, not a new authored framework.
-
-Capability-generated visuals that do not correspond to an ordinary project dataset are not automatically promoted into the Layers panel. They remain special capability behavior unless the trusted capability intentionally publishes a stable authorable project-layer target.
+Capability-generated visuals not corresponding to an ordinary project dataset are not automatically promoted into Layers. They remain special capability behavior unless the capability intentionally publishes a stable authorable project-layer target.
 
 ### 12.2 Layer authoring behavior
 
-Toggling a Layer checkbox:
+A Layer visibility toggle:
 
-- changes only the active Scene's `map.layerVisibility` value;
-- updates the live production Scene surface immediately;
-- creates one undoable authored mutation;
+- changes only active Scene `map.layerVisibility`;
+- updates the live production Scene immediately;
+- creates one undoable mutation;
 - never writes `map.set-visibility` actions.
 
-Changing a project's line color, width, fill, point radius, label descriptor, or other existing bounded render property remains a project-level edit and affects every Scene in which that layer is visible.
+Changing line color/width, fill, point radius, label descriptor, or another existing bounded render property remains project-level and affects every Scene in which the layer is visible.
 
-Deleting a layer uses existing reference-safety/validation behavior and must surface every broken Scene/action/capability reference rather than silently repairing it.
+Deleting a layer uses reference-safety/validation behavior and surfaces broken Scene/action/capability references rather than silently repairing them.
 
 ## 13. Freeform composition behavior
 
-V1.1 uses constrained PowerPoint-like composition, not unrestricted design-tool behavior.
+V1.1 uses constrained PowerPoint-like composition.
 
 ### 13.1 Direct manipulation
 
-For a selected overlay, the canvas provides:
+Selected overlays support:
 
-- drag within the 16:9 bounds;
-- resize handles constrained to the Scene bounds;
+- drag within 16:9 bounds;
+- bounded resize handles;
 - duplicate;
 - delete;
 - bring forward;
 - send backward;
 - basic alignment commands;
-- basic snapping and alignment guides.
+- basic snapping/alignment guides.
 
-The first snapping set is intentionally small:
+Initial snapping targets:
 
 - Scene edges;
 - Scene horizontal/vertical centers;
 - other object edges;
 - other object horizontal/vertical centers.
 
-Guides are transient UI and are never persisted.
-
-V1.1 does not add arbitrary user-created guide lines, distribution algorithms, grouping, or constraint graphs.
+Guides are transient and never persisted. V1.1 does not add user-created guides, distribution algorithms, grouping, or constraint graphs.
 
 ### 13.2 Direct text editing
 
-Text objects support direct editing on canvas. Semantic editing remains bounded text content; no HTML, Markdown execution, inline CSS, or rich-text DOM fragments are stored.
-
-Text edits commit as production semantic block changes. The Properties panel may expose the same text plus typography/appearance controls.
+Text supports direct canvas editing. Stored semantic content is bounded plain text: no HTML, executable Markdown, inline CSS, or rich-text DOM fragments.
 
 ### 13.3 Overflow
 
-The compositor does not silently auto-resize or reflow an object's frame to hide authoring mistakes.
+The compositor does not silently resize/reflow frames to hide authoring mistakes.
 
-If rendered content exceeds its frame, the editor surfaces a non-fatal layout warning and the author may resize/rewrite the object. Production rendering remains deterministic and clips/contains according to the object renderer rather than inventing a different layout.
+If content exceeds its frame, editor shows a non-fatal layout warning. Production remains deterministic and clips/contains according to the renderer rather than inventing another layout.
 
-Chart canvases resize to their authored frame through the existing responsive chart renderer. Images use `contain`. Tables that cannot fit their frame surface an overflow warning rather than turning presentation output into a spreadsheet viewport.
+Charts resize to their authored frame through existing responsive chart lifecycle. Images use `contain`. Tables that cannot fit surface overflow warning rather than becoming spreadsheet viewports.
 
 ## 14. Undo and Redo
 
-Undo/Redo is bounded to authored production-data mutations made since the project was opened/created in the current editor session.
+Undo/Redo covers authored production-data mutations in the current editor session.
 
-Examples of one undoable command:
+One undoable command includes:
 
 - Capture Camera;
-- Layer visibility toggle;
+- layer visibility toggle;
 - drag commit;
 - resize commit;
 - direct text commit;
@@ -647,78 +640,63 @@ Examples of one undoable command:
 - add/delete/duplicate/reorder Scene;
 - add/delete/duplicate overlay.
 
-Undo/Redo does not include:
+Undo/Redo excludes selection, hover, Select/Map mode, uncaptured map exploration, preview navigation, Problems state, permission prompts, and Save/Export.
 
-- selection;
-- hover;
-- Select/Map mode changes;
-- uncaptured map exploration;
-- preview navigation;
-- Problems panel state;
-- storage permission prompts;
-- Save/Export commands.
+Save marks package bytes clean but does not erase authoring history. Undo after Save creates a normal new dirty mutation.
 
-Save marks package bytes clean but does not erase authoring history. Undo after Save creates a new dirty production mutation normally.
-
-The implementation may use bounded immutable snapshots or inverse commands, but the history mechanism must remain editor memory and must not change production schemas.
+History remains editor memory and never changes production schema.
 
 ## 15. Scene activation and runtime precedence
 
 Story Runtime remains responsible for ordered state lifecycle. V1.1 adds a shared Scene-state application layer around that lifecycle rather than replacing it.
 
-On transition from Scene A to Scene B, the runtime order is:
+Transition A → B order:
 
 1. run Scene A `map.exit` trusted actions;
-2. cancel any in-flight camera transition owned by Scene A;
-3. apply Scene B's complete declarative layer-visibility baseline;
-4. apply Scene B's authored interaction policy;
-5. render/activate Scene B's overlay composition;
-6. initiate Scene B's declared camera transition toward its saved camera;
+2. cancel in-flight camera transition owned by Scene A;
+3. apply Scene B complete declarative layer-visibility baseline;
+4. apply Scene B interaction policy;
+5. render/activate Scene B overlay composition;
+6. initiate Scene B camera transition toward saved camera;
 7. run Scene B `map.enter` trusted actions.
 
-Steps 3–6 establish the ordinary presentation baseline. Step 7 allows trusted special behavior to deliberately refine that baseline.
+Steps 3–6 establish ordinary presentation baseline. Step 7 lets trusted special behavior intentionally refine it.
 
-Re-entering a Scene always re-applies the complete declarative baseline, so back/forward navigation cannot inherit stray layer state from another Scene.
+Re-entering a Scene re-applies the complete declarative baseline so back/forward navigation cannot inherit stray layer state.
 
-The camera animation may continue after `map.enter` begins; activation must not block Story navigation for the transition duration.
+Camera animation may continue after `map.enter` begins; Scene activation must not block Story navigation for transition duration.
 
 ## 16. Generic production shell
 
-The generic application shell contains only generic platform elements:
+Neutral shell contains only:
 
 - MapLibre map container;
 - Scene compositor root;
-- scroll-story navigation/activation host;
-- presentation navigation host;
+- Scroll Story navigation/activation host;
+- Presentation navigation host;
 - generic loading/error/status affordances;
 - trusted capability-control host slots.
 
-It contains no Route 61-2 labels, no Existing/Proposed/Difference tabs, no transport metrics, no bus simulation controls, and no industrial/urban controls.
+It contains no Route 61-2 labels, Existing/Proposed/Difference tabs, transport metrics, bus simulation controls, or industrial/urban controls.
 
-A blank project loaded through the same production shell must therefore show only its basemap/blank Scene and generic navigation appropriate to its Story.
+A blank project loaded through the neutral shell shows its basemap/blank Scene and generic Story navigation only.
 
 ### 16.1 Trusted capability control slots
 
-Some trusted capabilities legitimately need project-specific runtime controls. The generic shell may expose neutral named host elements to trusted capability implementations.
+Trusted capabilities may legitimately need project-specific runtime controls. Generic shell may expose neutral named host elements. A capability implementation may mount trusted controls through lifecycle context supplied by production bootstrap.
 
-A capability implementation may mount trusted controls into those hosts through lifecycle context supplied by production bootstrap. The control markup/behavior lives in trusted application code, not project JSON.
-
-If no installed project capability contributes controls, the host remains empty/hidden.
-
-This preserves `CAPABILITY_EXTENSION_BOUNDARY_V1`: executable UI behavior remains installed trusted code and project content contains only validated capability IDs/settings/data.
+Control markup/behavior lives in trusted application code, not project JSON. Empty hosts remain hidden.
 
 ## 17. Route 61-2 reference-project boundary
 
-Route 61-2 remains important as the benchmark artifact, but no longer defines generic platform behavior.
-
-The target composition is:
+Target composition:
 
 ```text
 Generic Runtime / Generic Shell
 + Core Content
 + Core Map
 + Route Comparison capability
-+ Transport/POI behavior where required
++ Transport/POI capability behavior where required
 + Urban Context capability where required
 + Route 61-2 project datasets/settings
 + Route 61-2 Story
@@ -726,36 +704,45 @@ Generic Runtime / Generic Shell
 
 The canonical Route 61-2 Story 1.0 continues to validate and execute through legacy action normalization and trusted capabilities.
 
-Route-specific adapters required only to preserve the existing Story 1.0 experience may remain trusted compatibility code, but they must not be imported or assumed by generic shell code.
+Route-specific compatibility adapters may remain trusted code, but generic shell must not import or assume them.
 
-By the end of V1.1:
+By V1.1 lock:
 
-- generic shell source contains no Route 61-2 data constants or labels;
-- blank-project certification uses the same shell successfully;
+- neutral shell source contains no Route 61-2 data constants/labels;
+- blank-project certification uses the same shell;
 - Route 61-2 still runs as a project loaded by that shell;
-- route-specific controls, simulation, POI emphasis, urban context, and derived route-comparison rendering are capability-owned;
-- the existing Route 61-2 Story 1.0 artifact remains unchanged.
+- route-specific controls, simulation, POI emphasis, urban context, and derived comparison rendering are capability-owned;
+- canonical Route 61-2 Story 1.0 bytes remain unchanged.
 
-If a Story 1.2 Route 61-2 demonstration is needed for the Studio reference experience, it must be a separate explicitly authored reference/template artifact rather than a silent rewrite of the canonical Story 1.0 file.
+If a Story 1.2 Route 61-2 Studio demonstration is needed, it is a separate explicitly authored reference/template artifact rather than a rewrite of the canonical Story 1.0 file.
 
 ## 18. Templates
 
-A template creates ordinary project content once. It has no runtime role after project creation.
+A template creates ordinary project content once. It has no runtime role afterward. No `templateId`, template-engine metadata, or template-specific runtime branch is persisted.
 
-No `templateId`, template engine metadata, or template-specific runtime branch is persisted.
+Every new V1.1 Studio project defaults to Story 1.2. Story 1.1 remains supported for imported/existing projects but is no longer the new-project default.
 
-Every new V1.1 Studio project defaults to Story 1.2. Story 1.1 remains supported for existing/imported projects but is no longer the default new-project Story format.
+Creation choices:
 
-V1.1 creation choices are intentionally limited to:
+1. Blank map story
+2. Route proposal
+3. Network / service plan
+4. Import existing project
 
-1. **Blank map story**;
-2. **Route proposal**;
-3. **Network / service plan**;
-4. **Import existing project**.
+Import reuses certified Open Folder / Import ZIP; it is not a special package format.
 
-Import existing project reuses the certified Open Folder / Import ZIP paths and is not a special on-disk format.
+### 18.1 Immediate-validity rule
 
-### 18.1 Blank map story
+Every template output must be accepted immediately by unchanged production `loadProject(...)` and all production validators. There is no allowed invalid transitional starter project.
+
+If a template wants a capability whose descriptor requires dataset roles, the template must either:
+
+- create valid bounded placeholder resources and matching role descriptors that satisfy those requirements; or
+- defer the capability declaration until the required resources exist.
+
+The template must never install a capability declaration that makes its freshly created project invalid.
+
+### 18.2 Blank map story
 
 Creates:
 
@@ -764,13 +751,11 @@ Creates:
 - one empty `freeform-16x9` Scene;
 - no project map layers;
 - no route-specific capabilities;
-- no sample transport metrics or controls.
+- no sample transport metrics/controls.
 
-### 18.2 Route proposal
+### 18.3 Route proposal
 
-Creates neutral starter project data and installs only the trusted capabilities required by the starter structure. It must not contain Route 61-2 labels or data.
-
-Starter Scenes are:
+Creates neutral starter project data. Starter Scenes:
 
 - Context;
 - Existing route;
@@ -778,90 +763,85 @@ Starter Scenes are:
 - Key connection;
 - Recommendation.
 
-They are normal editable/deletable Story 1.2 Scenes after creation.
+Scenes are ordinary editable/deletable Story 1.2 states. Capability declarations and any placeholder route/stops resources must obey the immediate-validity rule.
 
-### 18.3 Network / service plan
+### 18.4 Network / service plan
 
-Creates neutral starter Scenes/layers suitable for a network/service planning narrative using the same generic Scene format. It does not create a new runtime mode.
+Creates neutral starter Scenes/layers suitable for network/service planning using the same Story 1.2 format. It creates no new runtime mode and obeys the immediate-validity rule.
 
-Templates may seed layer visibility, camera, starter overlays, and relevant trusted capability declarations, but every resulting value is ordinary production project/Story data.
+Templates may seed layer visibility, camera, overlays, and relevant trusted capability declarations only when the resulting project is immediately production-valid.
 
 ## 19. Desktop outputs from the same Scene sequence
 
-There is one Story 1.2 Scene sequence and two production desktop experiences.
+There is one Story 1.2 Scene sequence and two desktop experiences.
 
 ### 19.1 Scroll Story
 
-Scroll Story is Mapbox-style storytelling:
-
-- one immersive live MapLibre background;
+- immersive live MapLibre background;
 - Scene activation driven by scroll position;
-- active Scene applies camera/layer/interaction/transition state;
-- active Scene displays the authored overlay composition;
-- trusted capability enter/exit effects may run;
+- camera/layer/interaction/transition applied on activation;
+- authored overlay composition;
+- optional trusted capability effects;
 - no editor chrome.
 
-On a non-16:9 desktop viewport, the map remains full-bleed while overlay geometry is resolved against the largest centered 16:9 composition-safe rectangle. The required V1.1 certification viewports are both effectively 16:9, so certified output is exact to the authored composition.
+On non-16:9 desktop viewport, map remains full-bleed while overlay geometry resolves against the largest centered 16:9 composition-safe rectangle.
 
-Scroll containers must not cause `zoom-only` or `explore` map interaction to trap ordinary page scrolling. Cooperative map gestures remain mandatory.
+Map interaction must not trap ordinary page scrolling; cooperative gestures remain mandatory.
 
 ### 19.2 Presentation mode
 
-Presentation mode is projector-oriented:
-
 - exact 16:9 Scene stage;
 - MapLibre fills the stage;
-- authored overlays render in the same positions as the editor canvas;
-- Next/Previous controls;
+- authored overlays in the same positions as editor canvas;
+- Next/Previous;
 - keyboard navigation;
-- configured camera/layer transitions;
-- authored interaction policy;
+- authored transitions/layer state/interaction policy;
 - trusted capability effects;
 - no editor chrome.
 
-If the browser/screen is not 16:9, the presentation stage is centered with neutral letterbox/pillarbox space rather than stretching the authored composition.
+Non-16:9 screens center the stage with neutral letterbox/pillarbox space rather than stretching composition.
 
 ### 19.3 Shared implementation rule
 
-Scroll Story and Presentation mode must use the same:
+Both outputs use the same:
 
 - Story definition;
 - Scene-state controller;
-- Layer runtime;
+- layer runtime;
 - MapLibre map creation path;
 - overlay compositor;
 - semantic content renderers;
 - capability instances/action contracts.
 
-Only the navigation/activation shell differs.
+Only navigation/activation shell differs.
 
 ## 20. Editor Preview Story and Present
 
-The editor's **Preview Story** and **Present** commands use the current last-valid in-memory package snapshot. The user does not need to Save first to test a valid unsaved change.
+Preview Story and Present use the current last-valid in-memory package snapshot. Save is not required first.
 
-A fatal production validation error preserves the existing last-valid preview behavior and clearly indicates that preview/presentation is using the prior valid revision.
+A fatal validation error preserves existing last-valid-preview behavior and clearly indicates when the previous valid revision is being shown.
 
-Editor authoring Scene switching is immediate. Preview Story/Present are the places where authored transitions, scroll activation, keyboard navigation, and runtime interaction policy are tested.
+Routine authoring Scene switching is immediate. Preview Story/Present are the places where transitions, scroll activation, keyboard navigation, and runtime interaction policy are tested.
 
 ## 21. Persistence and validation
 
-GUI Editor V1 persistence behavior is preserved.
+GUI Editor V1 persistence remains:
 
-- Folder Open reads `project.json` and declared resources only.
-- Folder Save writes only changed managed entries in deterministic order with `project.json` last.
-- ZIP import/export preserves existing safety limits and safe pass-through behavior.
-- Export remains blocked by fatal production validation errors.
-- Save may preserve an invalid repairable draft only through the existing explicit confirmation policy.
-- Story 1.0/1.1 files not mutated by the user preserve original bytes.
-- No hidden project database or IndexedDB project authority is introduced.
+- Folder Open reads `project.json` and declared resources only;
+- Folder Save writes only changed managed entries deterministically with `project.json` last;
+- ZIP import/export preserves existing safety/pass-through behavior;
+- Export is blocked by fatal production errors;
+- Save may persist an invalid repairable draft only through existing explicit confirmation;
+- Story 1.0/1.1 files not mutated preserve original bytes;
+- no hidden project database or IndexedDB project authority.
 
-New Story 1.2 validation extends, rather than bypasses, the production validation coordinator. The Problems UI may add non-fatal editor/layout warnings such as content overflow, but those warnings are clearly distinguished from production schema/reference errors.
+Story 1.2 validation extends the production validation coordinator. Problems may add non-fatal layout warnings such as overflow, clearly distinguished from production schema/reference errors.
+
+Resolved-reference validation for Story 1.2 must traverse into each composition envelope's nested semantic `block`, so metric/table/chart/image/legend references receive the same production checks as Story 1.1 semantic blocks.
 
 ## 22. Security and trust boundary
 
-V1.1 preserves the existing data-only authoring boundary.
-
-Story 1.2 may contain only bounded serializable data. It may not contain:
+Story 1.2 contains bounded serializable data only. It may not contain:
 
 - JavaScript;
 - functions/callbacks;
@@ -869,7 +849,7 @@ Story 1.2 may contain only bounded serializable data. It may not contain:
 - arbitrary CSS;
 - CSS URLs;
 - MapLibre expressions;
-- MapLibre source/layer IDs;
+- private MapLibre source/layer IDs;
 - DOM selectors;
 - module URLs;
 - remote plugins;
@@ -878,26 +858,24 @@ Story 1.2 may contain only bounded serializable data. It may not contain:
 
 Trusted executable behavior remains installed application code selected through the existing capability registry.
 
-The preview bridge remains origin/source checked and revision correlated. Authoring interaction messages are bounded semantic intents, not arbitrary method invocation.
+Preview bridge remains origin/source checked and revision correlated. Authoring interaction messages are bounded semantic intents, not arbitrary method invocation.
 
 ## 23. Accessibility and desktop usability
 
-V1.1 remains desktop-first but must preserve keyboard-operable authoring for primary commands.
+Minimum requirements:
 
-Minimum requirements include:
+- keyboard Scene selection and reorder fallback;
+- keyboard Select/Map mode access;
+- keyboard Capture Camera / Restore Saved Camera;
+- keyboard overlay select/delete/duplicate/z-order/alignment;
+- arrow-key nudge so drag is not the only positioning mechanism;
+- visible focus;
+- Problems diagnostics navigate to Scene/object/property where possible;
+- existing semantic table/chart/image accessibility remains intact;
+- Presentation Next/Previous keyboard navigation;
+- predictable Escape behavior.
 
-- keyboard Scene selection and reordering fallback;
-- keyboard access to Select/Map mode;
-- keyboard-accessible Capture Camera and Restore Saved Camera;
-- keyboard selection/delete/duplicate/z-order/alignment commands for overlay objects;
-- arrow-key nudge for selected overlay position so drag is not the only positioning mechanism;
-- visible focus state;
-- Problems diagnostics that navigate to the relevant Scene/object/property where possible;
-- production semantic content accessibility from existing table/chart/image renderers;
-- presentation Next/Previous keyboard navigation;
-- Escape behavior that exits presentation/chrome overlays predictably.
-
-The author is never required to type normalized coordinates.
+Authors never need to type normalized coordinates.
 
 ## 24. Performance and rendering constraints
 
@@ -906,44 +884,46 @@ V1.1 preserves the one-map principle.
 For any single active editor Scene surface or production output:
 
 - exactly one MapLibre instance is mounted;
-- Scene switching reuses that instance;
-- overlays are DOM/content renderer objects over the map;
-- drag/resize uses transient transforms and commits once at interaction end;
-- expensive production validation/package replacement is not performed on every pointer-move event;
-- chart instances are created/destroyed through the existing renderer lifecycle rather than leaked across Scene changes.
+- Scene switching reuses it;
+- overlays are DOM/content-renderer objects above map;
+- drag/resize uses transient transforms and one commit at interaction end;
+- production validation/package replacement does not run per pointer-move;
+- chart instances follow existing create/destroy lifecycle.
 
-Desktop certification must cover 1920×1080 and 1366×768 and show no material regression from the current settled interactive performance target. The intended steady-state target remains smooth 60 FPS-class presentation on the existing Route 61-2 benchmark hardware/content where the browser/GPU can sustain it.
+Desktop certification covers 1920×1080 and 1366×768 with no material regression from settled interactive performance. Intended steady-state remains smooth 60 FPS-class presentation on the existing Route 61-2 benchmark hardware/content when browser/GPU sustain it.
 
-V1.1 does not spend implementation scope certifying a mobile editor.
+No mobile editor certification is added. Existing Story 1.0/1.1 production runtime must retain a targeted 390×844 regression smoke because mobile compatibility is locked even though Story 1.2 mobile authoring/layout work is deferred.
 
 ## 25. Delivery slices
 
-The approved work is intentionally staged. Each PR must be reviewable and must preserve the certified V1 engine/persistence boundary.
+Each PR is reviewable and preserves certified V1 engine/persistence boundaries.
 
-### PR A — Generic neutral shell + Story 1.2 Scene Camera
+### PR A — Neutral shell + complete Story 1.2 Scene contract
 
 Scope:
 
-- introduce the neutral generic production shell path and prove it with a blank Story 1.2 project;
-- keep any still-required Route 61-2 legacy entry/adapter isolated from those neutral modules until PR C rather than forcing the full Route 61-2 conversion into PR A;
-- Story 1.2 base validation/contract;
-- declarative camera;
-- explicit camera capture/restore authoring behavior;
+- introduce neutral generic production shell path and prove it with blank Story 1.2 project;
+- keep still-required Route 61-2 legacy entry/adapter isolated until PR C;
+- introduce complete Story 1.2 production validation contract, including composition-envelope schema;
+- add minimal shared read-only Story 1.2 compositor sufficient to render schema-valid envelopes through existing semantic renderers;
+- declarative camera with explicit coordinate bounds;
+- explicit Capture Camera / Restore Saved Camera authoring behavior;
 - declarative per-Scene project-layer visibility;
 - authored interaction policy;
 - authored transition;
 - Scene switching/restoration;
 - minimal desktop Scene filmstrip;
-- trusted capability host/layer-control seam required to keep future project-specific behavior out of the neutral shell.
+- trusted capability host/layer-control seam;
+- frozen/versioned Story 1.2 compositor-default token contract;
+- preserve Story 1.0/1.1 behavior including targeted 390×844 mobile smoke.
 
-Do not build rich freeform composition or perform the full Route 61-2 reference-project conversion in this PR.
+Do not add PowerPoint drag/resize/direct-edit authoring or perform full Route 61-2 conversion in PR A.
 
-### PR B — Desktop PowerPoint compositor
+### PR B — Desktop PowerPoint Text authoring
 
 Scope:
 
-- shared 16:9 compositor;
-- Story 1.2 composition envelope;
+- authoring interaction layer over the already-valid shared 16:9 compositor;
 - Text object first;
 - direct text editing;
 - drag/resize;
@@ -951,25 +931,26 @@ Scope:
 - typography and box appearance;
 - z-order;
 - basic snapping/alignment;
-- bounded undo/redo for the new authoring interactions.
+- bounded undo/redo.
 
-Text composition is the proof gate. Do not add all rich objects until this path is stable.
+PR B must not change Story 1.2 schema semantics. Text composition is the proof gate before rich authoring.
 
-### PR C — Rich content + templates + Route 61-2 reference conversion
+### PR C — Rich authoring + templates + Route 61-2 conversion
 
 Scope:
 
-- Metric;
-- Image;
-- Chart;
-- Table;
-- Legend;
-- Blank map story template;
+- Metric authoring;
+- Image authoring;
+- Chart authoring;
+- Table authoring;
+- Legend authoring;
+- Blank template;
 - Route proposal template;
 - Network/service plan template;
 - Import existing project entry point;
-- move Route 61-2 fully onto the neutral shell through trusted capabilities/project data;
-- separate Story 1.2 Route 61-2 reference artifact only if needed, without modifying the canonical Story 1.0 artifact.
+- immediate-validity template certification;
+- move Route 61-2 fully onto neutral shell through trusted capabilities/project data;
+- optional separate Story 1.2 Route 61-2 reference artifact without modifying canonical Story 1.0.
 
 ### PR D — Desktop outputs + certification
 
@@ -977,97 +958,111 @@ Scope:
 
 - Scroll Story;
 - Presentation mode;
-- output navigation/keyboard behavior;
-- transition and interaction-policy verification;
+- output navigation/keyboard;
+- transition/interaction-policy verification;
 - persistence/export/reopen of Story 1.2 composition;
 - 1920×1080 certification;
 - 1366×768 certification;
 - performance/lifecycle checks;
 - neutral blank-project check;
 - Route 61-2 compatibility check;
+- existing Story 1.0/1.1 390×844 mobile regression smoke;
 - final V1.1 desktop lock/certification report.
 
-Mobile is a later separately designed phase after desktop V1.1 lock.
+Story 1.2 mobile-specific authored layout remains a later separately designed phase.
 
 ## 26. Acceptance and certification gates
 
-The following are required before Map Story Studio V1.1 desktop can be considered complete.
-
-### 26.1 Compatibility gates
+### 26.1 Compatibility
 
 - Story 1.0 production tests pass unchanged.
 - Story 1.1 production tests pass unchanged.
-- Canonical Route 61-2 Story 1.0 bytes are unchanged.
+- Canonical Route 61-2 Story 1.0 bytes unchanged.
 - Unrelated Save/Export does not migrate 1.0/1.1.
 - `PROJECT_MANIFEST_V1` remains accepted unchanged.
-- Existing GUI Editor V1 folder/ZIP package tests remain passing.
-- No GUI-only serialized fields exist.
+- GUI Editor V1 folder/ZIP package tests remain passing.
+- No GUI-only serialized fields.
+- Existing Story 1.0/1.1 mobile production path passes targeted 390×844 smoke.
 
-### 26.2 Generic-shell gates
+### 26.2 Story 1.2 contract
 
-A blank Story 1.2 project loaded through the same neutral production shell has:
+- Story 1.2 root/state/envelope validation is complete in PR A.
+- Every schema-valid Story 1.2 envelope has a deterministic production rendering path in PR A.
+- PR B/C do not revise Story 1.2 schema semantics to enable their UI features.
+- nested semantic block references receive production cross-resource validation.
+- omitted appearance uses frozen/versioned Story 1.2 defaults, not ambient CSS.
+
+### 26.3 Generic shell
+
+Blank Story 1.2 project through neutral shell has:
 
 - one MapLibre map;
 - no Existing/Proposed/Difference tabs;
 - no transport metrics;
-- no bus simulation controls;
+- no simulation controls;
 - no industrial/urban controls;
 - no Route 61-2 labels;
-- no Route 61-2 modules required by the neutral shell path.
+- no Route 61-2 modules required by neutral shell path.
 
-By PR C/D, Route 61-2 loaded through that same shell still presents its trusted domain behavior.
+By PR C/D, Route 61-2 through same shell retains trusted domain behavior.
 
-### 26.3 Camera gates
+### 26.4 Camera
 
 - map movement alone produces zero Story mutations;
-- Camera changed status appears after live camera divergence;
-- Capture Camera performs exactly one authored camera mutation;
-- Restore Saved Camera performs zero authored mutations;
+- Camera changed status appears after divergence;
+- Capture Camera = exactly one authored mutation;
+- Restore Saved Camera = zero authored mutations;
 - Scene switch restores saved camera;
-- leaving/re-entering a Scene never restores an uncaptured working camera;
-- Preview Story/Present honor Fly/Ease/Instant and duration;
-- reduced-motion fallback does not mutate authored transition data.
+- uncaptured camera never leaks across Scene changes;
+- Preview Story/Present honor Fly/Ease/Instant + duration;
+- longitude/latitude bounds are exact;
+- reduced-motion fallback does not mutate authored data.
 
-### 26.4 Layer gates
+### 26.5 Layers
 
-- layer visibility is stored per Scene in Story 1.2;
-- switching Scenes restores a complete visibility snapshot;
-- ordinary layer visibility changes do not author action arrays;
-- project layer styling remains global across Scenes;
-- capability-owned renderers honor visibility through stable project dataset IDs;
+- visibility stored per Scene;
+- Scene switch restores complete snapshot;
+- ordinary visibility does not write action arrays;
+- styling remains project-global;
+- capability renderers honor stable project dataset IDs;
 - no raw MapLibre ID enters project/Story JSON.
 
-### 26.5 Composition gates
+### 26.6 Composition
 
-- editor canvas is a true 16:9 Scene surface;
-- Text can be added, selected, directly edited, dragged, resized, duplicated, deleted, aligned, and reordered in z;
-- frame data is normalized and bounded;
-- typography/box appearance is constrained and deterministic;
-- editor uses the same production semantic renderer path;
-- no arbitrary CSS/HTML/JS is serialized;
-- Metric/Image/Chart/Table/Legend reuse existing semantic descriptors/renderers;
-- chart/table/image/legend accessibility behavior remains intact;
-- overflow is surfaced rather than silently changing authored layout.
+- editor canvas is true 16:9 Scene surface;
+- read-only production compositor renders all valid envelopes in PR A;
+- Text can be added, selected, directly edited, dragged, resized, duplicated, deleted, aligned, and z-ordered in PR B;
+- frame data normalized/bounded;
+- appearance constrained/deterministic;
+- editor uses same production semantic renderers;
+- no arbitrary CSS/HTML/JS serialized;
+- Metric/Image/Chart/Table/Legend reuse existing descriptors/renderers;
+- chart/table/image/legend accessibility remains intact;
+- overflow surfaced rather than silently changing layout.
 
-### 26.6 Output gates
+### 26.7 Templates
 
-The same Story 1.2 file produces both Scroll Story and Presentation mode.
+Each template result immediately passes unchanged `loadProject(...)` and production validators. Capability role requirements are either satisfied by valid bounded starter resources or the capability is not yet declared. No template relies on an invalid intermediate project.
+
+### 26.8 Outputs
+
+The same Story 1.2 file produces Scroll Story and Presentation mode.
 
 At 1920×1080 and 1366×768:
 
-- camera state is correct;
-- layer state is correct;
-- overlay geometry matches the 16:9 composition;
-- navigation is correct;
-- interaction policy is honored;
-- trusted effects re-enter cleanly on back/forward navigation;
-- exactly one MapLibre instance is active per output;
-- browser console has no unexpected errors;
-- no editor chrome appears in production outputs.
+- camera correct;
+- layer state correct;
+- overlay geometry matches 16:9 composition;
+- navigation correct;
+- interaction policy honored;
+- trusted effects re-enter cleanly;
+- one MapLibre instance per output;
+- browser console clean;
+- no editor chrome.
 
-### 26.7 Persistence gates
+### 26.9 Persistence
 
-A Story 1.2 project must survive:
+A Story 1.2 project survives:
 
 ```text
 Create/Open
@@ -1086,12 +1081,12 @@ with no editor translation step and no loss of authored values.
 
 ## 27. Design closure
 
-This design intentionally chooses extension over rewrite.
+This design chooses extension over rewrite.
 
-The V1.1 product surface changes substantially, but the certified architecture below it remains the base:
+V1.1 substantially changes product UX while preserving:
 
 - one production project package;
-- one versioned Story format;
+- one versioned Story system;
 - one production loader/validator authority;
 - one semantic content system;
 - one trusted capability boundary;
@@ -1099,6 +1094,13 @@ The V1.1 product surface changes substantially, but the certified architecture b
 - shared production/editor composition;
 - existing bounded folder/ZIP persistence.
 
-The only new production authoring vocabulary is the additive Story 1.2 Scene/composition contract described above. Routine presentation behavior moves from hand-authored actions into declarative Scene properties; special domain behavior remains trusted capability actions.
+The additive Story 1.2 contract owns routine Scene presentation state. Special domain behavior remains trusted capability actions.
 
-There are no unresolved design placeholders in this specification. Implementation should not begin until this written design is reviewed and approved. After approval, the next Superpowers step is `writing-plans` for the staged PR A–D implementation plan.
+The four approval-hardening rules are now part of this specification:
+
+1. complete Story 1.2 + read-only production compositor in PR A;
+2. explicit camera bounds + frozen/versioned compositor defaults;
+3. immediately production-valid templates;
+4. legacy Story 1.0/1.1 mobile runtime regression protection despite mobile V1.1 deferral.
+
+Human design approval is recorded. The next Superpowers step is `writing-plans`; implementation must follow the reviewed plan rather than beginning ad hoc.
