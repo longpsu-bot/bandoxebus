@@ -9,7 +9,8 @@ import { STORY_10_CONTENT_TYPES } from '../src/content/content-descriptors.js';
 import {
   canOpenFolder,
   createFolderStorageAdapter,
-  createMemoryStorageAdapter
+  createMemoryStorageAdapter,
+  createZipStorageAdapter
 } from './storage/adapters.js';
 
 export async function savePackageChanges({
@@ -30,6 +31,13 @@ export async function savePackageChanges({
   const result = await adapter.writeChanges(changeSet);
   packageStore.markWritten(result.written);
   return result;
+}
+
+export async function exportPackageZip({ packageStore, validation }) {
+  if (validation?.status === 'invalid') {
+    throw new TypeError('Project ZIP export is blocked by fatal production validation errors.');
+  }
+  return createZipStorageAdapter().export(packageStore);
 }
 
 export function createEditor({
@@ -990,6 +998,10 @@ export function createEditor({
     return openStorage(createFolderStorageAdapter({ directoryHandle: selected }));
   }
 
+  async function importZip(zipBytes, { label = zipBytes?.name ?? 'Imported project.zip' } = {}) {
+    return openStorage(createZipStorageAdapter({ zipBytes, label }));
+  }
+
   async function save({ confirmInvalid } = {}) {
     const result = await savePackageChanges({
       adapter: storageAdapter,
@@ -1001,6 +1013,10 @@ export function createEditor({
     });
     renderDirty();
     return result;
+  }
+
+  async function exportZip() {
+    return exportPackageZip({ packageStore, validation });
   }
 
   function setViewport(preset) {
@@ -1034,7 +1050,18 @@ export function createEditor({
     bridge.dispose();
   }
 
-  return { newProject, openEntries, openFolder, save, setViewport, inspect, editStories, dispose };
+  return {
+    newProject,
+    openEntries,
+    openFolder,
+    importZip,
+    save,
+    exportZip,
+    setViewport,
+    inspect,
+    editStories,
+    dispose
+  };
 }
 
 if (globalThis.document && globalThis.window) {
