@@ -2,9 +2,14 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-export function createStoryRuntime({ definition, actionRunner }) {
+export function createStoryRuntime({ definition, actionRunner, lifecycle = {} }) {
   if (!definition?.states?.length) throw new TypeError('A validated story definition is required.');
   if (!actionRunner?.run) throw new TypeError('A story action runner is required.');
+  const beforeEnter = lifecycle.beforeEnter ?? (() => {});
+  const afterExit = lifecycle.afterExit ?? (() => {});
+  if (typeof beforeEnter !== 'function' || typeof afterExit !== 'function') {
+    throw new TypeError('Story lifecycle hooks must be functions.');
+  }
 
   let active = false;
   let currentIndex = 0;
@@ -34,18 +39,16 @@ export function createStoryRuntime({ definition, actionRunner }) {
     if (active && nextIndex === currentIndex) return nextState;
 
     if (active) {
-      actionRunner.run(
-        oldState.map.exit,
-        contextFor('exit', oldState, nextState, oldState, currentIndex)
-      );
+      const exitContext = contextFor('exit', oldState, nextState, oldState, currentIndex);
+      actionRunner.run(oldState.map.exit, exitContext);
+      afterExit(oldState, exitContext);
     }
 
     currentIndex = nextIndex;
     active = true;
-    actionRunner.run(
-      nextState.map.enter,
-      contextFor('enter', wasActive ? oldState : null, nextState, nextState, currentIndex)
-    );
+    const enterContext = contextFor('enter', wasActive ? oldState : null, nextState, nextState, currentIndex);
+    beforeEnter(nextState, enterContext);
+    actionRunner.run(nextState.map.enter, enterContext);
     return nextState;
   }
 
@@ -61,10 +64,9 @@ export function createStoryRuntime({ definition, actionRunner }) {
     deactivate() {
       const state = definition.states[currentIndex];
       if (!active) return state;
-      actionRunner.run(
-        state.map.exit,
-        contextFor('exit', state, null, state, currentIndex)
-      );
+      const exitContext = contextFor('exit', state, null, state, currentIndex);
+      actionRunner.run(state.map.exit, exitContext);
+      afterExit(state, exitContext);
       active = false;
       return state;
     },
