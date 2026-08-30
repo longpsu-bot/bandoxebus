@@ -8,8 +8,8 @@ const APP_URL = new URL('../src/app.js', import.meta.url);
 
 test('production composition boots fixed project.json through one map/runtime path', async () => {
   const source = await readFile(APP_URL, 'utf8');
-  assert.match(source, /startApplication\(\{/);
-  assert.match(source, /manifestUrl:\s*['"]\.\/project\.json['"]/);
+  assert.match(source, /startProductionApplication\(\)/);
+  assert.match(source, /manifestUrl\s*=\s*['"]\.\/project\.json['"]/);
   assert.doesNotMatch(source, /loadStoryDefinition\(['"]\.\/data\/stories\/route-61-2\.story\.json/);
   assert.equal((source.match(/new maplibregl\.Map\(/g) ?? []).length, 1);
   assert.equal((source.match(/createStoryRuntime\(/g) ?? []).length, 0);
