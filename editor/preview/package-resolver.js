@@ -30,3 +30,57 @@ export function createPackageFetch(snapshot, {
 
   return { manifestUrl, fetchImpl };
 }
+
+const SUPPORTED_IMAGE_MEDIA_TYPES = new Set([
+  'image/avif',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/svg+xml',
+  'image/webp'
+]);
+
+export function createPreviewPackageResolver(snapshot, {
+  baseUrl,
+  urlApi = globalThis.URL
+} = {}) {
+  const transport = createPackageFetch(snapshot, baseUrl === undefined ? {} : { baseUrl });
+  const packageBase = new URL('.', transport.manifestUrl);
+  const entries = new Map(snapshot.entries.map((entry) => [entry.path, entry]));
+  const objectUrls = new Map();
+  let revoked = false;
+
+  function resolveAssetUrl(url, { id, descriptor } = {}) {
+    if (revoked) throw new Error('Preview asset URL resolver has been revoked.');
+    const resolved = new URL(url, transport.manifestUrl);
+    if (resolved.origin !== packageBase.origin || !resolved.pathname.startsWith(packageBase.pathname)) {
+      throw new TypeError(`Asset ${id ?? ''} is outside the preview package.`);
+    }
+    const path = decodeURIComponent(resolved.pathname.slice(packageBase.pathname.length));
+    const entry = entries.get(path);
+    if (!entry) throw new TypeError(`Asset ${id ?? path} is absent from the preview package.`);
+    if (entry.kind !== 'asset' || descriptor?.type !== 'image'
+      || !SUPPORTED_IMAGE_MEDIA_TYPES.has(entry.mediaType)) {
+      throw new TypeError(`Preview asset ${id ?? path} must be a supported declared image.`);
+    }
+    if (descriptor.mediaType !== entry.mediaType) {
+      throw new TypeError(`Preview asset ${id ?? path} media type does not match its declared media type.`);
+    }
+    if (objectUrls.has(path)) return objectUrls.get(path);
+    if (typeof urlApi?.createObjectURL !== 'function' || typeof urlApi?.revokeObjectURL !== 'function') {
+      throw new TypeError('Preview image object URL support is unavailable.');
+    }
+    const objectUrl = urlApi.createObjectURL(new Blob([entry.bytes.slice()], { type: entry.mediaType }));
+    objectUrls.set(path, objectUrl);
+    return objectUrl;
+  }
+
+  function revoke() {
+    if (revoked) return;
+    revoked = true;
+    for (const objectUrl of objectUrls.values()) urlApi.revokeObjectURL(objectUrl);
+    objectUrls.clear();
+  }
+
+  return { ...transport, resolveAssetUrl, revoke };
+}
