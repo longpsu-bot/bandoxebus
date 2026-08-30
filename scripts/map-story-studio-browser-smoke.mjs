@@ -180,6 +180,7 @@ try {
     `/matches saved Scene/.test(document.getElementById('studio-camera-status')?.textContent ?? '')`,
     'captured camera');
 
+  await evaluate(client, clickButton('Map'));
   await wheelMap(client, 320);
   await waitFor(client,
     `/Camera changed/.test(document.getElementById('studio-camera-status')?.textContent ?? '')`,
