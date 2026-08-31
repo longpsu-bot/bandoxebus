@@ -23,17 +23,22 @@ test('core map installs ordinary authored GeoJSON once and exposes semantic acti
     project: { resources, focusTargets: { overview: { type: 'datasets', datasets: ['ordinary-stops'] } }, capabilities: { renderResponsibilities: {} } }
   });
   assert.deepEqual(calls.slice(0, 2), [['source', 'project-ordinary-stops'], ['layer', 'project-ordinary-stops', 'circle']]);
-  capability.handlers['map.set-visibility']({ target: 'ordinary-stops', visible: false });
+  assert.deepEqual(capability.sceneLayers.ids, ['ordinary-stops']);
+  capability.sceneLayers.setVisible('ordinary-stops', false);
   assert.ok(calls.some((call) => call.join(':') === 'layout:project-ordinary-stops:visibility:none'));
+  capability.handlers['map.set-visibility']({ target: 'ordinary-stops', visible: true });
+  assert.ok(calls.some((call) => call.join(':') === 'layout:project-ordinary-stops:visibility:visible'));
+  assert.equal(JSON.stringify(capability.sceneLayers).includes('project-ordinary-stops'), false);
 });
 
 test('datasets claimed by trusted special capabilities are not rendered by core map', () => {
   const calls = [];
   const resources = new Map([['route', { descriptor: { type: 'geojson', geometry: 'line', role: 'route.proposed', render: { type: 'line', color: '#00AAFF' } }, value: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] } }] } }]]);
-  createCoreMapCapability({
+  const capability = createCoreMapCapability({
     map: { loaded: () => true, addSource() { calls.push('source'); }, addLayer() { calls.push('layer'); } },
     resources,
     project: { resources, focusTargets: {}, capabilities: { renderResponsibilities: { 'route.proposed': 'route-comparison-v1' } } }
   });
   assert.deepEqual(calls, []);
+  assert.deepEqual(capability.sceneLayers.ids, []);
 });

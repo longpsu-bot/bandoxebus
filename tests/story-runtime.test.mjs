@@ -78,6 +78,28 @@ test('state transitions execute old exit before new enter', () => {
   assert.deepEqual(events, ['alpha.exit', 'banana.enter']);
 });
 
+test('optional lifecycle surrounds existing action order without changing default semantics', () => {
+  const events = [];
+  const definition = story(['alpha', 'banana']);
+  const actionRunner = createStoryActionRunner({ record(action) { events.push(action.value); } });
+  const runtime = createStoryRuntime({
+    definition,
+    actionRunner,
+    lifecycle: {
+      afterExit(state) { events.push(`${state.id}.afterExit`); },
+      beforeEnter(state) { events.push(`${state.id}.beforeEnter`); }
+    }
+  });
+  runtime.activate();
+  assert.deepEqual(events, ['alpha.beforeEnter', 'alpha.enter']);
+  events.length = 0;
+  runtime.next();
+  assert.deepEqual(events, ['alpha.exit', 'alpha.afterExit', 'banana.beforeEnter', 'banana.enter']);
+  events.length = 0;
+  runtime.goTo('banana');
+  assert.deepEqual(events, []);
+});
+
 test('unknown action types fail with a deterministic error', () => {
   const runner = createStoryActionRunner({ record() {} });
   assert.throws(

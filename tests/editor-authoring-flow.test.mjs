@@ -11,12 +11,34 @@ import { createPackageFetch } from '../editor/preview/package-resolver.js';
 import { renderEntityInspector } from '../editor/ui/inspectors.js';
 import { createStoryEditor } from '../editor/ui/story-editor.js';
 
+const encoder = new TextEncoder();
+
 function geo(type, coordinates, properties = {}) {
   return { type: 'FeatureCollection', features: [{ type: 'Feature', properties, geometry: { type, coordinates } }] };
 }
 
+function legacyStructuredEntries() {
+  const entries = createNewProjectEntries();
+  const storyIndex = entries.findIndex(({ path }) => path === 'stories/main.story.json');
+  const story = {
+    schemaVersion: '1.1',
+    id: 'main',
+    title: 'Untitled project',
+    states: [{
+      id: 'opening',
+      content: { layout: 'hero', blocks: [{ type: 'heading', text: 'Untitled project' }] },
+      map: { enter: [], exit: [] }
+    }]
+  };
+  entries[storyIndex] = {
+    ...entries[storyIndex],
+    bytes: encoder.encode(`${JSON.stringify(story, null, 2)}\n`)
+  };
+  return entries;
+}
+
 function createHarness() {
-  const packageStore = createPackageStore({ origin: { kind: 'memory' }, entries: createNewProjectEntries() });
+  const packageStore = createPackageStore({ origin: { kind: 'memory' }, entries: legacyStructuredEntries() });
   const draftStore = createDraftStore({ packageStore });
   function manifest() { return draftStore.get('project.json'); }
   function mutate(updater) { draftStore.mutate('project.json', updater); }
@@ -45,7 +67,7 @@ function createHarness() {
   return { packageStore, draftStore, manifest, mutate, writeJson, inspect };
 }
 
-test('integrated UI commands author a production-loadable project without editor metadata', async () => {
+test('integrated legacy structured UI commands author a production-loadable project without editor metadata', async () => {
   const h = createHarness();
   const data = h.inspect('dataset');
   data.command('add-geojson', 'route', {

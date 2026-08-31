@@ -180,7 +180,7 @@ function validateFormat(columnDescriptor, format, path) {
 }
 
 function validateBlockReferences(block, path, context) {
-  if (block.type === 'stat-group' && context.story?.schemaVersion === '1.1') {
+  if (block.type === 'stat-group' && ['1.1', '1.2'].includes(context.story?.schemaVersion)) {
     for (const [index, item] of (block.items ?? []).entries()) {
       if (!context.metrics?.has?.(item.metric)) fail(`${path}.items[${index}].metric`, `Unknown metric ID: ${item.metric}.`, 'METRIC_UNKNOWN');
     }
@@ -218,12 +218,48 @@ function validateImageAsset(id, path, context) {
   if (!asset || asset.type !== 'image') fail(path, `Unknown image asset ID: ${id}.`, 'ASSET_UNKNOWN');
 }
 
+function sceneControllableDatasetIds(manifest, capabilities) {
+  return Object.entries(manifest.datasets)
+    .filter(([, descriptor]) => descriptor.type === 'geojson')
+    .filter(([, descriptor]) => (
+      Boolean(descriptor.render)
+      || Boolean(descriptor.role && capabilities?.renderResponsibilities?.[descriptor.role])
+    ))
+    .map(([id]) => id)
+    .sort();
+}
+
+function validateSceneLayerVisibility(manifest, story, capabilities) {
+  if (story?.schemaVersion !== '1.2') return;
+  const expected = sceneControllableDatasetIds(manifest, capabilities);
+  const expectedSet = new Set(expected);
+  for (const state of story.states ?? []) {
+    const snapshot = state.map?.layerVisibility ?? {};
+    const path = `$.states.${state.id}.map.layerVisibility`;
+    for (const id of Object.keys(snapshot)) {
+      if (!Object.hasOwn(manifest.datasets, id)) fail(`${path}.${id}`, `Unknown Scene layer dataset ID: ${id}.`);
+      if (!expectedSet.has(id)) fail(`${path}.${id}`, `Dataset ${id} is not a Scene-controllable map resource.`);
+    }
+    for (const id of expected) {
+      if (!Object.hasOwn(snapshot, id)) fail(path, `Scene layer visibility snapshot is missing dataset ${id}.`);
+    }
+  }
+}
+
+function semanticBlock(story, item) {
+  return story?.schemaVersion === '1.2' ? item?.block : item;
+}
+
 export function validateResolvedReferences(context) {
-  const { manifest, story } = context;
+  const { manifest, story, capabilities } = context;
   validateManifestReferences(manifest);
+  validateSceneLayerVisibility(manifest, story, capabilities);
   for (const state of story?.states ?? []) {
-    for (const [index, block] of (state.content?.blocks ?? []).entries()) {
-      validateBlockReferences(block, `$.states.${state.id}.content.blocks[${index}]`, context);
+    for (const [index, item] of (state.content?.blocks ?? []).entries()) {
+      const block = semanticBlock(story, item);
+      if (!block || typeof block !== 'object') continue;
+      const blockPath = `$.states.${state.id}.content.blocks[${index}]${story.schemaVersion === '1.2' ? '.block' : ''}`;
+      validateBlockReferences(block, blockPath, context);
     }
   }
   return true;

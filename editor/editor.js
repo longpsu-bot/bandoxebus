@@ -8,6 +8,7 @@ import {
 import { createPreviewBridge } from './preview/bridge.js';
 import { renderEntityInspector } from './ui/inspectors.js';
 import { createStoryEditor } from './ui/story-editor.js';
+import { applyStudioStoryCommand, mountStudioShell } from './ui/studio-shell.js';
 import { INSTALLED_CAPABILITY_REGISTRY } from '../src/capabilities/installed-capabilities.js';
 import { STORY_10_CONTENT_TYPES } from '../src/content/content-descriptors.js';
 import {
@@ -72,6 +73,9 @@ export function createEditor({
   };
   elements.inspector = documentRef.querySelector?.('.editor-inspector') ?? null;
   elements.navigation = documentRef.querySelector?.('.editor-navigation') ?? null;
+  elements.layout = documentRef.querySelector?.('.editor-layout') ?? null;
+  elements.previewToolbar = documentRef.querySelector?.('.preview-toolbar') ?? null;
+  elements.studioScenes = documentRef.getElementById('studio-scenes');
   let packageStore = null;
   let storageAdapter = null;
   let draftStore = null;
@@ -87,6 +91,60 @@ export function createEditor({
   let blockSelection = 0;
   let actionSelection = '';
   let viewportPreset = 'desktop';
+
+  function primaryStory() {
+    const manifest = draftStore?.get('project.json');
+    const item = manifest?.stories?.items?.find(({ id }) => id === manifest.stories.primary);
+    const path = item?.src?.replace(/^\.\//, '') ?? null;
+    return { manifest, item, path, story: path ? draftStore?.get(path) : null };
+  }
+
+  function renderStudioWorkspace() {
+    const current = primaryStory();
+    if (current.story?.schemaVersion !== '1.2' || !elements.studioScenes) return false;
+    stateSelection = Math.max(0, Math.min(stateSelection, current.story.states.length - 1));
+    elements.layout?.classList?.add('is-studio');
+    elements.mobile.hidden = true;
+    elements.desktop.hidden = true;
+    mountStudioShell({
+      documentRef,
+      navigation: elements.navigation,
+      inspector: elements.inspector,
+      scenesHost: elements.studioScenes,
+      previewToolbar: elements.previewToolbar,
+      manifest: current.manifest,
+      story: current.story,
+      sceneIndex: stateSelection,
+      workingCamera: previewTelemetry,
+      onSelectScene(index) {
+        stateSelection = index;
+        bridge.command('activate-scene', { index, animate: false });
+        renderStudioWorkspace();
+      },
+      onStoryCommand(name, payload) {
+        const next = applyStudioStoryCommand(current.story, name, payload);
+        if (name === 'add-scene') stateSelection = next.states.length - 1;
+        else if (name === 'duplicate-scene') stateSelection = payload.sceneIndex + 1;
+        else if (name === 'delete-scene') stateSelection = Math.min(payload.sceneIndex, next.states.length - 1);
+        else if (name === 'move-scene') stateSelection = payload.to;
+        draftStore.mutate(current.path, () => next);
+        renderDirty();
+        renderStudioWorkspace();
+      },
+      onPreviewCommand(name, payload) { bridge.command(name, payload); }
+    });
+    return true;
+  }
+
+  function addLayerToPrimaryStory12(datasetId) {
+    const current = primaryStory();
+    if (current.story?.schemaVersion !== '1.2') return;
+    const next = applyStudioStoryCommand(current.story, 'add-project-layer', {
+      sceneIndex: stateSelection,
+      datasetId
+    });
+    draftStore.mutate(current.path, () => next);
+  }
 
   function inspect(kind, options = {}) {
     if (!draftStore || !packageStore) throw new TypeError('Create or open a project before authoring.');
@@ -443,6 +501,7 @@ export function createEditor({
         if (type.value === 'table') ui.command('add-table', id.value, { label: label.value, value });
         else {
           ui.command('add-geojson', id.value, { geometry: type.value, label: label.value, value });
+          addLayerToPrimaryStory12(id.value);
           const entity = ui.entity(id.value);
           entity.control('render.type').set(type.value === 'polygon' ? 'fill' : type.value);
           entity.control('render.color').set(color.value.toUpperCase());
@@ -950,12 +1009,16 @@ export function createEditor({
       } else if (event.type === 'editor-preview:loaded') {
         elements.iframe.dataset.previewRevision = String(event.revision);
         elements.previewStatus.textContent = `Preview revision ${event.revision}`;
+        if (primaryStory().story?.schemaVersion === '1.2') {
+          bridge.command('activate-scene', { index: stateSelection, animate: false });
+          bridge.command('authoring-mode', { mode: 'select' });
+        }
       } else if (event.type === 'editor-preview:runtime-error') {
         elements.previewStatus.textContent = 'Preview runtime error';
         elements.paused.hidden = false;
       } else if (event.type === 'editor-preview:camera') {
         previewTelemetry = structuredClone(event.payload);
-        if (activeSection === 'project') renderProjectInspector();
+        if (!renderStudioWorkspace() && activeSection === 'project') renderProjectInspector();
       }
     }
   });
@@ -1138,20 +1201,30 @@ export function createEditor({
     const primaryStory = primaryStoryPath ? draftStore.get(primaryStoryPath) : undefined;
     elements.heading.disabled = !primaryStory;
     elements.heading.value = primaryStory?.states?.[0]?.content?.blocks?.find(({ type }) => type === 'heading')?.text ?? '';
-    renderAuthoringNavigation();
+    if (primaryStory?.schemaVersion === '1.2') {
+      elements.heading.disabled = true;
+      renderStudioWorkspace();
+    } else {
+      elements.layout?.classList?.remove('is-studio');
+      if (elements.studioScenes) elements.studioScenes.hidden = true;
+      elements.desktop.hidden = false;
+      elements.mobile.hidden = false;
+      elements.previewToolbar?.replaceChildren?.(elements.desktop, elements.mobile);
+      renderAuthoringNavigation();
+    }
     if (primaryStoryPath && !primaryStory) renderSourceRepair(primaryStoryPath);
     return true;
   }
 
   async function startEntries({ origin, capabilities, entries, adapter = null }) {
     validation?.dispose();
-    bridge.reset();
     packageStore = createPackageStore({
       origin,
       entries
     });
     storageAdapter = adapter;
     draftStore = createDraftStore({ packageStore });
+    bridge.reset();
     validation = createValidationCoordinator({ draftStore, onChange: handleValidationChange });
     lastSentRevision = -1;
     previewTelemetry = null;

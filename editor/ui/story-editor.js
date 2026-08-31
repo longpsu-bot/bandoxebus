@@ -1,5 +1,16 @@
 import { STORY_10_CONTENT_TYPES } from '../../src/content/content-descriptors.js';
 import { createStableId, moveArrayItem } from '../core/draft-store.js';
+import {
+  addProjectLayerToStory12,
+  addScene12,
+  captureSceneCamera,
+  deleteScene12,
+  duplicateScene12,
+  moveScene12,
+  setSceneInteraction,
+  setSceneLayerVisibility,
+  setSceneTransition
+} from '../core/scene-commands.js';
 import { createContentActionEditor } from './content-actions.js';
 
 const LAYOUTS = Object.freeze(['hero', 'metrics', 'narrative', 'map-focus']);
@@ -87,7 +98,9 @@ export function createStoryEditor({
     }
     return {
       id,
-      layoutOptions: () => [...LAYOUTS],
+      get schemaVersion() { return current().schemaVersion; },
+      snapshot: () => clone(current()),
+      layoutOptions: () => current().schemaVersion === '1.2' ? ['freeform-16x9'] : [...LAYOUTS],
       authoring() {
         if (current().schemaVersion !== '1.1') throw new TypeError('Canonical content/action authoring requires Story 1.1.');
         return createContentActionEditor({
@@ -104,8 +117,30 @@ export function createStoryEditor({
         return legacyActionModels(current().states[stateIndex]);
       },
       command(name, options) {
+        const source = current();
+        if (source.schemaVersion === '1.2') {
+          if (name === 'add-state') {
+            const next = addScene12(source, { activeSceneIndex: options?.activeSceneIndex ?? 0 });
+            persist(id, next);
+            return clone(next.states.at(-1));
+          }
+          if (name === 'duplicate-state') return persist(id, duplicateScene12(source, options));
+          if (name === 'delete-state') return persist(id, deleteScene12(source, options));
+          if (name === 'move-state') {
+            const next = moveScene12(source, options.from, options.to);
+            persist(id, next);
+            announce(`Scene moved to position ${options.to + 1} of ${next.states.length}.`);
+            return clone(next.states);
+          }
+          if (name === 'set-layer-visibility') return persist(id, setSceneLayerVisibility(source, options));
+          if (name === 'capture-camera') return persist(id, captureSceneCamera(source, options));
+          if (name === 'set-interaction') return persist(id, setSceneInteraction(source, options));
+          if (name === 'set-transition') return persist(id, setSceneTransition(source, options));
+          if (name === 'add-project-layer') return persist(id, addProjectLayerToStory12(source, options.datasetId, { activeSceneIndex: options.activeSceneIndex ?? 0 }));
+          throw new TypeError(`Unknown Story 1.2 Scene command: ${name}`);
+        }
         if (name === 'add-state') {
-          const next = clone(current());
+          const next = clone(source);
           const stateId = createStableId(options.title, next.states.map(({ id: used }) => used));
           const state = {
             id: stateId,
@@ -117,24 +152,23 @@ export function createStoryEditor({
           return clone(state);
         }
         if (name === 'duplicate-state') {
-          const next = clone(current());
-          const source = next.states[options];
-          if (!source) throw new TypeError(`Unknown state index: ${options}`);
-          const duplicate = clone(source);
-          duplicate.id = createStableId(`${source.id}-copy`, next.states.map(({ id: used }) => used));
+          const next = clone(source);
+          const selected = next.states[options];
+          if (!selected) throw new TypeError(`Unknown state index: ${options}`);
+          const duplicate = clone(selected);
+          duplicate.id = createStableId(`${selected.id}-copy`, next.states.map(({ id: used }) => used));
           next.states.splice(options + 1, 0, duplicate);
           persist(id, next);
           return clone(duplicate);
         }
         if (name === 'delete-state') {
-          const source = current();
           if (source.states.length === 1) throw new TypeError('A Story must contain at least one state.');
           const next = clone(source);
           next.states.splice(options, 1);
           return persist(id, next);
         }
         if (name === 'move-state') {
-          const next = clone(current());
+          const next = clone(source);
           next.states = moveArrayItem(next.states, options.from, options.to);
           persist(id, next);
           announce(`State moved to position ${options.to + 1} of ${next.states.length}.`);
@@ -151,7 +185,6 @@ export function createStoryEditor({
           });
         }
         if (name === 'add-block') {
-          const source = current();
           if (source.schemaVersion === '1.0' && !STORY_10_CONTENT_TYPES.includes(options.block.type)) {
             throw new TypeError(`${options.block.type} is a Story 1.1-only block.`);
           }
@@ -171,6 +204,7 @@ export function createStoryEditor({
 
   return {
     story,
+    primaryId: () => manifest.stories.primary,
     list: () => clone(manifest.stories.items),
     command(name, options) {
       if (name === 'add-story') {

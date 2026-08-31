@@ -2,9 +2,14 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-export function createStoryRuntime({ definition, actionRunner }) {
+export function createStoryRuntime({ definition, actionRunner, lifecycle = {} }) {
   if (!definition?.states?.length) throw new TypeError('A validated story definition is required.');
   if (!actionRunner?.run) throw new TypeError('A story action runner is required.');
+  const beforeEnter = lifecycle.beforeEnter ?? (() => {});
+  const afterExit = lifecycle.afterExit ?? (() => {});
+  if (typeof beforeEnter !== 'function' || typeof afterExit !== 'function') {
+    throw new TypeError('Story lifecycle hooks must be functions.');
+  }
 
   let active = false;
   let currentIndex = 0;
@@ -21,11 +26,11 @@ export function createStoryRuntime({ definition, actionRunner }) {
     return clamp(Math.trunc(numericTarget), 0, definition.states.length - 1);
   }
 
-  function contextFor(phase, fromState, toState, state, index) {
-    return Object.freeze({ definition, phase, fromState, toState, state, index });
+  function contextFor(phase, fromState, toState, state, index, { animate = true } = {}) {
+    return Object.freeze({ definition, phase, fromState, toState, state, index, animate });
   }
 
-  function goTo(target) {
+  function goTo(target, { animate = true } = {}) {
     const nextIndex = resolveIndex(target);
     const oldState = definition.states[currentIndex];
     const nextState = definition.states[nextIndex];
@@ -34,18 +39,18 @@ export function createStoryRuntime({ definition, actionRunner }) {
     if (active && nextIndex === currentIndex) return nextState;
 
     if (active) {
-      actionRunner.run(
-        oldState.map.exit,
-        contextFor('exit', oldState, nextState, oldState, currentIndex)
-      );
+      const exitContext = contextFor('exit', oldState, nextState, oldState, currentIndex);
+      actionRunner.run(oldState.map.exit, exitContext);
+      afterExit(oldState, exitContext);
     }
 
     currentIndex = nextIndex;
     active = true;
-    actionRunner.run(
-      nextState.map.enter,
-      contextFor('enter', wasActive ? oldState : null, nextState, nextState, currentIndex)
+    const enterContext = contextFor(
+      'enter', wasActive ? oldState : null, nextState, nextState, currentIndex, { animate }
     );
+    beforeEnter(nextState, enterContext);
+    actionRunner.run(nextState.map.enter, enterContext);
     return nextState;
   }
 
@@ -55,16 +60,15 @@ export function createStoryRuntime({ definition, actionRunner }) {
     get currentIndex() { return currentIndex; },
     get currentState() { return definition.states[currentIndex]; },
     get currentContent() { return definition.states[currentIndex].content; },
-    activate(target = currentIndex) {
-      return goTo(target);
+    activate(target = currentIndex, options) {
+      return goTo(target, options);
     },
     deactivate() {
       const state = definition.states[currentIndex];
       if (!active) return state;
-      actionRunner.run(
-        state.map.exit,
-        contextFor('exit', state, null, state, currentIndex)
-      );
+      const exitContext = contextFor('exit', state, null, state, currentIndex);
+      actionRunner.run(state.map.exit, exitContext);
+      afterExit(state, exitContext);
       active = false;
       return state;
     },

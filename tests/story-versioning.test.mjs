@@ -10,6 +10,26 @@ function story(version, blocks) {
   return { schemaVersion: version, id: 'fixture', title: 'Fixture', states: [{ id: 'state', content: { layout: 'narrative', blocks }, map: { enter: [], exit: [] } }] };
 }
 
+function story12(blocks = []) {
+  return {
+    schemaVersion: '1.2',
+    id: 'fixture',
+    title: 'Fixture',
+    states: [{
+      id: 'state',
+      content: { layout: 'freeform-16x9', blocks },
+      map: {
+        camera: { center: [106.63, 11.06], zoom: 10.7, pitch: 46, bearing: -18 },
+        interaction: 'locked',
+        transition: { type: 'ease', durationMs: 900 },
+        layerVisibility: {},
+        enter: [],
+        exit: []
+      }
+    }]
+  };
+}
+
 const newBlocks = [
   { type: 'table', title: 'Table', data: { dataset: 'demand', columns: [{ field: 'name', header: 'Name', align: 'start', format: { type: 'text' } }] } },
   { type: 'chart', chartType: 'bar', title: 'Chart', description: 'Demand', data: { dataset: 'demand', x: 'name', series: [{ y: 'value', label: 'Value' }] } },
@@ -17,14 +37,17 @@ const newBlocks = [
   { type: 'legend', items: [{ label: 'Route', sample: 'line', color: '#00AAFF' }] }
 ];
 
-test('Story 1.0 remains unchanged while 1.1 adds exactly four blocks', () => {
-  assert.deepEqual(STORY_SCHEMA_VERSIONS, ['1.0', '1.1']);
+test('Story 1.0 and 1.1 remain unchanged while Story 1.2 is additive', () => {
+  assert.deepEqual(STORY_SCHEMA_VERSIONS, ['1.0', '1.1', '1.2']);
   const old = story('1.0', [{ type: 'heading', text: 'Old' }]);
   assert.equal(validateStoryDefinition(old, { actionContracts: {} }), old);
   const next = story('1.1', [{ type: 'heading', text: 'New' }, ...newBlocks]);
   assert.equal(validateStoryDefinition(next, { actionContracts: {} }), next);
   assert.throws(() => validateStoryDefinition(story('1.0', newBlocks), { actionContracts: {} }), /unsupported content block.*table/i);
+  const freeform = story12();
+  assert.equal(validateStoryDefinition(freeform, { actionContracts: {} }), freeform);
   assert.equal(getStorySchema('1.1').properties.schemaVersion.const, '1.1');
+  assert.equal(getStorySchema('1.2').properties.schemaVersion.const, '1.2');
 });
 
 test('descriptor catalog is the single runtime and GUI discovery authority', () => {

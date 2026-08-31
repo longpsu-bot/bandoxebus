@@ -90,13 +90,20 @@ export function createNewProjectEntries({
     attribution: {}
   };
   const story = {
-    schemaVersion: '1.1',
+    schemaVersion: '1.2',
     id: 'main',
     title,
     states: [{
       id: 'opening',
-      content: { layout: 'hero', blocks: [{ type: 'heading', text: title }] },
-      map: { enter: [], exit: [] }
+      content: { layout: 'freeform-16x9', blocks: [] },
+      map: {
+        camera: structuredClone(manifest.map.initialView),
+        interaction: 'locked',
+        transition: { type: 'ease', durationMs: 900 },
+        layerVisibility: {},
+        enter: [],
+        exit: []
+      }
     }]
   };
   return [

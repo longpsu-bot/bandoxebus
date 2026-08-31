@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "id": "story-1-2-blank",
+  "title": "Story 1.2 blank",
+  "locale": "en-US",
+  "stories": {
+    "primary": "main",
+    "items": [
+      {
+        "id": "main",
+        "src": "./stories/main.story.json"
+      }
+    ]
+  },
+  "map": {
+    "basemap": "openfreemap-dark",
+    "initialView": {
+      "center": [0, 0],
+      "zoom": 2,
+      "pitch": 0,
+      "bearing": 0
+    }
+  },
+  "datasets": {},
+  "assets": {},
+  "focusTargets": {},
+  "capabilities": [],
+  "attribution": {}
+}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07101c">
+  <title>Map Story</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="./runtime.css">
+</head>
+<body>
+  <section id="project-load-error" role="alert" hidden></section>
+  <main id="map" aria-label="Map"></main>
+  <section id="scene-compositor" aria-live="polite"></section>
+  <nav id="runtime-navigation" aria-label="Story navigation" hidden></nav>
+  <section id="capability-controls" aria-label="Project controls" hidden></section>
+  <p id="runtime-status" role="status" aria-live="polite">Loading map…</p>
+  <noscript>This map story requires JavaScript.</noscript>
+  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script src="../../vendor/chart.js/4.5.1/chart.umd.min.js"></script>
+  <script type="module" src="./generic-app.js"></script>
+</body>
+</html>

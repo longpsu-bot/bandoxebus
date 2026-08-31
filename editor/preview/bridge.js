@@ -1,6 +1,7 @@
 export const PREVIEW_PROTOCOL_VERSION = 1;
 export const PREVIEW_PACKAGE_MAX_BYTES = 256 * 1024 * 1024;
 
+const decoder = new TextDecoder();
 const EVENT_TYPES = new Set([
   'editor-preview:ready',
   'editor-preview:loaded',
@@ -85,13 +86,44 @@ export function validatePreviewSnapshot(snapshot) {
   return snapshot;
 }
 
+function parseJsonEntry(snapshot, path) {
+  const entry = snapshot.entries.find((candidate) => candidate.path === path);
+  if (!entry) throw new TypeError(`Preview package is missing ${path}.`);
+  try {
+    return JSON.parse(decoder.decode(entry.bytes));
+  } catch {
+    throw new TypeError(`Preview package ${path} is not valid JSON.`);
+  }
+}
+export function resolvePreviewSourceForSnapshot(snapshot, {
+  legacy = '../?editorPreview=1',
+  story12 = '../src/runtime/?editorPreview=1'
+} = {}) {
+  validatePreviewSnapshot(snapshot);
+  const manifest = parseJsonEntry(snapshot, 'project.json');
+  const primary = manifest?.stories?.items?.find(({ id }) => id === manifest?.stories?.primary);
+  if (!primary?.src) throw new TypeError('Preview project primary Story is not declared.');
+  const storyPath = String(primary.src).replace(/^\.\//, '');
+  const story = parseJsonEntry(snapshot, storyPath);
+  if (story.schemaVersion === '1.2') return story12;
+  if (story.schemaVersion === '1.0' || story.schemaVersion === '1.1') return legacy;
+  throw new TypeError(`Unsupported Story preview version: ${story.schemaVersion ?? ''}.`);
+}
+
 function validCommandPayload(payload) {
   if (!hasExactKeys(payload, ['name', 'payload']) || !isRecord(payload.payload)) return false;
-  if (!['enter-story', 'explore', 'restart', 'viewport'].includes(payload.name)) return false;
-  if (payload.name !== 'viewport') return hasExactKeys(payload.payload, []);
-  return hasExactKeys(payload.payload, ['preset', 'reducedMotion'])
+  if (['enter-story', 'explore', 'restart'].includes(payload.name)) return hasExactKeys(payload.payload, []);
+  if (payload.name === 'viewport') return hasExactKeys(payload.payload, ['preset', 'reducedMotion'])
     && ['desktop', 'mobile'].includes(payload.payload.preset)
     && typeof payload.payload.reducedMotion === 'boolean';
+  if (payload.name === 'activate-scene') return hasExactKeys(payload.payload, ['index', 'animate'])
+    && Number.isInteger(payload.payload.index) && payload.payload.index >= 0
+    && payload.payload.animate === false;
+  if (payload.name === 'authoring-mode') return hasExactKeys(payload.payload, ['mode'])
+    && ['select', 'map'].includes(payload.payload.mode);
+  if (payload.name === 'restore-scene-camera') return hasExactKeys(payload.payload, ['index'])
+    && Number.isInteger(payload.payload.index) && payload.payload.index >= 0;
+  return false;
 }
 
 function envelope(type, revision, requestId, payload = {}) {
@@ -157,11 +189,33 @@ export function createPreviewBridge({
   iframe.addEventListener?.('load', handleLoad);
   if (iframe.contentDocument?.readyState === 'complete') handleLoad();
 
+  function clearSession() {
+    currentRevision = -1;
+    currentStartRequestId = null;
+    readyRequestId = null;
+    requireReadyRequest = true;
+    canRetryReadyHandshake = false;
+    ready = false;
+    queuedStart = null;
+  }
+
+  function selectSnapshotSource(snapshot) {
+    const legacy = iframe.dataset?.previewSrcLegacy;
+    const story12 = iframe.dataset?.previewSrcStory12;
+    if (!legacy || !story12) return;
+    const source = resolvePreviewSourceForSnapshot(snapshot, { legacy, story12 });
+    if (iframe.dataset.previewSrc === source) return;
+    iframe.dataset.previewSrc = source;
+    clearSession();
+    iframe.src = source;
+  }
+
   function start(lastValid) {
     validatePreviewSnapshot(lastValid.snapshot);
     if (lastValid.revision !== lastValid.snapshot.revision) {
       throw new TypeError('Preview snapshot revision does not match last-valid revision.');
     }
+    selectSnapshotSource(lastValid.snapshot);
     currentRevision = lastValid.revision;
     currentStartRequestId = `request-${++requestNumber}`;
     queuedStart = envelope(
@@ -174,20 +228,11 @@ export function createPreviewBridge({
   }
 
   function reset() {
-    currentRevision = -1;
-    currentStartRequestId = null;
-    readyRequestId = null;
-    requireReadyRequest = true;
-    canRetryReadyHandshake = false;
-    ready = false;
-    queuedStart = null;
+    clearSession();
     iframe.src = iframe.dataset.previewSrc;
   }
 
   function command(name, payload = {}) {
-    if (!['enter-story', 'explore', 'restart', 'viewport'].includes(name)) {
-      throw new TypeError(`Unsupported preview command: ${name}`);
-    }
     const commandPayload = { name, payload };
     if (!validCommandPayload(commandPayload)) throw new TypeError(`Invalid preview command payload: ${name}`);
     post(envelope('editor-preview:command', currentRevision, `request-${++requestNumber}`, commandPayload));
