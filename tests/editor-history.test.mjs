@@ -14,7 +14,12 @@ function harness(initial = { value: 0 }, limit = 100) {
       writes.push(structuredClone(next));
     }
   });
-  return { history, get current() { return structuredClone(current); }, writes };
+  return {
+    history,
+    get current() { return structuredClone(current); },
+    replaceExternal(next) { current = structuredClone(next); },
+    writes
+  };
 }
 
 test('history executes, undoes, and redoes production-data mutations', () => {
@@ -73,4 +78,17 @@ test('markSaved does not clear undo or redo and UI-only state stays outside hist
   assert.equal(authoringMode, 'map');
   h.history.redo();
   assert.deepEqual(h.current, { value: 1 });
+});
+
+test('external production-state replacement invalidates stale undo and redo safely', () => {
+  const h = harness();
+  h.history.execute((value) => ({ value: value.value + 1 }));
+  h.replaceExternal({ value: 99 });
+
+  assert.equal(h.history.sync(), true);
+  assert.deepEqual(h.current, { value: 99 });
+  assert.equal(h.history.canUndo, false);
+  assert.equal(h.history.canRedo, false);
+  h.history.undo();
+  assert.deepEqual(h.current, { value: 99 });
 });
