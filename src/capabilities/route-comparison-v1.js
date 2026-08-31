@@ -32,6 +32,7 @@ export const ROUTE_COMPARISON_V1_DESCRIPTOR = deepFreeze({
     { role: 'route.existing', types: ['geojson'], geometry: ['line'], required: true, render: true },
     { role: 'route.proposed', types: ['geojson'], geometry: ['line'], required: true, render: true },
     { role: 'stops.existing', types: ['geojson'], geometry: ['point'], required: false, render: true },
+    { role: 'stops.proposed', types: ['geojson'], geometry: ['point'], required: false, render: true },
     { role: 'transport.poi', types: ['geojson'], geometry: ['point'], required: false, render: true }
   ],
   actions: [

@@ -10,7 +10,7 @@ export function createRoute612Controls({
   if (!host?.replaceChildren || !documentRef?.createElement) throw new TypeError('Route 61-2 controls require a neutral host.');
   const root = documentRef.createElement('section');
   root.setAttribute('aria-label', 'Route comparison controls');
-  for (const [label, mode] of [['Existing', 'existing'], ['Proposed', 'proposed'], ['Difference', 'difference']]) {
+  for (const [label, mode] of [['Difference', 'difference'], ['Existing', 'existing'], ['Proposed', 'proposed'], ['Compare', 'compare']]) {
     const button = documentRef.createElement('button');
     button.type = 'button';
     button.textContent = label;

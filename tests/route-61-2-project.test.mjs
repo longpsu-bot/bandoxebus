@@ -44,6 +44,7 @@ test('Route 61-2 loads from project.json and preserves its Story 1.0 contract', 
   assert.equal(project.story.states.length, 7);
   assert.equal(await readFile(STORY_URL, 'utf8'), before);
   assert.equal(project.capabilities.datasetRoles.filter(({ required }) => required).length, 2);
+  assert.ok(project.capabilities.datasetRoles.some(({ role }) => role === 'stops.proposed'));
 });
 
 test('static Route 61-2 GeoJSON bridge exactly matches current JavaScript geometry', async () => {

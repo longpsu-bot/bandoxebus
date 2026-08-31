@@ -96,7 +96,7 @@ test('trusted Route controls mount mode, reveal, POI, urban, and simulation beha
   });
   const nodes = (node) => [node, ...node.children.flatMap(nodes)];
   const all = nodes(host);
-  for (const label of ['Existing', 'Proposed', 'Difference', 'Route reveal', 'POI emphasis', 'Urban context', 'Simulation']) {
+  for (const label of ['Existing', 'Proposed', 'Difference', 'Compare', 'Route reveal', 'POI emphasis', 'Urban context', 'Simulation']) {
     assert.ok(all.some(({ textContent }) => textContent === label), label);
   }
   all.find(({ textContent }) => textContent === 'Existing').listeners.click();
@@ -106,7 +106,122 @@ test('trusted Route controls mount mode, reveal, POI, urban, and simulation beha
   assert.deepEqual(events, [['mode', 'existing'], ['simulation', true, 1]]);
 });
 
-test('trusted adapter renders derived comparison, POI beacons, reveal, urban context, and moving buses', () => {
+test('all four route modes preserve route offsets and existing, proposed, and difference stop semantics', async () => {
+  class Element {
+    constructor() { this.dataset = {}; this.attributes = {}; }
+    setAttribute(name, value) { this.attributes[name] = value; }
+  }
+  const mapElement = new Element();
+  const sources = new Map(); const layers = new Map(); const paint = [];
+  const map = {
+    loaded: () => true,
+    getContainer: () => mapElement,
+    getSource: (id) => sources.get(id),
+    addSource(id, spec) { sources.set(id, spec); },
+    getLayer: (id) => layers.get(id),
+    addLayer(layer) { layers.set(layer.id, structuredClone(layer)); },
+    setLayoutProperty(id, property, value) { layers.get(id).layout = { ...layers.get(id).layout, [property]: value }; },
+    setPaintProperty(id, property, value) { paint.push([id, property, value]); layers.get(id).paint[property] = value; },
+    getStyle: () => ({ layers: [...layers.values()] }),
+    once() {},
+    isSourceLoaded: () => true
+  };
+  const pointCollection = (coordinates) => ({
+    type: 'FeatureCollection',
+    features: coordinates.map((point, index) => ({
+      type: 'Feature', id: index, properties: { stopId: index }, geometry: { type: 'Point', coordinates: point }
+    }))
+  });
+  const resources = new Map([
+    ['existing-route', { descriptor: { role: 'route.existing' }, value: line([[106.6, 11], [106.61, 11.01]]) }],
+    ['proposed-route', { descriptor: { role: 'route.proposed' }, value: line([[106.6, 11], [106.62, 11.02]]) }],
+    ['existing-stops', { descriptor: { role: 'stops.existing' }, value: pointCollection([[106.6, 11], [106.61, 11.01]]) }],
+    ['proposed-stops', { descriptor: { role: 'stops.proposed' }, value: pointCollection([[106.6, 11], [106.62, 11.02]]) }]
+  ]);
+  const adapter = createRoute612RuntimeAdapter({ map, resources, documentRef: { getElementById: () => mapElement } });
+  await adapter.ready;
+
+  for (const mode of ['difference', 'existing', 'proposed', 'compare']) {
+    adapter.setMode(mode);
+    assert.equal(mapElement.attributes['data-route-mode'], mode);
+    assert.equal(mapElement.attributes['data-route-existing-visible'], String(['existing', 'compare'].includes(mode)));
+    assert.equal(mapElement.attributes['data-route-proposed-visible'], String(['proposed', 'compare'].includes(mode)));
+    assert.equal(mapElement.attributes['data-route-stop-mode'], mode === 'difference' ? 'difference' : mode === 'existing' ? 'existing' : 'proposed');
+    if (mode === 'difference') {
+      assert.equal(layers.get('route-61-2-stops-retained').layout.visibility, 'visible');
+      assert.equal(layers.get('route-61-2-stops-existing').layout.visibility, 'none');
+      assert.equal(layers.get('route-61-2-stops-proposed').layout.visibility, 'none');
+    } else if (mode === 'existing') {
+      assert.equal(layers.get('route-61-2-stops-existing').layout.visibility, 'visible');
+      assert.equal(layers.get('route-61-2-stops-proposed').layout.visibility, 'none');
+    } else {
+      assert.equal(layers.get('route-61-2-stops-existing').layout.visibility, 'none');
+      assert.equal(layers.get('route-61-2-stops-proposed').layout.visibility, 'visible');
+    }
+  }
+  assert.equal(layers.get('route-61-2-existing').layout.visibility, 'visible');
+  assert.equal(layers.get('route-61-2-proposed').layout.visibility, 'visible');
+  assert.equal(layers.get('route-61-2-existing').paint['line-offset'], -4.5);
+  assert.equal(layers.get('route-61-2-proposed').paint['line-offset'], 4.5);
+  assert.equal(mapElement.attributes['data-route-existing-offset'], '-4.5');
+  assert.equal(mapElement.attributes['data-route-proposed-offset'], '4.5');
+  assert.ok(layers.has('route-61-2-stops-existing'));
+  assert.ok(layers.has('route-61-2-stops-proposed'));
+  for (const status of ['retained', 'added', 'removed']) assert.ok(layers.has(`route-61-2-stops-${status}`));
+  assert.ok(paint.some(([id, property, value]) => id === 'route-61-2-proposed' && property === 'line-offset' && value === 4.5));
+});
+
+test('trusted adapter activates the existing Overture urban-context stack instead of a polygon approximation', async () => {
+  const mapElement = { dataset: {}, setAttribute() {} };
+  const sources = new Map(); const layers = new Map(); const placements = [];
+  const overtureBuildings = {
+    type: 'FeatureCollection',
+    metadata: {
+      provider: 'Overture Maps Foundation', overtureRelease: '2026-07-22.0',
+      aoiFeatureId: 'osm-industrial-759187612', statistics: { featureCount: 1, aoiCoverageRatio: 0.05 }
+    },
+    features: [{
+      type: 'Feature', properties: { render_height_m: 9 },
+      geometry: { type: 'Polygon', coordinates: [[[106.6, 11], [106.601, 11], [106.601, 11.001], [106.6, 11]]] }
+    }]
+  };
+  const zone = {
+    type: 'FeatureCollection',
+    features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[106.59, 10.99], [106.63, 10.99], [106.63, 11.03], [106.59, 10.99]]] } }]
+  };
+  const map = {
+    loaded: () => true,
+    getContainer: () => mapElement,
+    getSource: (id) => sources.get(id), addSource(id, spec) { sources.set(id, spec); },
+    getLayer: (id) => layers.get(id), addLayer(layer, beforeId) { layers.set(layer.id, structuredClone(layer)); placements.push([layer.id, beforeId]); },
+    setLayoutProperty(id, property, value) { layers.get(id).layout = { ...layers.get(id).layout, [property]: value }; },
+    setPaintProperty() {},
+    getStyle: () => ({ layers: [...layers.values()] }),
+    once() {},
+    isSourceLoaded: () => true
+  };
+  const resources = new Map([
+    ['existing-route', { descriptor: { role: 'route.existing' }, value: line([[106.6, 11], [106.61, 11.01]]) }],
+    ['proposed-route', { descriptor: { role: 'route.proposed' }, value: line([[106.6, 11], [106.62, 11.02]]) }],
+    ['industrial-zone', { descriptor: { role: 'context.area' }, value: zone }]
+  ]);
+  const adapter = createRoute612RuntimeAdapter({
+    map, resources, overtureBuildings, documentRef: { getElementById: () => mapElement }
+  });
+  await adapter.ready;
+  adapter.setContextMode('industrial-context');
+
+  assert.equal(mapElement.dataset.urbanContextProvider, 'overture');
+  assert.equal(mapElement.dataset.urbanGroundState, 'visible');
+  assert.equal(mapElement.dataset.urbanOvertureLayerState, 'visible');
+  assert.ok(layers.has('industrial-context-ground'));
+  assert.ok(layers.has('industrial-context-boundary'));
+  assert.ok(layers.has('overture-industrial-buildings-3d'));
+  assert.equal(layers.has('route-61-2-urban-context'), false);
+  assert.ok(placements.some(([id, beforeId]) => id === 'overture-industrial-buildings-3d' && beforeId === 'route-61-2-difference-removed'));
+});
+
+test('trusted adapter renders derived comparison, POI beacons, reveal, and moving buses', () => {
   class Element {
     constructor(tagName) {
       this.tagName = tagName; this.children = []; this.dataset = {}; this.attributes = {}; this.className = ''; this.hidden = false;
@@ -167,9 +282,6 @@ test('trusted adapter renders derived comparison, POI beacons, reveal, urban con
   assert.ok(paint.some(([id, property, value]) => (
     id === 'route-61-2-proposed' && property === 'line-gradient' && Array.isArray(value)
   )));
-  adapter.setContextMode('industrial-context');
-  assert.equal(layers.get('route-61-2-urban-context').layout.visibility, 'visible');
-
   adapter.setSimulation(true, 2);
   const buses = markers.filter(({ options }) => options.element.className.includes('bus-marker'));
   assert.equal(buses.length, 2);

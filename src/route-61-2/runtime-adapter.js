@@ -1,4 +1,6 @@
-import { compareRoutes, haversineMeters } from '../comparison.js';
+import { compareRoutes, compareStops, haversineMeters } from '../comparison.js';
+import { createUrbanContextController } from '../urban-context.js';
+import { OVERTURE_BUILDINGS_DATA_URL } from '../overture-buildings.js';
 import { createRouteRevealController } from './reveal-controller.js';
 import {
   buildTransportPoiGroundLayers,
@@ -38,6 +40,27 @@ function poiRecords(resource) {
   return (resource?.value?.features ?? [])
     .filter(({ geometry }) => geometry?.type === 'Point')
     .map(({ properties = {}, geometry }) => ({ ...structuredClone(properties), coordinates: structuredClone(geometry.coordinates) }));
+}
+
+function pointFeatures(resource) {
+  return (resource?.value?.features ?? []).filter(({ geometry }) => geometry?.type === 'Point');
+}
+
+function polygonFeature(resource) {
+  return (resource?.value?.features ?? []).find(({ geometry }) => ['Polygon', 'MultiPolygon'].includes(geometry?.type)) ?? null;
+}
+
+async function loadTrustedOvertureBuildings(context) {
+  if (Object.hasOwn(context, 'overtureBuildings')) return context.overtureBuildings;
+  const fetchImpl = context.trustedFetch ?? globalThis.fetch;
+  if (typeof fetchImpl !== 'function') return null;
+  try {
+    const rootUrl = new URL('../../', import.meta.url);
+    const response = await fetchImpl(new URL(OVERTURE_BUILDINGS_DATA_URL, rootUrl));
+    return response?.ok ? await response.json() : null;
+  } catch {
+    return null;
+  }
 }
 
 function setVisible(map, id, visible) {
@@ -145,7 +168,8 @@ export function createRoute612RuntimeAdapter(context = {}) {
   };
   const existingResource = resourceByRole(context.resources, 'route.existing');
   const proposedResource = resourceByRole(context.resources, 'route.proposed');
-  const stopsResource = resourceByRole(context.resources, 'stops.existing');
+  const existingStopsResource = resourceByRole(context.resources, 'stops.existing');
+  const proposedStopsResource = resourceByRole(context.resources, 'stops.proposed');
   const areaResource = resourceByRole(context.resources, 'context.area');
   const poiResource = resourceByRole(context.resources, 'transport.poi');
   const map = context.map;
@@ -156,14 +180,24 @@ export function createRoute612RuntimeAdapter(context = {}) {
   const comparison = routeCoordinates.existing.length > 1 && routeCoordinates.proposed.length > 1
     ? compareRoutes(routeCoordinates.existing, routeCoordinates.proposed)
     : { all: { type: 'FeatureCollection', features: [] } };
+  const stopComparison = compareStops(pointFeatures(existingStopsResource), pointFeatures(proposedStopsResource));
   const ids = Object.freeze({
     existing: 'route-61-2-existing',
+    proposedHalo: 'route-61-2-proposed-halo',
     proposed: 'route-61-2-proposed',
-    stops: 'route-61-2-stops',
-    area: 'route-61-2-urban-context',
+    stopsExistingSource: 'route-61-2-stops-existing-source',
+    stopsExisting: 'route-61-2-stops-existing',
+    stopsProposedSource: 'route-61-2-stops-proposed-source',
+    stopsProposed: 'route-61-2-stops-proposed',
+    stopsDifferenceSource: 'route-61-2-stops-difference',
+    stopsRetained: 'route-61-2-stops-retained',
+    stopsAddedHalo: 'route-61-2-stops-added-halo',
+    stopsAdded: 'route-61-2-stops-added',
+    stopsRemoved: 'route-61-2-stops-removed',
     differenceSource: 'route-61-2-difference',
     differenceRemoved: 'route-61-2-difference-removed',
     differenceRetained: 'route-61-2-difference-retained',
+    differenceAddedHalo: 'route-61-2-difference-added-halo',
     differenceAdded: 'route-61-2-difference-added',
     pois: 'route-61-2-pois',
     poiHalo: 'poi-halo',
@@ -173,6 +207,7 @@ export function createRoute612RuntimeAdapter(context = {}) {
   let mode = 'difference'; let revealActive = false; let poiActive = false; let contextMode = 'off';
   let simulation = Object.freeze({ active: false, speed: 1 });
   let destroyed = false; let controls = null; let poiBeaconController = null; let busSimulation = null; let revealFrameId = null;
+  let urbanContextController = null; let ready = Promise.resolve();
   const raf = context.requestAnimationFrame ?? globalThis.requestAnimationFrame;
   const caf = context.cancelAnimationFrame ?? globalThis.cancelAnimationFrame;
 
@@ -213,18 +248,34 @@ export function createRoute612RuntimeAdapter(context = {}) {
     const showExisting = ['existing', 'compare'].includes(nextMode);
     const showProposed = ['proposed', 'compare'].includes(nextMode);
     setVisible(map, ids.existing, showExisting);
+    setVisible(map, ids.proposedHalo, showProposed);
     setVisible(map, ids.proposed, showProposed);
-    setVisible(map, ids.stops, nextMode !== 'proposed');
-    for (const id of [ids.differenceRemoved, ids.differenceRetained, ids.differenceAdded]) setVisible(map, id, difference);
-    context.documentRef?.getElementById?.('map')?.setAttribute?.('data-route-mode', nextMode);
+    for (const id of [ids.differenceRemoved, ids.differenceRetained, ids.differenceAddedHalo, ids.differenceAdded]) setVisible(map, id, difference);
+    for (const id of [ids.stopsRetained, ids.stopsAddedHalo, ids.stopsAdded, ids.stopsRemoved]) setVisible(map, id, difference);
+    setVisible(map, ids.stopsExisting, nextMode === 'existing');
+    setVisible(map, ids.stopsProposed, ['proposed', 'compare'].includes(nextMode));
+    const offset = nextMode === 'compare' ? 4.5 : 0;
+    if (map?.getLayer?.(ids.existing)) map.setPaintProperty(ids.existing, 'line-offset', -offset);
+    for (const id of [ids.proposedHalo, ids.proposed]) {
+      if (map?.getLayer?.(id)) map.setPaintProperty(id, 'line-offset', offset);
+    }
+    const mapElement = context.documentRef?.getElementById?.('map');
+    mapElement?.setAttribute?.('data-route-mode', nextMode);
+    mapElement?.setAttribute?.('data-route-existing-visible', String(showExisting));
+    mapElement?.setAttribute?.('data-route-proposed-visible', String(showProposed));
+    mapElement?.setAttribute?.('data-route-existing-offset', String(-offset));
+    mapElement?.setAttribute?.('data-route-proposed-offset', String(offset));
+    mapElement?.setAttribute?.('data-route-stop-mode', difference ? 'difference' : nextMode === 'existing' ? 'existing' : 'proposed');
   }
 
   function applyContext(nextMode) {
     contextMode = nextMode;
-    setVisible(map, ids.area, nextMode === 'industrial-context');
+    urbanContextController?.setMode(nextMode);
     const mapElement = context.documentRef?.getElementById?.('map');
     mapElement?.setAttribute?.('data-urban-context', nextMode);
-    mapElement?.setAttribute?.('data-urban-layer-visible', String(nextMode === 'industrial-context'));
+    mapElement?.setAttribute?.('data-urban-layer-visible', String(
+      nextMode === 'industrial-context' && Boolean(urbanContextController)
+    ));
   }
 
   function applyPoiEmphasis(active) {
@@ -238,31 +289,55 @@ export function createRoute612RuntimeAdapter(context = {}) {
     if (destroyed) return;
     installDataset(map, ids.existing, existingResource, {
       type: 'line', layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#718096', 'line-opacity': 0.82, 'line-width': 6 }
+      paint: { 'line-color': '#718096', 'line-opacity': 0.82, 'line-width': 6, 'line-offset': 0 }
     });
-    installDataset(map, ids.proposed, proposedResource, {
-      type: 'line', layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#2BB7FF', 'line-opacity': 0.98, 'line-width': 7 }
+    if (proposedResource?.value && !map.getSource?.(ids.proposed)) {
+      map.addSource(ids.proposed, { type: 'geojson', data: proposedResource.value, lineMetrics: true });
+    }
+    if (!map.getLayer?.(ids.proposedHalo)) map.addLayer({
+      id: ids.proposedHalo, source: ids.proposed, type: 'line',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#2BB7FF', 'line-opacity': 0.2, 'line-blur': 3, 'line-width': 12, 'line-offset': 0 }
     });
-    installDataset(map, ids.stops, stopsResource, {
-      type: 'circle',
-      paint: { 'circle-color': '#67E8F9', 'circle-radius': 5, 'circle-stroke-color': '#ECFEFF', 'circle-stroke-width': 1 }
-    });
-    installDataset(map, ids.area, areaResource, {
-      type: 'fill', layout: { visibility: 'none' }, paint: { 'fill-color': '#38BDF8', 'fill-opacity': 0.18 }
+    if (!map.getLayer?.(ids.proposed)) map.addLayer({
+      id: ids.proposed, source: ids.proposed, type: 'line',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#2BB7FF', 'line-opacity': 0.98, 'line-width': 7, 'line-offset': 0 }
     });
     if (!map.getSource?.(ids.differenceSource)) map.addSource(ids.differenceSource, { type: 'geojson', data: comparison.all });
-    for (const [id, status, color, dasharray] of [
-      [ids.differenceRemoved, 'removed', '#FFAD32', [1.35, 1.05]],
-      [ids.differenceRetained, 'retained', '#708096', null],
-      [ids.differenceAdded, 'added', '#2BB7FF', null]
+    for (const [id, status, color, dasharray, opacity, width, blur] of [
+      [ids.differenceRemoved, 'removed', '#FFAD32', [1.35, 1.05], 1, 6, 0],
+      [ids.differenceRetained, 'retained', '#708096', null, 0.64, 5.5, 0],
+      [ids.differenceAddedHalo, 'added', '#2BB7FF', null, 0.24, 12, 3],
+      [ids.differenceAdded, 'added', '#2BB7FF', null, 1, 7, 0]
     ]) {
       if (!map.getLayer?.(id)) map.addLayer({
         id, type: 'line', source: ids.differenceSource,
         filter: ['==', ['get', 'status'], status],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': color, 'line-opacity': status === 'retained' ? 0.64 : 1, 'line-width': status === 'added' ? 7 : 6, ...(dasharray ? { 'line-dasharray': dasharray } : {}) }
+        paint: { 'line-color': color, 'line-opacity': opacity, 'line-width': width, ...(blur ? { 'line-blur': blur } : {}), ...(dasharray ? { 'line-dasharray': dasharray } : {}) }
       });
+    }
+    if (existingStopsResource?.value && !map.getSource?.(ids.stopsExistingSource)) {
+      map.addSource(ids.stopsExistingSource, { type: 'geojson', data: existingStopsResource.value });
+    }
+    if (proposedStopsResource?.value && !map.getSource?.(ids.stopsProposedSource)) {
+      map.addSource(ids.stopsProposedSource, { type: 'geojson', data: proposedStopsResource.value });
+    }
+    if (!map.getSource?.(ids.stopsDifferenceSource)) {
+      map.addSource(ids.stopsDifferenceSource, { type: 'geojson', data: stopComparison.all });
+    }
+    for (const layer of [
+      { id: ids.stopsExisting, source: ids.stopsExistingSource, paint: { 'circle-radius': 4.5, 'circle-color': '#8A98AA', 'circle-opacity': 0.82, 'circle-stroke-color': '#E2E8F0', 'circle-stroke-width': 1 } },
+      { id: ids.stopsProposed, source: ids.stopsProposedSource, paint: { 'circle-radius': 5, 'circle-color': '#67E8F9', 'circle-opacity': 0.92, 'circle-stroke-color': '#ECFEFF', 'circle-stroke-width': 1.2 } },
+      { id: ids.stopsRetained, source: ids.stopsDifferenceSource, filter: ['==', ['get', 'status'], 'retained'], paint: { 'circle-radius': 4, 'circle-color': '#8290A3', 'circle-opacity': 0.74, 'circle-stroke-color': '#D4DBE5', 'circle-stroke-width': 0.8 } },
+      { id: ids.stopsAddedHalo, source: ids.stopsDifferenceSource, filter: ['==', ['get', 'status'], 'added'], paint: { 'circle-radius': 9, 'circle-color': '#22D3EE', 'circle-opacity': 0.28, 'circle-blur': 0.65 } },
+      { id: ids.stopsAdded, source: ids.stopsDifferenceSource, filter: ['==', ['get', 'status'], 'added'], paint: { 'circle-radius': 5.5, 'circle-color': '#67E8F9', 'circle-opacity': 1, 'circle-stroke-color': '#ECFEFF', 'circle-stroke-width': 1.8 } },
+      { id: ids.stopsRemoved, source: ids.stopsDifferenceSource, filter: ['==', ['get', 'status'], 'removed'], paint: { 'circle-radius': 5, 'circle-color': 'rgba(245, 158, 11, 0)', 'circle-stroke-color': '#F59E0B', 'circle-stroke-width': 2, 'circle-opacity': 0.95 } }
+    ]) {
+      if (map.getSource?.(layer.source) && !map.getLayer?.(layer.id)) {
+        map.addLayer({ ...layer, type: 'circle', layout: { visibility: 'none' } });
+      }
     }
     if (poiResource?.value && !map.getSource?.(ids.pois)) {
       map.addSource(ids.pois, { type: 'geojson', data: poiResource.value });
@@ -282,6 +357,22 @@ export function createRoute612RuntimeAdapter(context = {}) {
       map, maplibregl: context.maplibregl, documentRef: context.documentRef, routeCoordinates,
       requestAnimationFrame: raf, cancelAnimationFrame: caf
     });
+    if (!urbanContextController && polygonFeature(areaResource)) {
+      ready = loadTrustedOvertureBuildings(context).then((overtureBuildings) => {
+        if (destroyed || urbanContextController) return;
+        urbanContextController = createUrbanContextController({
+          map,
+          maplibregl: context.maplibregl,
+          zone: polygonFeature(areaResource),
+          overtureBuildings,
+          routeCoordinates: [routeCoordinates.existing, routeCoordinates.proposed],
+          pois: poiRecords(poiResource),
+          reducedMotion: context.reducedMotion ?? false,
+          beforeLayerId: ids.differenceRemoved
+        });
+        applyContext(contextMode);
+      });
+    }
     applyMode(mode); applyContext(contextMode); applyPoiEmphasis(poiActive); busSimulation?.set(simulation.active, simulation.speed);
   }
 
@@ -295,6 +386,7 @@ export function createRoute612RuntimeAdapter(context = {}) {
     id: 'route-61-2-current',
     routeCoordinates,
     ids,
+    get ready() { return ready; },
     connect(next = {}) {
       for (const key of Object.keys(delegates)) if (typeof next[key] === 'function') delegates[key] = next[key];
       return adapter;
@@ -331,14 +423,15 @@ export function createRoute612RuntimeAdapter(context = {}) {
     },
     sceneLayers: Object.freeze({
       ids: Object.freeze([...(context.resources ?? [])]
-        .filter(([, resource]) => ['route.existing', 'route.proposed', 'stops.existing', 'context.area', 'transport.poi'].includes(resource.descriptor?.role))
+        .filter(([, resource]) => ['route.existing', 'route.proposed', 'stops.existing', 'stops.proposed', 'context.area', 'transport.poi'].includes(resource.descriptor?.role))
         .map(([id]) => id)),
       setVisible(datasetId, visible) {
         const role = context.resources.get(datasetId)?.descriptor?.role;
         if (role === 'route.existing') setVisible(map, ids.existing, visible);
-        else if (role === 'route.proposed') setVisible(map, ids.proposed, visible);
-        else if (role === 'stops.existing') setVisible(map, ids.stops, visible);
-        else if (role === 'context.area') setVisible(map, ids.area, visible);
+        else if (role === 'route.proposed') for (const id of [ids.proposedHalo, ids.proposed]) setVisible(map, id, visible);
+        else if (role === 'stops.existing') setVisible(map, ids.stopsExisting, visible);
+        else if (role === 'stops.proposed') setVisible(map, ids.stopsProposed, visible);
+        else if (role === 'context.area') applyContext(visible ? 'industrial-context' : 'off');
         else if (role === 'transport.poi') {
           for (const id of [ids.poiHalo, ids.poiCore, ids.poiLabels]) setVisible(map, id, visible);
           poiBeaconController?.setVisible(visible);
@@ -353,13 +446,17 @@ export function createRoute612RuntimeAdapter(context = {}) {
       routeRevealController.setActive(false);
       controls?.destroy();
       if (context.capabilityControlHost) context.capabilityControlHost.hidden = true;
-      poiBeaconController?.destroy(); busSimulation?.destroy(); stylesheet?.remove?.();
+      poiBeaconController?.destroy(); busSimulation?.destroy(); urbanContextController?.destroy(); stylesheet?.remove?.();
       for (const id of [
         ids.poiLabels, ids.poiCore, ids.poiHalo,
-        ids.differenceAdded, ids.differenceRetained, ids.differenceRemoved,
-        ids.area, ids.stops, ids.proposed, ids.existing
+        ids.stopsRemoved, ids.stopsAdded, ids.stopsAddedHalo, ids.stopsRetained, ids.stopsProposed, ids.stopsExisting,
+        ids.differenceAdded, ids.differenceAddedHalo, ids.differenceRetained, ids.differenceRemoved,
+        ids.proposed, ids.proposedHalo, ids.existing
       ]) if (map?.getLayer?.(id)) map.removeLayer?.(id);
-      for (const id of [ids.pois, ids.differenceSource, ids.area, ids.stops, ids.proposed, ids.existing]) {
+      for (const id of [
+        ids.pois, ids.stopsDifferenceSource, ids.stopsProposedSource, ids.stopsExistingSource,
+        ids.differenceSource, ids.proposed, ids.existing
+      ]) {
         if (map?.getSource?.(id)) map.removeSource?.(id);
       }
     }
