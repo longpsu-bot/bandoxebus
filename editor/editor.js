@@ -5,7 +5,7 @@ import {
   createValidationCoordinator,
   createValidationNavigationIndex
 } from './core/validation.js';
-import { createPreviewBridge, resolvePreviewSourceForSnapshot } from './preview/bridge.js';
+import { createPreviewBridge } from './preview/bridge.js';
 import { renderEntityInspector } from './ui/inspectors.js';
 import { createStoryEditor } from './ui/story-editor.js';
 import { applyStudioStoryCommand, mountStudioShell } from './ui/studio-shell.js';
@@ -1224,10 +1224,6 @@ export function createEditor({
     });
     storageAdapter = adapter;
     draftStore = createDraftStore({ packageStore });
-    elements.iframe.dataset.previewSrc = resolvePreviewSourceForSnapshot(packageStore.snapshot(), {
-      legacy: elements.iframe.dataset.previewSrcLegacy,
-      story12: elements.iframe.dataset.previewSrcStory12
-    });
     bridge.reset();
     validation = createValidationCoordinator({ draftStore, onChange: handleValidationChange });
     lastSentRevision = -1;

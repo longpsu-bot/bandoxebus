@@ -389,7 +389,6 @@ test('Story 1.2 Studio source exposes Layers Canvas Properties Scenes and explic
   assert.match(source, /ArrowLeft|ArrowRight/);
   assert.match(source, /Move Scene Up|Move Scene Down/);
   assert.match(css, /aspect-ratio:\s*16\s*\/\s*9/);
-  assert.match(editorSource, /resolvePreviewSourceForSnapshot/);
   assert.match(editorSource, /schemaVersion\s*===\s*['"]1\.2['"]/);
 });
 
