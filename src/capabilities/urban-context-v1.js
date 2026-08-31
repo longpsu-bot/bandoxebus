@@ -1,6 +1,7 @@
 import { ProjectLoadError } from '../project/project-error.js';
 import { deepFreeze } from './descriptor-schema.js';
 import { createLegacyActionNormalizer } from './story-1.0-normalizer.js';
+import { getRoute612RuntimeAdapter } from '../route-61-2/runtime-adapter.js';
 
 const MODES = ['off', 'industrial-context'];
 
@@ -67,6 +68,13 @@ function unavailable() {
 }
 
 export function createUrbanContextCapability(context = {}) {
+  if (context.settings?.adapter === 'route-61-2-current' && context.map) {
+    const adapter = getRoute612RuntimeAdapter(context);
+    return Object.freeze({
+      handlers: Object.freeze({ 'context.set-mode': (descriptor) => adapter.setContextMode(descriptor.mode) }),
+      datasetRoles: Object.freeze({ 'context.area': true })
+    });
+  }
   return Object.freeze({
     handlers: Object.freeze({
       'context.set-mode': context.setContextMode

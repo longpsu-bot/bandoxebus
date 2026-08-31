@@ -2,6 +2,7 @@ import { ProjectLoadError } from '../project/project-error.js';
 import { deepFreeze } from './descriptor-schema.js';
 import { createLegacyActionNormalizer } from './story-1.0-normalizer.js';
 import { haversineMeters } from '../comparison.js';
+import { getRoute612RuntimeAdapter } from '../route-61-2/runtime-adapter.js';
 
 function action(type, label, description, required, properties) {
   return {
@@ -129,7 +130,13 @@ function unavailable(type) {
   };
 }
 
-export function createRouteComparisonCapability(context = {}) {
+export function selectRouteComparisonAdapter(settings, context, loadAdapter = () => ({ getRoute612RuntimeAdapter })) {
+  if (settings?.adapter !== 'route-61-2-current') return null;
+  const module = loadAdapter();
+  return module.getRoute612RuntimeAdapter(context);
+}
+
+function createRouteComparisonImplementation(context = {}) {
   const handlers = {
     'route.set-mode': context.setMode
       ? (descriptor) => context.setMode(descriptor.mode)
@@ -161,4 +168,16 @@ export function createRouteComparisonCapability(context = {}) {
       'route-stop-count': () => byRole('stops.existing')?.features?.length ?? 0
     })
   });
+}
+
+export function createRouteComparisonCapability(context = {}) {
+  if (context.settings?.adapter !== 'route-61-2-current' || !context.map) return createRouteComparisonImplementation(context);
+  const adapter = selectRouteComparisonAdapter(context.settings, context);
+  const implementation = createRouteComparisonImplementation({
+    ...context,
+    setMode: adapter.setMode,
+    setRouteReveal: adapter.setRouteReveal,
+    setPoiEmphasis: adapter.setPoiEmphasis
+  });
+  return Object.freeze({ ...implementation, sceneLayers: adapter.sceneLayers, destroy: adapter.destroy });
 }
