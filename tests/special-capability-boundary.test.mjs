@@ -10,6 +10,14 @@ import { CORE_MAP_V1_DESCRIPTOR, createCoreMapCapability } from '../src/capabili
 import { createMetricRegistry } from '../src/metrics/metric-registry.js';
 import { facilityAccessTestEntry } from './fixtures/capabilities/facility-access-test-v1.mjs';
 
+const GENERIC_MODULES = [
+  '../src/app.js',
+  '../src/runtime/generic-app.js', '../src/runtime/generic-shell.js',
+  '../src/story-runtime.js', '../src/story-shell.js',
+  '../src/scene/scene-compositor.js', '../src/scene/scene-state-controller.js'
+];
+const ROUTE_ASSUMPTION = /route-61-2(?:-current)?|route-data|connection-pois|industrial-zone|\b(?:Difference|Existing|Proposed|Compare)\b|Route reveal|POI emphasis|Urban context|Simulation/;
+
 async function runtimeHash() {
   const values = await Promise.all(['../src/story-runtime.js', '../src/story-shell.js'].map(async (path) => readFile(new URL(path, import.meta.url))));
   return createHash('sha256').update(Buffer.concat(values)).digest('hex');
@@ -46,4 +54,29 @@ test('special capability settings and role requirements remain deterministic', (
   ]);
   assert.throws(() => composeCapabilities({ registry, declarations: [{ id: 'facility-access-test-v1', settings: { enabled: 'yes' } }], datasets: { access: { type: 'geojson', geometry: 'line', role: 'facility.access-paths' } } }), (error) => error.code === 'CAPABILITY_SETTINGS_INVALID');
   assert.throws(() => composeCapabilities({ registry, declarations: [{ id: 'facility-access-test-v1', settings: { enabled: true } }], datasets: {} }), (error) => error.code === 'CAPABILITY_ROLE_MISSING');
+});
+
+test('generic runtime, shell, and Scene modules contain no concrete Route assumptions', async () => {
+  for (const path of GENERIC_MODULES) {
+    const source = await readFile(new URL(path, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, ROUTE_ASSUMPTION, path);
+  }
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, ROUTE_ASSUMPTION, '../index.html');
+});
+
+test('installed Blank root defers the Route 61-2 adapter outside the static ESM graph', async () => {
+  const installed = await readFile(new URL('../src/capabilities/installed-capabilities.js', import.meta.url), 'utf8');
+  for (const path of ['route-comparison-v1.js', 'urban-context-v1.js']) assert.match(installed, new RegExp(path));
+  for (const path of ['../src/capabilities/route-comparison-v1.js', '../src/capabilities/urban-context-v1.js']) {
+    const source = await readFile(new URL(path, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /^\s*import\s+.*route-61-2\/runtime-adapter\.js.*$/m, path);
+    assert.match(source, /import\(['"]\.\.\/route-61-2\/runtime-adapter\.js['"]\)/, path);
+  }
+});
+
+test('generic application lifecycle uses the explicit replaceExisting API without source obfuscation', async () => {
+  const source = await readFile(new URL('../src/runtime/generic-app.js', import.meta.url), 'utf8');
+  assert.match(source, /\breplaceExisting\b/);
+  assert.doesNotMatch(source, /replacementKey|\[['"]replace['"],\s*['"]Exist['"],\s*['"]ing['"]\]|\.join\(['"]['"]\)/);
 });

@@ -1,0 +1,49 @@
+.maplibregl-marker.transport-poi-beacon {
+  position: absolute;
+  width: 24px;
+  height: 64px;
+  pointer-events: none;
+  filter: drop-shadow(0 0 5px rgb(177 244 255 / 38%));
+}
+
+.transport-poi-beacon__pillar {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 2px;
+  height: 43px;
+  border-radius: 999px;
+  background: linear-gradient(to top, rgb(224 251 255 / 98%), rgb(161 238 255 / 10%));
+  box-shadow: 0 0 6px rgb(190 245 255 / 58%);
+  transform: translateX(-50%);
+  transform-origin: bottom;
+  opacity: .72;
+  transition: height 180ms ease, opacity 180ms ease, box-shadow 180ms ease;
+}
+
+.transport-poi-beacon.is-emphasized .transport-poi-beacon__pillar {
+  height: 52px;
+  opacity: 1;
+  box-shadow: 0 0 10px rgb(202 249 255 / 90%);
+}
+
+.maplibregl-marker.bus-marker {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 2px solid rgb(236 254 255 / 92%);
+  border-radius: 50%;
+  color: #050b14;
+  font: 800 9px/1 system-ui, sans-serif;
+  letter-spacing: .06em;
+  box-shadow: 0 0 0 4px rgb(5 11 20 / 55%), 0 0 18px rgb(141 239 255 / 48%);
+  pointer-events: none;
+}
+
+.maplibregl-marker.bus-marker.existing { background: #94a3b8; }
+.maplibregl-marker.bus-marker.proposed { background: #67e8f9; }
+
+@media (prefers-reduced-motion: reduce) {
+  .transport-poi-beacon__pillar { transition-duration: 1ms; }
+}

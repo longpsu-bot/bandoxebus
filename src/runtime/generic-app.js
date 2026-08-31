@@ -5,7 +5,7 @@ import { renderProjectLoadError } from '../project/bootstrap.js';
 import { bindGenericStoryExperience } from './generic-shell.js';
 
 async function createGenericMap({ project, maplibregl }) {
-  const response = await fetch('../../style-openfreemap-dark.json');
+  const response = await fetch(new URL('../../style-openfreemap-dark.json', import.meta.url));
   if (!response.ok) throw new Error(`Could not load basemap style (${response.status}).`);
   const style = prepareBasemapStyle(stripOpenFreeMapDarkStyle(await response.json()));
   return new maplibregl.Map({
@@ -19,16 +19,16 @@ async function createGenericMap({ project, maplibregl }) {
 }
 
 export function createGenericApplicationOptions({
-  manifestUrl = '../../project.json',
+  manifestUrl = new URL('../../project.json', import.meta.url).href,
   fetchImpl = fetch,
   resolveAssetUrl,
   signal,
   owner,
-  replaceExisting = false,
   documentRef = globalThis.document,
   windowRef = globalThis.window,
   maplibregl = globalThis.maplibregl,
-  Chart = globalThis.Chart
+  Chart = globalThis.Chart,
+  replaceExisting = false
 } = {}) {
   const reducedMotion = windowRef?.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   return {

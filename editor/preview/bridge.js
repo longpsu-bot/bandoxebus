@@ -139,8 +139,7 @@ function parseJsonEntry(snapshot, path) {
   }
 }
 export function resolvePreviewSourceForSnapshot(snapshot, {
-  legacy = '../?editorPreview=1',
-  story12 = '../src/runtime/?editorPreview=1'
+  source = '../?editorPreview=1'
 } = {}) {
   validatePreviewSnapshot(snapshot);
   const manifest = parseJsonEntry(snapshot, 'project.json');
@@ -148,8 +147,7 @@ export function resolvePreviewSourceForSnapshot(snapshot, {
   if (!primary?.src) throw new TypeError('Preview project primary Story is not declared.');
   const storyPath = String(primary.src).replace(/^\.\//, '');
   const story = parseJsonEntry(snapshot, storyPath);
-  if (story.schemaVersion === '1.2') return story12;
-  if (story.schemaVersion === '1.0' || story.schemaVersion === '1.1') return legacy;
+  if (['1.0', '1.1', '1.2'].includes(story.schemaVersion)) return source;
   throw new TypeError(`Unsupported Story preview version: ${story.schemaVersion ?? ''}.`);
 }
 
@@ -244,10 +242,9 @@ export function createPreviewBridge({
   }
 
   function selectSnapshotSource(snapshot) {
-    const legacy = iframe.dataset?.previewSrcLegacy;
-    const story12 = iframe.dataset?.previewSrcStory12;
-    if (!legacy || !story12) return;
-    const source = resolvePreviewSourceForSnapshot(snapshot, { legacy, story12 });
+    const configured = iframe.dataset?.previewSrc;
+    if (!configured) return;
+    const source = configured;
     if (iframe.dataset.previewSrc === source) return;
     iframe.dataset.previewSrc = source;
     clearSession();

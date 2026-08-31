@@ -31,6 +31,21 @@
     </div>
   </header>
 
+  <dialog id="project-template-chooser" aria-labelledby="project-template-heading">
+    <h2 id="project-template-heading">Create a project</h2>
+    <div class="template-choices">
+      <button id="choose-template-blank" type="button">Blank</button>
+      <button id="choose-template-route-proposal" type="button">Route Proposal</button>
+      <button id="choose-template-network-service" type="button">Network / Service Plan</button>
+      <button id="choose-import-existing" type="button">Import Existing</button>
+    </div>
+    <div id="import-existing-choices" hidden>
+      <button id="chooser-open-folder" type="button">Open Folder</button>
+      <button id="chooser-import-zip" type="button">Import ZIP</button>
+    </div>
+    <form method="dialog"><button type="submit">Cancel</button></form>
+  </dialog>
+
   <div class="editor-layout">
     <nav class="editor-navigation" aria-label="Project navigation">
       <h2>Project</h2>
@@ -49,9 +64,7 @@
           title="Production project preview"
           sandbox="allow-scripts allow-same-origin"
           src="about:blank"
-          data-preview-src="../?editorPreview=1"
-          data-preview-src-legacy="../?editorPreview=1"
-          data-preview-src-story12="../src/runtime/?editorPreview=1"></iframe>
+          data-preview-src="../?editorPreview=1"></iframe>
         <div id="preview-paused" class="preview-paused" hidden>Preview paused at the last valid revision.</div>
       </div>
     </main>

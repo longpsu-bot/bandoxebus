@@ -5,12 +5,17 @@ import test from 'node:test';
 import { applyProjectMetadata } from '../src/project/bootstrap.js';
 
 const APP_URL = new URL('../src/app.js', import.meta.url);
+const GENERIC_APP_URL = new URL('../src/runtime/generic-app.js', import.meta.url);
 
 test('production composition boots fixed project.json through one map/runtime path', async () => {
-  const source = await readFile(APP_URL, 'utf8');
-  assert.match(source, /startProductionApplication\(\)/);
-  assert.match(source, /manifestUrl\s*=\s*['"]\.\/project\.json['"]/);
-  assert.doesNotMatch(source, /loadStoryDefinition\(['"]\.\/data\/stories\/route-61-2\.story\.json/);
+  const [entry, source] = await Promise.all([
+    readFile(APP_URL, 'utf8'),
+    readFile(GENERIC_APP_URL, 'utf8')
+  ]);
+  assert.match(entry, /^import ['"]\.\/runtime\/generic-app\.js['"];?\s*$/);
+  assert.match(source, /startGenericProductionApplication\(\)/);
+  assert.match(source, /manifestUrl\s*=\s*new URL\(['"]\.\.\/\.\.\/project\.json['"],\s*import\.meta\.url\)\.href/);
+  assert.doesNotMatch(`${entry}\n${source}`, /loadStoryDefinition\(['"]\.\/data\/stories\/route-61-2\.story\.json/);
   assert.equal((source.match(/new maplibregl\.Map\(/g) ?? []).length, 1);
   assert.equal((source.match(/createStoryRuntime\(/g) ?? []).length, 0);
 });

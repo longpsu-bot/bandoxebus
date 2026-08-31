@@ -1,5 +1,5 @@
 import { createDraftStore } from './core/draft-store.js';
-import { createNewProjectEntries, createPackageStore } from './core/package-store.js';
+import { createPackageStore } from './core/package-store.js';
 import {
   createSourceRepairModel,
   createValidationCoordinator,
@@ -10,6 +10,7 @@ import { renderEntityInspector } from './ui/inspectors.js';
 import { createStoryEditor } from './ui/story-editor.js';
 import {
   applyStudioStoryCommand,
+  createStudioProjectEntries,
   getStudioAuthoringMode,
   mountStudioShell,
   resetStudioAuthoringSession
@@ -60,6 +61,14 @@ export function createEditor({
     newProject: documentRef.getElementById('new-project'),
     openFolder: documentRef.getElementById('open-folder'),
     importZip: documentRef.getElementById('import-zip'),
+    templateChooser: documentRef.getElementById('project-template-chooser'),
+    chooseBlank: documentRef.getElementById('choose-template-blank'),
+    chooseRouteProposal: documentRef.getElementById('choose-template-route-proposal'),
+    chooseNetworkService: documentRef.getElementById('choose-template-network-service'),
+    chooseImportExisting: documentRef.getElementById('choose-import-existing'),
+    importExistingChoices: documentRef.getElementById('import-existing-choices'),
+    chooserOpenFolder: documentRef.getElementById('chooser-open-folder'),
+    chooserImportZip: documentRef.getElementById('chooser-import-zip'),
     save: documentRef.getElementById('save-project'),
     exportZip: documentRef.getElementById('export-project-zip'),
     validate: documentRef.getElementById('validate-project'),
@@ -104,6 +113,34 @@ export function createEditor({
     return { manifest, item, path, story: path ? draftStore?.get(path) : null };
   }
 
+  function productionContentCatalogs(manifest) {
+    const selectedIds = new Set(['core-content-v1', 'core-map-v1', ...manifest.capabilities.map(({ id }) => id)]);
+    const selectedDescriptors = INSTALLED_CAPABILITY_REGISTRY.catalog().filter(({ id }) => selectedIds.has(id));
+    const tables = Object.entries(manifest.datasets)
+      .filter(([, descriptor]) => descriptor.type === 'table-json')
+      .map(([id, descriptor]) => ({ id, columns: draftStore.get(descriptor.src.replace(/^\.\//, ''))?.columns ?? [] }));
+    const metricFile = manifest.metrics ? draftStore.get(manifest.metrics.src.replace(/^\.\//, '')) : null;
+    const catalogs = {
+      tables,
+      datasets: Object.entries(manifest.datasets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
+      assets: Object.keys(manifest.assets).map((id) => ({ id })),
+      metrics: [
+        ...Object.entries(metricFile?.metrics ?? {}).map(([id, metric]) => ({ id, label: metric.label, format: metric.format })),
+        ...selectedDescriptors.flatMap(({ metrics }) => metrics)
+      ],
+      capabilityTargets: selectedDescriptors.flatMap(({ targets }) => targets.map(({ id, label }) => ({ id, label }))),
+      attribution: Object.keys(manifest.attribution).map((id) => ({ id }))
+    };
+    const datasetTargets = catalogs.datasets;
+    const focusTargets = Object.keys(manifest.focusTargets).map((id) => ({ id }));
+    catalogs.actionTargets = {
+      'map.focus': [...datasetTargets, ...focusTargets, ...catalogs.capabilityTargets],
+      'map.set-visibility': datasetTargets,
+      'map.set-emphasis': datasetTargets
+    };
+    return { catalogs, selectedDescriptors };
+  }
+
   function renderStudioWorkspace() {
     const current = primaryStory();
     if (current.story?.schemaVersion !== '1.2' || !elements.studioScenes) return false;
@@ -118,6 +155,7 @@ export function createEditor({
       scenesHost: elements.studioScenes,
       previewToolbar: elements.previewToolbar,
       manifest: current.manifest,
+      catalogs: productionContentCatalogs(current.manifest).catalogs,
       story: current.story,
       sceneIndex: stateSelection,
       workingCamera: previewTelemetry,
@@ -222,30 +260,7 @@ export function createEditor({
       id,
       draftStore.get(src.replace(/^\.\//, ''))
     ]));
-    const selectedIds = new Set(['core-content-v1', 'core-map-v1', ...manifest.capabilities.map(({ id }) => id)]);
-    const selectedDescriptors = INSTALLED_CAPABILITY_REGISTRY.catalog().filter(({ id }) => selectedIds.has(id));
-    const tables = Object.entries(manifest.datasets)
-      .filter(([, descriptor]) => descriptor.type === 'table-json')
-      .map(([id, descriptor]) => ({ id, columns: draftStore.get(descriptor.src.replace(/^\.\//, ''))?.columns ?? [] }));
-    const metricFile = manifest.metrics ? draftStore.get(manifest.metrics.src.replace(/^\.\//, '')) : null;
-    const catalogs = {
-      tables,
-      datasets: Object.entries(manifest.datasets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
-      assets: Object.keys(manifest.assets).map((id) => ({ id })),
-      metrics: [
-        ...Object.entries(metricFile?.metrics ?? {}).map(([id, metric]) => ({ id, label: metric.label, format: metric.format })),
-        ...selectedDescriptors.flatMap(({ metrics }) => metrics)
-      ],
-      capabilityTargets: selectedDescriptors.flatMap(({ targets }) => targets.map(({ id, label }) => ({ id, label }))),
-      attribution: Object.keys(manifest.attribution).map((id) => ({ id }))
-    };
-    const datasetTargets = catalogs.datasets;
-    const focusTargets = Object.keys(manifest.focusTargets).map((id) => ({ id }));
-    catalogs.actionTargets = {
-      'map.focus': [...datasetTargets, ...focusTargets, ...catalogs.capabilityTargets],
-      'map.set-visibility': datasetTargets,
-      'map.set-emphasis': datasetTargets
-    };
+    const { catalogs, selectedDescriptors } = productionContentCatalogs(manifest);
     return createStoryEditor({
       manifest,
       stories,
@@ -1248,10 +1263,10 @@ export function createEditor({
     return validation.validateNow();
   }
 
-  async function newProject() {
+  async function newProject(template = 'blank') {
     const adapter = createMemoryStorageAdapter({
       label: 'New project',
-      entries: createNewProjectEntries({ id: 'new-project', title: 'New project', locale: 'en-US' })
+      entries: createStudioProjectEntries(template, { id: 'new-project', title: 'New project', locale: 'en-US' })
     });
     return openStorage(adapter);
   }
@@ -1308,7 +1323,22 @@ export function createEditor({
     });
   }
 
-  elements.newProject.addEventListener('click', () => { void newProject(); });
+  const closeTemplateChooser = () => elements.templateChooser?.close?.();
+  elements.newProject.addEventListener('click', () => {
+    if (elements.importExistingChoices) elements.importExistingChoices.hidden = true;
+    if (elements.templateChooser?.showModal) elements.templateChooser.showModal();
+    else void newProject('blank');
+  });
+  for (const [button, template] of [
+    [elements.chooseBlank, 'blank'],
+    [elements.chooseRouteProposal, 'route-proposal'],
+    [elements.chooseNetworkService, 'network-service-plan']
+  ]) button?.addEventListener('click', () => { closeTemplateChooser(); void newProject(template); });
+  elements.chooseImportExisting?.addEventListener('click', () => {
+    if (elements.importExistingChoices) elements.importExistingChoices.hidden = false;
+  });
+  elements.chooserOpenFolder?.addEventListener('click', () => { closeTemplateChooser(); elements.openFolder.click(); });
+  elements.chooserImportZip?.addEventListener('click', () => { closeTemplateChooser(); elements.importZip.click(); });
   elements.openFolder.disabled = !canOpenFolder(windowRef);
   elements.openFolder.addEventListener('click', () => {
     void openFolder().catch((error) => { elements.validationStatus.textContent = error.message; });

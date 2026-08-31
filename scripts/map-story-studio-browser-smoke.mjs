@@ -1,3 +1,6 @@
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
 const args = new Map(process.argv.slice(2).map((argument) => {
   const [key, ...value] = argument.split('=');
   return [key, value.join('=')];
@@ -8,6 +11,13 @@ const APP_URL = args.get('--url') ?? 'http://127.0.0.1:8080/editor/';
 const CDP_PORT = Number(process.env.CDP_PORT || 9222);
 const TIMEOUT_MS = 30_000;
 
+if (GATE === 'pr-c') {
+  const result = spawnSync(process.execPath, [
+    fileURLToPath(new URL('./map-story-studio-pr-c-browser-smoke.mjs', import.meta.url)),
+    ...process.argv.slice(2)
+  ], { stdio: 'inherit', env: process.env });
+  process.exit(result.status ?? 1);
+}
 if (GATE !== 'pr-a') throw new Error(`Unsupported Map Story Studio browser gate: ${GATE}`);
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));

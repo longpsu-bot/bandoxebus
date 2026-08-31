@@ -3,7 +3,6 @@ import {
   normalizeNativeBuildingFeatures,
   normalizeRoadFeatures
 } from './urban-spatial.js';
-import { createThreeUrbanLayer, SYNTHETIC_INDUSTRIAL_LAYER_ID } from './three-urban-layer.js';
 import {
   createOvertureLayerDefinitions,
   inspectOvertureCollection,
@@ -16,6 +15,7 @@ const MORPHOLOGY_V2_FALLBACK_SEED = 'route-61-2:osm-industrial-759187612:industr
 const GROUND_SOURCE_ID = 'industrial-context-zone';
 const GROUND_FILL_LAYER_ID = 'industrial-context-ground';
 const GROUND_LINE_LAYER_ID = 'industrial-context-boundary';
+const SYNTHETIC_INDUSTRIAL_LAYER_ID = 'synthetic-industrial-infill';
 
 export function createUrbanContextController({
   map,
@@ -24,7 +24,8 @@ export function createUrbanContextController({
   overtureBuildings = null,
   routeCoordinates,
   pois,
-  reducedMotion = false
+  reducedMotion = false,
+  beforeLayerId = 'route-removed'
 }) {
   const mapElement = map.getContainer();
   let desiredMode = 'off';
@@ -39,7 +40,7 @@ export function createUrbanContextController({
 
   function addGroundContext() {
     if (!map.getSource(GROUND_SOURCE_ID)) map.addSource(GROUND_SOURCE_ID, { type: 'geojson', data: zone });
-    const beforeId = map.getLayer('route-removed') ? 'route-removed' : undefined;
+    const beforeId = map.getLayer(beforeLayerId) ? beforeLayerId : undefined;
     if (!map.getLayer(GROUND_FILL_LAYER_ID)) map.addLayer({
       id: GROUND_FILL_LAYER_ID,
       type: 'fill',
@@ -95,11 +96,11 @@ export function createUrbanContextController({
     const definitions = createOvertureLayerDefinitions(overtureBuildings);
     if (!map.getSource(OVERTURE_BUILDING_SOURCE_ID)) map.addSource(OVERTURE_BUILDING_SOURCE_ID, definitions.source);
     if (!map.getLayer(OVERTURE_BUILDING_LAYER_ID)) {
-      map.addLayer(definitions.layer, map.getLayer('route-removed') ? 'route-removed' : undefined);
+      map.addLayer(definitions.layer, map.getLayer(beforeLayerId) ? beforeLayerId : undefined);
     }
     const layerIds = map.getStyle().layers.map(({ id }) => id);
     mapElement.dataset.urbanRouteOrderPreserved = String(
-      layerIds.indexOf(OVERTURE_BUILDING_LAYER_ID) < layerIds.indexOf('route-removed')
+      layerIds.indexOf(OVERTURE_BUILDING_LAYER_ID) < layerIds.indexOf(beforeLayerId)
     );
     mapElement.dataset.urbanOvertureDataState = 'validating';
     map.once('idle', () => {
@@ -136,7 +137,7 @@ export function createUrbanContextController({
     });
   }
 
-  function prepare() {
+  async function prepare() {
     idleHandler = null;
     if (prepared || preparing) return;
     preparing = true;
@@ -167,6 +168,7 @@ export function createUrbanContextController({
         }
       });
       const generationMs = performance.now() - startedAt;
+      const { createThreeUrbanLayer } = await import('./three-urban-layer.js');
       layer = createThreeUrbanLayer({
         maplibregl,
         placements: result.placements,
@@ -174,7 +176,7 @@ export function createUrbanContextController({
         reducedMotion,
         onDiagnostics: updateDiagnostics
       });
-      map.addLayer(layer, map.getLayer('route-removed') ? 'route-removed' : undefined);
+      map.addLayer(layer, map.getLayer(beforeLayerId) ? beforeLayerId : undefined);
       prepared = true;
       preparing = false;
       updateDiagnostics({

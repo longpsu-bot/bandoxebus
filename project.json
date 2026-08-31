@@ -56,6 +56,21 @@
       "label": "Điểm dừng điều chỉnh",
       "attribution": ["route-61-2-source"]
     },
+    "connection-pois": {
+      "type": "geojson",
+      "geometry": "point",
+      "src": "./data/route-61-2/connection-pois.geojson",
+      "role": "transport.poi",
+      "label": "Điểm kết nối chính",
+      "render": {
+        "type": "point",
+        "color": "#DFFAFF",
+        "radius": 4,
+        "strokeColor": "#8DEFFF",
+        "strokeWidth": 1
+      },
+      "attribution": ["route-61-2-source"]
+    },
     "industrial-zone": {
       "type": "geojson",
       "geometry": "polygon",

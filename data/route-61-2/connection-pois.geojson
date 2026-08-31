@@ -1,0 +1,41 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "poi-0",
+      "properties": {
+        "name": "Trường Đại học Thủ Dầu Một cơ sở 2 (Thới Hòa)",
+        "type": "university",
+        "glyph": "ĐH",
+        "labelSide": "right",
+        "sourceUrl": "https://share.google/bSukRdP6MTRBPC087"
+      },
+      "geometry": { "type": "Point", "coordinates": [106.59759765625, 11.08911] }
+    },
+    {
+      "type": "Feature",
+      "id": "poi-1",
+      "properties": {
+        "name": "Trường Đại học Thủ Dầu Một (Phú Lợi)",
+        "type": "university",
+        "glyph": "ĐH",
+        "labelSide": "left",
+        "sourceUrl": "https://share.google/C2OyrhoONSexuvDYH"
+      },
+      "geometry": { "type": "Point", "coordinates": [106.67443, 10.98051] }
+    },
+    {
+      "type": "Feature",
+      "id": "poi-2",
+      "properties": {
+        "name": "Bến xe khách tỉnh Bình Dương",
+        "type": "bus-station",
+        "glyph": "BX",
+        "labelSide": "right",
+        "sourceUrl": "https://share.google/EgYPjWAQAEvZHBABU"
+      },
+      "geometry": { "type": "Point", "coordinates": [106.66837, 10.96611] }
+    }
+  ]
+}

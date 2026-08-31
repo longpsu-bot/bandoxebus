@@ -1,6 +1,7 @@
 import { createHistory } from '../core/history.js';
 import {
   addProjectLayerToStory12,
+  addRichEnvelope,
   addScene12,
   addTextEnvelope,
   alignEnvelopes,
@@ -11,6 +12,7 @@ import {
   deleteScene12,
   duplicateEnvelope,
   duplicateScene12,
+  editRichEnvelope,
   editTextEnvelope,
   moveScene12,
   sendEnvelopeBackward,
@@ -24,6 +26,32 @@ import {
   STORY_12_FONT_FAMILIES
 } from '../../src/scene/scene-contract.js';
 import { subscribePreviewAuthoringEvents } from '../preview/bridge.js';
+import {
+  createBlankMapStoryTemplate,
+  createNetworkServicePlanTemplate,
+  createRouteProposalTemplate
+} from '../core/templates.js';
+
+export const STUDIO_PROJECT_CHOICES = Object.freeze([
+  Object.freeze({ id: 'blank', label: 'Blank' }),
+  Object.freeze({ id: 'route-proposal', label: 'Route Proposal' }),
+  Object.freeze({ id: 'network-service-plan', label: 'Network / Service Plan' }),
+  Object.freeze({ id: 'import-existing', label: 'Import Existing' })
+]);
+
+export function createStudioProjectEntries(choice, options = {}) {
+  if (choice === 'blank') return createBlankMapStoryTemplate(options);
+  if (choice === 'route-proposal') return createRouteProposalTemplate(options);
+  if (choice === 'network-service-plan') return createNetworkServicePlanTemplate(options);
+  if (choice === 'import-existing') throw new TypeError('Import Existing uses Open Folder or Import ZIP.');
+  throw new TypeError(`Unknown Studio project choice: ${choice}.`);
+}
+
+export function routeStudioImportExisting(kind, { openFolder, importZip }, value) {
+  if (kind === 'folder') return openFolder();
+  if (kind === 'zip') return importZip(value, { label: value?.name ?? 'Imported project.zip' });
+  throw new TypeError(`Unsupported import path: ${kind}.`);
+}
 
 let activeStudio = null;
 let activeHistory = null;
@@ -59,10 +87,9 @@ function cameraEqual(left, right) {
     && left.center[0] === right.center[0] && left.center[1] === right.center[1];
 }
 
-function textEnvelope(story, sceneIndex, id) {
+function selectedEnvelope(story, sceneIndex, id) {
   if (!id) return null;
-  const envelope = story.states[sceneIndex]?.content?.blocks?.find((item) => item.id === id) ?? null;
-  return ['heading', 'paragraph'].includes(envelope?.block?.type) ? envelope : null;
+  return story.states[sceneIndex]?.content?.blocks?.find((item) => item.id === id) ?? null;
 }
 
 export function applyStudioStoryCommand(story, name, payload = {}) {
@@ -77,6 +104,8 @@ export function applyStudioStoryCommand(story, name, payload = {}) {
   if (name === 'set-transition') return setSceneTransition(story, payload);
   if (name === 'add-project-layer') return addProjectLayerToStory12(story, payload.datasetId, { activeSceneIndex: payload.sceneIndex });
   if (name === 'add-text') return addTextEnvelope(story, payload);
+  if (name === 'add-rich-object') return addRichEnvelope(story, payload);
+  if (name === 'edit-rich-block') return editRichEnvelope(story, payload);
   if (name === 'edit-text' || name === 'commit-text') return editTextEnvelope(story, payload);
   if (name === 'commit-frame') return commitEnvelopeFrame(story, payload);
   if (name === 'set-appearance') return setEnvelopeAppearance(story, payload);
@@ -161,7 +190,7 @@ function executeStoryCommand(name, payload = {}) {
   else if (name === 'delete-scene') nextSceneIndex = Math.min(payload.sceneIndex, next.states.length - 1);
   else if (name === 'move-scene') nextSceneIndex = payload.to;
 
-  if (name === 'add-text' || name === 'duplicate-object') {
+  if (name === 'add-text' || name === 'add-rich-object' || name === 'duplicate-object') {
     const newId = next.states[payload.sceneIndex].content.blocks.at(-1)?.id ?? null;
     selectedOverlayId = newId;
     selectedOverlayIds = newId ? [newId] : [];
@@ -354,6 +383,77 @@ function renderTextProperties({ documentRef, inspector, sceneIndex, envelope }) 
   renderObjectHelpers({ documentRef, inspector, sceneIndex, envelope });
 }
 
+function renderRichProperties({ documentRef, inspector, sceneIndex, envelope, catalogs }) {
+  const block = envelope.block;
+  const label = block.type === 'stat-group' ? 'Metric' : `${block.type[0].toUpperCase()}${block.type.slice(1)}`;
+  inspector.replaceChildren(
+    element(documentRef, 'h2', 'Properties'),
+    element(documentRef, 'p', `${label} · ${envelope.id}`, { className: 'studio-selection-label' })
+  );
+  const commit = (update) => executeStoryCommand('edit-rich-block', {
+    sceneIndex, id: envelope.id, block: update(clone(block))
+  });
+  if (block.type === 'stat-group') {
+    addControl(documentRef, inspector, {
+      label: 'Label', id: 'studio-metric-label', value: block.items[0].label,
+      onChange: (value) => commit((next) => { next.items[0].label = value; return next; })
+    });
+    addControl(documentRef, inspector, {
+      label: 'Metric', id: 'studio-metric-id', value: block.items[0].metric,
+      options: catalogs.metrics?.map(({ id }) => id) ?? [block.items[0].metric],
+      onChange: (value) => commit((next) => {
+        const metric = catalogs.metrics?.find(({ id }) => id === value);
+        next.items[0].metric = value;
+        if (metric?.format) next.items[0].format = clone(metric.format);
+        return next;
+      })
+    });
+  } else if (block.type === 'chart') {
+    addControl(documentRef, inspector, {
+      label: 'Title', id: 'studio-chart-title', value: block.title,
+      onChange: (value) => commit((next) => { next.title = value; return next; })
+    });
+    addControl(documentRef, inspector, {
+      label: 'Chart type', id: 'studio-chart-type', value: block.chartType, options: ['bar', 'line', 'area'],
+      onChange: (value) => commit((next) => { next.chartType = value; if (value !== 'bar') delete next.stacked; return next; })
+    });
+  } else if (block.type === 'table') {
+    addControl(documentRef, inspector, {
+      label: 'Title', id: 'studio-table-title', value: block.title ?? '',
+      onChange: (value) => commit((next) => { if (value) next.title = value; else delete next.title; return next; })
+    });
+  } else if (block.type === 'image') {
+    addControl(documentRef, inspector, {
+      label: 'Image', id: 'studio-image-asset', value: block.asset,
+      options: catalogs.assets?.map((asset) => typeof asset === 'string' ? asset : asset.id) ?? [block.asset],
+      onChange: (value) => commit((next) => { next.asset = value; return next; })
+    });
+    addControl(documentRef, inspector, {
+      label: 'Decorative', id: 'studio-image-decorative', type: 'checkbox', checked: block.decorative,
+      onChange: (value) => commit((next) => { if (value) { next.decorative = true; next.alt = ''; } else delete next.decorative; return next; })
+    });
+    addControl(documentRef, inspector, {
+      label: 'Alternative text', id: 'studio-image-alt', value: block.alt,
+      onChange: (value) => commit((next) => { next.alt = value; if (value) delete next.decorative; return next; })
+    });
+  } else if (block.type === 'legend') {
+    addControl(documentRef, inspector, {
+      label: 'Item label', id: 'studio-legend-label', value: block.items[0].label,
+      onChange: (value) => commit((next) => { next.items[0].label = value; return next; })
+    });
+    addControl(documentRef, inspector, {
+      label: 'Sample', id: 'studio-legend-sample', value: block.items[0].sample, options: ['swatch', 'line', 'icon'],
+      onChange: (value) => commit((next) => {
+        next.items[0].sample = value;
+        if (value === 'icon') { delete next.items[0].color; next.items[0].asset = catalogs.assets?.[0]?.id ?? catalogs.assets?.[0]; }
+        else { delete next.items[0].asset; next.items[0].color ??= '#000000'; }
+        return next;
+      })
+    });
+  }
+  renderObjectHelpers({ documentRef, inspector, sceneIndex, envelope });
+}
+
 function renderSceneProperties({ documentRef, inspector, active, sceneIndex, workingCamera }) {
   const propertiesHeading = element(documentRef, 'h2', 'Properties');
   const interactionLabel = element(documentRef, 'label', 'Interaction');
@@ -404,6 +504,7 @@ export function mountStudioShell({
   previewToolbar,
   manifest,
   story,
+  catalogs = {},
   sceneIndex = 0,
   workingCamera = null,
   selectedOverlayId: requestedSelection,
@@ -424,7 +525,7 @@ export function mountStudioShell({
 
   activeStudio = {
     documentRef, navigation, inspector, scenesHost, previewToolbar,
-    manifest, story, sceneIndex, workingCamera,
+    manifest, story, catalogs, sceneIndex, workingCamera,
     onSelectScene, onSelectOverlay, onStoryCommand, onPreviewCommand
   };
   normalizeSelection();
@@ -452,8 +553,15 @@ export function mountStudioShell({
   const addBody = element(documentRef, 'button', 'Add Body Text', { type: 'button' });
   addBody.addEventListener('click', () => executeStoryCommand('add-text', { sceneIndex, kind: 'body' }));
   addMenu.append(addHeading, addBody);
+  for (const [label, kind] of [
+    ['Add Metric', 'metric'], ['Add Chart', 'chart'], ['Add Table', 'table'], ['Add Image', 'image'], ['Add Legend', 'legend']
+  ]) {
+    const button = element(documentRef, 'button', label, { type: 'button' });
+    button.addEventListener('click', () => executeStoryCommand('add-rich-object', { sceneIndex, kind, catalogs }));
+    addMenu.append(button);
+  }
   const objects = element(documentRef, 'div', undefined, { className: 'studio-object-list' });
-  for (const envelope of active.content.blocks.filter(({ block }) => ['heading', 'paragraph'].includes(block?.type))) {
+  for (const envelope of active.content.blocks) {
     const objectButton = element(documentRef, 'button', envelope.id, {
       type: 'button', className: selectedOverlayIds.includes(envelope.id) ? 'is-current' : ''
     });
@@ -465,8 +573,9 @@ export function mountStudioShell({
   }
   navigation.replaceChildren(layersHeading, layers, textHeading, addMenu, objects);
 
-  const selected = textEnvelope(story, sceneIndex, selectedOverlayId);
-  if (selected) renderTextProperties({ documentRef, inspector, sceneIndex, envelope: selected });
+  const selected = selectedEnvelope(story, sceneIndex, selectedOverlayId);
+  if (['heading', 'paragraph'].includes(selected?.block?.type)) renderTextProperties({ documentRef, inspector, sceneIndex, envelope: selected });
+  else if (selected) renderRichProperties({ documentRef, inspector, sceneIndex, envelope: selected, catalogs });
   else renderSceneProperties({ documentRef, inspector, active, sceneIndex, workingCamera });
 
   if (previewToolbar?.replaceChildren) {

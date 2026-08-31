@@ -66,7 +66,23 @@ function unavailable() {
   throw new ProjectLoadError('CAPABILITY_NOT_INITIALIZED', '$.capabilities.urban-context-v1.handlers.context.set-mode', 'Urban context is not initialized.');
 }
 
+export async function selectUrbanContextAdapter(
+  settings,
+  context,
+  loadAdapter = () => import('../route-61-2/runtime-adapter.js')
+) {
+  if (settings?.adapter !== 'route-61-2-current') return null;
+  const module = await loadAdapter();
+  return module.getRoute612RuntimeAdapter(context);
+}
+
 export function createUrbanContextCapability(context = {}) {
+  if (context.settings?.adapter === 'route-61-2-current' && context.map) {
+    return selectUrbanContextAdapter(context.settings, context).then((adapter) => Object.freeze({
+      handlers: Object.freeze({ 'context.set-mode': (descriptor) => adapter.setContextMode(descriptor.mode) }),
+      datasetRoles: Object.freeze({ 'context.area': true })
+    }));
+  }
   return Object.freeze({
     handlers: Object.freeze({
       'context.set-mode': context.setContextMode

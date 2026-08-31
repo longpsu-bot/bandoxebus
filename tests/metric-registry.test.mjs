@@ -45,12 +45,23 @@ test('route comparison exposes trusted computed length and stop metrics', async 
   const resources = new Map([
     ['existing', { descriptor: { role: 'route.existing' }, value: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: [[0, 0], [0, 0.01]] }, properties: {} }] } }],
     ['proposed', { descriptor: { role: 'route.proposed' }, value: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: [[0, 0], [0, 0.02]] }, properties: {} }] } }],
-    ['stops', { descriptor: { role: 'stops.existing' }, value: { type: 'FeatureCollection', features: [{}, {}] } }]
+    ['stops', { descriptor: { role: 'stops.existing' }, value: { type: 'FeatureCollection', features: [
+      { type: 'Feature', id: 'shared', geometry: { type: 'Point', coordinates: [0, 0] }, properties: {} },
+      { type: 'Feature', id: 'removed', geometry: { type: 'Point', coordinates: [0, 0.005] }, properties: {} }
+    ] } }],
+    ['proposed-stops', { descriptor: { role: 'stops.proposed' }, value: { type: 'FeatureCollection', features: [
+      { type: 'Feature', id: 'shared', geometry: { type: 'Point', coordinates: [0, 0] }, properties: {} },
+      { type: 'Feature', id: 'added', geometry: { type: 'Point', coordinates: [0, 0.015] }, properties: {} }
+    ] } }]
   ]);
   const capability = createRouteComparisonCapability({ resources, setMode() {}, setRouteReveal() {}, setPoiEmphasis() {} });
   const providers = ROUTE_COMPARISON_V1_DESCRIPTOR.metrics.map((descriptor) => ({ descriptor, compute: capability.metricProviders[descriptor.id] }));
-  const registry = await createMetricRegistry({ providers });
+  const registry = await createMetricRegistry({ providers, aliases: capability.legacyMetricAliases });
   assert.ok(registry.resolve('route-existing-length').value > 1000);
   assert.ok(registry.resolve('route-length-delta').value > 1000);
   assert.equal(registry.resolve('route-stop-count').value, 2);
+  for (const id of ['existingLengthMeters', 'proposedLengthMeters', 'retainedLengthMeters', 'addedLengthMeters', 'removedLengthMeters']) {
+    assert.ok(Number.isFinite(registry.resolve(id).value), `${id} should preserve the legacy Story metric binding`);
+  }
+  assert.equal(registry.resolve('existingStopCount').value, 2);
 });

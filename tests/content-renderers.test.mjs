@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createTableRegistry } from '../src/data/table-registry.js';
 import { createLocaleFormatter } from '../src/metrics/locale-formatter.js';
-import { renderImageBlock, renderLegendBlock, renderTableBlock } from '../src/content/content-renderers.js';
+import { createContentRendererRegistry, renderImageBlock, renderLegendBlock, renderTableBlock } from '../src/content/content-renderers.js';
 
 class Element {
   constructor(tagName) { this.tagName = tagName; this.children = []; this.attributes = {}; this.className = ''; this.textContent = ''; this.dataset = {}; }
@@ -31,4 +31,17 @@ test('image and legend render safe native semantics and declared assets', () => 
   const legend = renderLegendBlock({ type: 'legend', title: 'Legend', items: [{ label: 'Route', sample: 'line', color: '#00AAFF' }, { label: 'Photo', sample: 'icon', asset: 'photo' }] }, context);
   assert.equal(find(legend, 'li').length, 2);
   assert.equal(find(legend, 'img')[0].attributes.src, '/photo.svg');
+});
+
+test('legacy metric strings retain signed-distance presentation formatting', () => {
+  const registry = createContentRendererRegistry({
+    ...context,
+    metrics: { resolve: () => ({ value: 1250 }) },
+    chartRenderer: { render() {} }
+  });
+  const node = registry.renderBlock({
+    type: 'stat-group',
+    items: [{ label: 'Added', metric: 'addedLengthMeters', format: 'signed-distance', tone: 'added' }]
+  });
+  assert.equal(find(node, 'strong')[0].textContent, '+1.3 km');
 });

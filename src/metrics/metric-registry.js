@@ -18,7 +18,7 @@ function normalizeProvider(provider) {
   return { descriptor: { id, label: id, format: { type: 'decimal' } }, compute };
 }
 
-export async function createMetricRegistry({ staticMetrics = {}, providers = [], context } = {}) {
+export async function createMetricRegistry({ staticMetrics = {}, providers = [], aliases = {}, context } = {}) {
   const results = new Map();
   const diagnostics = [];
   for (const [id, metric] of Object.entries(staticMetrics)) {
@@ -53,9 +53,14 @@ export async function createMetricRegistry({ staticMetrics = {}, providers = [],
       attribution: structuredClone(descriptor.attribution ?? [])
     }));
   }
-  const resolve = (id) => results.get(id) ?? fail('METRIC_UNKNOWN', id, `Unknown metric ID: ${id}.`);
+  for (const [alias, target] of Object.entries(aliases)) {
+    if (results.has(alias)) fail('METRIC_ID_COLLISION', alias, `Metric ID collision: ${alias}.`);
+    if (!results.has(target)) fail('METRIC_ALIAS_TARGET_UNKNOWN', alias, `Metric alias target is unknown: ${target}.`);
+  }
+  const canonicalId = (id) => aliases[id] ?? id;
+  const resolve = (id) => results.get(canonicalId(id)) ?? fail('METRIC_UNKNOWN', id, `Unknown metric ID: ${id}.`);
   return Object.freeze({
-    has: (id) => results.has(id),
+    has: (id) => results.has(canonicalId(id)),
     resolve,
     catalog: () => deepFreeze([...results.values()].map(({ value: _value, status: _status, ...descriptor }) => structuredClone(descriptor))),
     diagnostics: deepFreeze(diagnostics)
