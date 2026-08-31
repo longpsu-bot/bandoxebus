@@ -120,6 +120,7 @@ export function bindGenericStoryExperience({
     outputAdapter = createPresentationMode({
       runtime,
       experience,
+      map,
       stage: contentRoot,
       navigation,
       documentRef,

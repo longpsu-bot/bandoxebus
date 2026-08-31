@@ -28,6 +28,7 @@ function isInteractiveTarget(target) {
 export function createPresentationMode({
   runtime,
   experience,
+  map,
   stage,
   navigation,
   documentRef = document,
@@ -39,14 +40,19 @@ export function createPresentationMode({
   if (!experience?.enter || !experience?.activateScene || !experience?.exit) {
     throw new TypeError('Presentation requires the shared generic Story experience.');
   }
+  const mapContainer = map?.getContainer?.();
+  if (!mapContainer?.style || typeof map.resize !== 'function') {
+    throw new TypeError('Presentation requires the existing MapLibre map and container.');
+  }
   if (!stage?.style || !navigation?.replaceChildren) {
-    throw new TypeError('Presentation requires the existing compositor stage and navigation root.');
+    throw new TypeError('Presentation requires the existing compositor and navigation roots.');
   }
 
   let active = false;
   let previousButton = null;
   let nextButton = null;
   let stageSnapshot = null;
+  let mapContainerSnapshot = null;
 
   function updateNavigation() {
     if (!previousButton || !nextButton) return;
@@ -68,12 +74,8 @@ export function createPresentationMode({
   function previous() { return activate(runtime.currentIndex - 1); }
   function next() { return activate(runtime.currentIndex + 1); }
 
-  function fitStage() {
-    const fitted = fitPresentationStage({
-      viewportWidth: windowRef.innerWidth,
-      viewportHeight: windowRef.innerHeight
-    });
-    Object.assign(stage.style, {
+  function applyGeometry(surface, fitted) {
+    Object.assign(surface.style, {
       position: 'fixed',
       width: `${fitted.width}px`,
       height: `${fitted.height}px`,
@@ -83,6 +85,20 @@ export function createPresentationMode({
       margin: '0',
       aspectRatio: '16 / 9'
     });
+  }
+
+  function snapshotSurface(surface) {
+    return Object.fromEntries(STAGE_STYLE_PROPERTIES.map((name) => [name, surface.style[name]]));
+  }
+
+  function fitStage() {
+    const fitted = fitPresentationStage({
+      viewportWidth: windowRef.innerWidth,
+      viewportHeight: windowRef.innerHeight
+    });
+    applyGeometry(mapContainer, fitted);
+    applyGeometry(stage, fitted);
+    map.resize();
     return fitted;
   }
 
@@ -105,9 +121,10 @@ export function createPresentationMode({
     active = true;
     stageSnapshot = {
       className: stage.className,
-      styles: Object.fromEntries(STAGE_STYLE_PROPERTIES.map((name) => [name, stage.style[name]])),
+      styles: snapshotSurface(stage),
       outputMode: stage.dataset.outputMode
     };
+    mapContainerSnapshot = snapshotSurface(mapContainer);
     stage.classList?.add?.('presentation-stage');
     stage.dataset.outputMode = 'presentation';
     fitStage();
@@ -143,16 +160,20 @@ export function createPresentationMode({
     const state = experience.exit();
     stage.className = stageSnapshot.className;
     Object.assign(stage.style, stageSnapshot.styles);
+    Object.assign(mapContainer.style, mapContainerSnapshot);
     if (stageSnapshot.outputMode === undefined) delete stage.dataset.outputMode;
     else stage.dataset.outputMode = stageSnapshot.outputMode;
     stageSnapshot = null;
+    mapContainerSnapshot = null;
     previousButton = null;
     nextButton = null;
+    map.resize();
     return state;
   }
 
   return Object.freeze({
     runtime,
+    map,
     stage,
     get active() { return active; },
     enter,

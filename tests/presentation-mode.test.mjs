@@ -98,15 +98,21 @@ function fixture(options = {}) {
   const stage = new TestElement('section');
   const existingContent = new TestElement('article');
   stage.append(existingContent);
+  const mapContainer = new TestElement('main');
+  const mapEvents = [];
+  const map = {
+    getContainer() { return mapContainer; },
+    resize() { mapEvents.push('resize'); }
+  };
   const navigation = new TestElement('nav');
   const documentRef = { createElement: (tagName) => new TestElement(tagName) };
   const windowRef = createWindowRef(options);
   const presentation = createPresentationMode({
-    runtime, experience, stage, navigation, documentRef, windowRef
+    runtime, experience, map, stage, navigation, documentRef, windowRef
   });
   return {
     actionEvents, controllerEvents, definition, documentRef, existingContent, experience,
-    navigation, presentation, runtime, stage, windowRef
+    map, mapContainer, mapEvents, navigation, presentation, runtime, stage, windowRef
   };
 }
 
@@ -122,6 +128,89 @@ test('Presentation uses the existing Scene compositor geometry and content root'
   f.presentation.enter();
   assert.equal(f.presentation.stage, f.stage);
   assert.deepEqual(f.stage.children, [f.existingContent]);
+});
+
+test('Presentation reuses the existing MapLibre map and fits map and compositor identically at 1200x600', () => {
+  const f = fixture({ width: 1200, height: 600 });
+  f.presentation.enter();
+
+  assert.equal(f.presentation.map, f.map);
+  for (const surface of [f.mapContainer, f.stage]) {
+    assert.equal(surface.style.width, '1066.6666666666665px');
+    assert.equal(surface.style.height, '600px');
+    assert.equal(surface.style.left, '66.66666666666674px');
+    assert.equal(surface.style.top, '0px');
+  }
+});
+
+test('Presentation fits the existing map and compositor identically at 600x900', () => {
+  const f = fixture({ width: 600, height: 900 });
+  f.presentation.enter();
+
+  for (const surface of [f.mapContainer, f.stage]) {
+    assert.equal(surface.style.width, '600px');
+    assert.equal(surface.style.height, '337.5px');
+    assert.equal(surface.style.left, '0px');
+    assert.equal(surface.style.top, '281.25px');
+  }
+});
+
+test('Presentation leaves non-stage viewport space outside the constrained map', () => {
+  const wide = fixture({ width: 1200, height: 600 });
+  wide.presentation.enter();
+  assert.ok(Number.parseFloat(wide.mapContainer.style.width) < wide.windowRef.innerWidth);
+
+  const tall = fixture({ width: 600, height: 900 });
+  tall.presentation.enter();
+  assert.ok(Number.parseFloat(tall.mapContainer.style.height) < tall.windowRef.innerHeight);
+});
+
+test('Presentation resizes MapLibre after entry and after refitting both surfaces', () => {
+  const f = fixture({ width: 1200, height: 600 });
+  f.presentation.enter();
+  assert.deepEqual(f.mapEvents, ['resize']);
+
+  f.windowRef.innerWidth = 600;
+  f.windowRef.innerHeight = 900;
+  f.windowRef.emit('resize');
+
+  assert.deepEqual(f.mapEvents, ['resize', 'resize']);
+  assert.equal(f.mapContainer.style.height, '337.5px');
+  assert.equal(f.stage.style.height, '337.5px');
+  assert.equal(f.mapContainer.style.top, '281.25px');
+  assert.equal(f.stage.style.top, '281.25px');
+});
+
+test('Presentation exit restores map and compositor inline layout before resizing MapLibre', () => {
+  const f = fixture({ width: 1200, height: 600 });
+  Object.assign(f.mapContainer.style, {
+    position: 'absolute', width: 'map-width', height: 'map-height', left: 'map-left', top: 'map-top'
+  });
+  Object.assign(f.stage.style, {
+    position: 'absolute', width: 'stage-width', height: 'stage-height', left: 'stage-left', top: 'stage-top'
+  });
+  f.presentation.enter();
+  f.presentation.exit();
+
+  assert.deepEqual({
+    position: f.mapContainer.style.position,
+    width: f.mapContainer.style.width,
+    height: f.mapContainer.style.height,
+    left: f.mapContainer.style.left,
+    top: f.mapContainer.style.top
+  }, {
+    position: 'absolute', width: 'map-width', height: 'map-height', left: 'map-left', top: 'map-top'
+  });
+  assert.deepEqual({
+    position: f.stage.style.position,
+    width: f.stage.style.width,
+    height: f.stage.style.height,
+    left: f.stage.style.left,
+    top: f.stage.style.top
+  }, {
+    position: 'absolute', width: 'stage-width', height: 'stage-height', left: 'stage-left', top: 'stage-top'
+  });
+  assert.deepEqual(f.mapEvents, ['resize', 'resize']);
 });
 
 test('Next activates the next Scene through the shared runtime', () => {
@@ -261,15 +350,17 @@ test('generic shell selects Presentation from bounded session URL state', () => 
     ['scene-compositor', f.stage],
     ['runtime-navigation', f.navigation]
   ]);
+  f.map.loaded = () => true;
   const shell = bindGenericStoryExperience({
     runtime: f.runtime,
     sceneController: {},
-    map: { loaded: () => true },
+    map: f.map,
     documentRef: { ...f.documentRef, getElementById: (id) => elements.get(id) ?? null },
     windowRef: f.windowRef
   });
   assert.equal(shell.outputMode, 'presentation');
   assert.equal(f.windowRef.listenerCount('keydown'), 1);
   assert.equal(f.runtime.active, true);
+  assert.deepEqual(f.mapEvents, ['resize']);
   shell.destroy();
 });
