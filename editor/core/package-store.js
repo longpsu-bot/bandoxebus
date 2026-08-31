@@ -1,4 +1,5 @@
 import { resolvePackageUrl } from '../../src/project/path-resolver.js';
+import { createBlankMapStoryTemplate } from './templates.js';
 
 const encoder = new TextEncoder();
 const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
@@ -13,10 +14,6 @@ function bytes(value) {
 
 function equalBytes(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function jsonBytes(value) {
-  return encoder.encode(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 function invalidPath(message) {
@@ -70,46 +67,7 @@ export function createNewProjectEntries({
   title = 'Untitled project',
   locale = 'en-US'
 } = {}) {
-  const manifest = {
-    schemaVersion: '1.0',
-    id,
-    title,
-    locale,
-    stories: {
-      primary: 'main',
-      items: [{ id: 'main', src: './stories/main.story.json' }]
-    },
-    map: {
-      basemap: 'openfreemap-dark',
-      initialView: { center: [0, 0], zoom: 2, pitch: 0, bearing: 0 }
-    },
-    datasets: {},
-    assets: {},
-    focusTargets: {},
-    capabilities: [],
-    attribution: {}
-  };
-  const story = {
-    schemaVersion: '1.2',
-    id: 'main',
-    title,
-    states: [{
-      id: 'opening',
-      content: { layout: 'freeform-16x9', blocks: [] },
-      map: {
-        camera: structuredClone(manifest.map.initialView),
-        interaction: 'locked',
-        transition: { type: 'ease', durationMs: 900 },
-        layerVisibility: {},
-        enter: [],
-        exit: []
-      }
-    }]
-  };
-  return [
-    { path: 'project.json', bytes: jsonBytes(manifest), mediaType: 'application/json', kind: 'manifest', managed: true },
-    { path: 'stories/main.story.json', bytes: jsonBytes(story), mediaType: 'application/json', kind: 'story', managed: true }
-  ];
+  return createBlankMapStoryTemplate({ id, title, locale });
 }
 
 export function createPackageStore({ origin, entries = [] }) {
