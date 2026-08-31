@@ -3,12 +3,17 @@ import {
   addProjectLayerToStory12,
   addScene12,
   addTextEnvelope,
+  alignEnvelopes,
+  bringEnvelopeForward,
   captureSceneCamera,
   commitEnvelopeFrame,
+  deleteEnvelope,
   deleteScene12,
+  duplicateEnvelope,
   duplicateScene12,
   editTextEnvelope,
   moveScene12,
+  sendEnvelopeBackward,
   setEnvelopeAppearance,
   setSceneInteraction,
   setSceneLayerVisibility,
@@ -24,6 +29,7 @@ let activeStudio = null;
 let activeHistory = null;
 let activeHistoryKey = null;
 let selectedOverlayId = null;
+let selectedOverlayIds = [];
 let authoringMode = 'select';
 
 function clone(value) {
@@ -70,6 +76,11 @@ export function applyStudioStoryCommand(story, name, payload = {}) {
   if (name === 'edit-text' || name === 'commit-text') return editTextEnvelope(story, payload);
   if (name === 'commit-frame') return commitEnvelopeFrame(story, payload);
   if (name === 'set-appearance') return setEnvelopeAppearance(story, payload);
+  if (name === 'duplicate-object') return duplicateEnvelope(story, payload);
+  if (name === 'delete-object') return deleteEnvelope(story, payload);
+  if (name === 'align-objects') return alignEnvelopes(story, payload);
+  if (name === 'bring-forward') return bringEnvelopeForward(story, payload);
+  if (name === 'send-backward') return sendEnvelopeBackward(story, payload);
   throw new TypeError(`Unknown Studio Story command: ${name}.`);
 }
 
@@ -85,8 +96,18 @@ function updateHistoryButtons() {
   if (redo) redo.disabled = !activeHistory?.canRedo;
 }
 
+function normalizeSelection() {
+  if (!activeStudio) return;
+  const validIds = new Set(activeStudio.story.states[activeStudio.sceneIndex]?.content?.blocks?.map(({ id }) => id) ?? []);
+  selectedOverlayIds = selectedOverlayIds.filter((id) => validIds.has(id));
+  if (selectedOverlayId && !validIds.has(selectedOverlayId)) selectedOverlayId = null;
+  if (selectedOverlayId && !selectedOverlayIds.includes(selectedOverlayId)) selectedOverlayIds.push(selectedOverlayId);
+  if (!selectedOverlayId && selectedOverlayIds.length) selectedOverlayId = selectedOverlayIds.at(-1);
+}
+
 function rerenderActive() {
   if (!activeStudio) return;
+  normalizeSelection();
   mountStudioShell({ ...activeStudio, selectedOverlayId });
 }
 
@@ -111,7 +132,7 @@ function bindHistoryButtons(documentRef) {
     undo.dataset.studioHistoryBound = 'true';
     undo.addEventListener('click', () => {
       activeHistory?.undo();
-      if (selectedOverlayId && !textEnvelope(activeStudio.story, activeStudio.sceneIndex, selectedOverlayId)) selectedOverlayId = null;
+      normalizeSelection();
       rerenderActive();
     });
   }
@@ -119,6 +140,7 @@ function bindHistoryButtons(documentRef) {
     redo.dataset.studioHistoryBound = 'true';
     redo.addEventListener('click', () => {
       activeHistory?.redo();
+      normalizeSelection();
       rerenderActive();
     });
   }
@@ -129,22 +151,40 @@ function executeStoryCommand(name, payload = {}) {
   if (!activeStudio) return null;
   const history = ensureHistory(activeStudio);
   const next = history.execute((story) => applyStudioStoryCommand(story, name, payload));
-  if (name === 'add-text') selectedOverlayId = next.states[payload.sceneIndex].content.blocks.at(-1)?.id ?? null;
-  if (name === 'delete-scene') selectedOverlayId = null;
+  if (name === 'add-text' || name === 'duplicate-object') {
+    const newId = next.states[payload.sceneIndex].content.blocks.at(-1)?.id ?? null;
+    selectedOverlayId = newId;
+    selectedOverlayIds = newId ? [newId] : [];
+  }
+  if (name === 'delete-object') {
+    selectedOverlayIds = selectedOverlayIds.filter((id) => id !== payload.id);
+    selectedOverlayId = selectedOverlayIds.at(-1) ?? null;
+  }
+  if (name === 'delete-scene') {
+    selectedOverlayId = null;
+    selectedOverlayIds = [];
+  }
   rerenderActive();
   return next;
 }
 
-function selectOverlay(id, { notify = true } = {}) {
-  selectedOverlayId = id;
-  if (notify) activeStudio?.onSelectOverlay?.(id);
+function selectOverlay(id, { notify = true, additive = false } = {}) {
+  if (additive) {
+    if (selectedOverlayIds.includes(id)) selectedOverlayIds = selectedOverlayIds.filter((selected) => selected !== id);
+    else selectedOverlayIds = [...selectedOverlayIds, id];
+    selectedOverlayId = selectedOverlayIds.at(-1) ?? null;
+  } else {
+    selectedOverlayId = id;
+    selectedOverlayIds = id ? [id] : [];
+  }
+  if (notify) activeStudio?.onSelectOverlay?.(selectedOverlayId);
   rerenderActive();
 }
 
 subscribePreviewAuthoringEvents((event) => {
   if (!activeStudio) return;
   if (event.type === 'editor-preview:select-overlay') {
-    selectOverlay(event.payload.id, { notify: true });
+    selectOverlay(event.payload.id, { notify: true, additive: false });
     return;
   }
   if (event.type === 'editor-preview:commit-frame') {
@@ -200,10 +240,43 @@ function addControl(documentRef, parent, {
   return control;
 }
 
-function renderTextProperties({ documentRef, inspector, story, sceneIndex, envelope }) {
+function actionButton(documentRef, parent, label, action, { disabled = false } = {}) {
+  const button = element(documentRef, 'button', label, { type: 'button' });
+  button.disabled = disabled;
+  button.addEventListener('click', action);
+  parent.append(button);
+  return button;
+}
+
+function renderObjectHelpers({ documentRef, inspector, sceneIndex, envelope }) {
+  const helpers = element(documentRef, 'section', undefined, { className: 'studio-object-helpers', 'aria-label': 'Object commands' });
+  actionButton(documentRef, helpers, 'Duplicate', () => executeStoryCommand('duplicate-object', { sceneIndex, id: envelope.id }));
+  actionButton(documentRef, helpers, 'Delete', () => executeStoryCommand('delete-object', { sceneIndex, id: envelope.id }));
+  actionButton(documentRef, helpers, 'Bring Forward', () => executeStoryCommand('bring-forward', { sceneIndex, id: envelope.id }));
+  actionButton(documentRef, helpers, 'Send Backward', () => executeStoryCommand('send-backward', { sceneIndex, id: envelope.id }));
+  const alignment = element(documentRef, 'div', undefined, { className: 'studio-align-commands' });
+  const enough = selectedOverlayIds.length >= 2;
+  for (const [label, value] of [
+    ['Align Left', 'left'], ['Align Center', 'center'], ['Align Right', 'right'],
+    ['Align Top', 'top'], ['Align Middle', 'middle'], ['Align Bottom', 'bottom']
+  ]) {
+    actionButton(documentRef, alignment, label, () => executeStoryCommand('align-objects', {
+      sceneIndex,
+      ids: [...selectedOverlayIds],
+      alignment: value
+    }), { disabled: !enough });
+  }
+  helpers.append(alignment);
+  inspector.append(helpers);
+}
+
+function renderTextProperties({ documentRef, inspector, sceneIndex, envelope }) {
   const appearance = resolveStory12Appearance(envelope);
   const propertiesHeading = element(documentRef, 'h2', 'Properties');
-  const objectLabel = element(documentRef, 'p', `Text · ${envelope.id}`, { className: 'studio-selection-label' });
+  const selectionLabel = selectedOverlayIds.length > 1
+    ? `Text · ${selectedOverlayIds.length} objects selected`
+    : `Text · ${envelope.id}`;
+  const objectLabel = element(documentRef, 'p', selectionLabel, { className: 'studio-selection-label' });
   inspector.replaceChildren(propertiesHeading, objectLabel);
 
   addControl(documentRef, inspector, {
@@ -266,6 +339,7 @@ function renderTextProperties({ documentRef, inspector, story, sceneIndex, envel
   });
   const z = element(documentRef, 'output', `Z order · ${envelope.frame.z}`, { id: 'studio-z-order' });
   inspector.append(z);
+  renderObjectHelpers({ documentRef, inspector, sceneIndex, envelope });
 }
 
 function renderSceneProperties({ documentRef, inspector, active, sceneIndex, workingCamera }) {
@@ -331,14 +405,17 @@ export function mountStudioShell({
   }
   const active = story.states[sceneIndex];
   if (!active) throw new RangeError(`Unknown active Scene index: ${sceneIndex}.`);
-  if (requestedSelection !== undefined) selectedOverlayId = requestedSelection;
-  if (selectedOverlayId && !active.content.blocks.some(({ id }) => id === selectedOverlayId)) selectedOverlayId = null;
+  if (requestedSelection !== undefined) {
+    selectedOverlayId = requestedSelection;
+    selectedOverlayIds = requestedSelection ? [requestedSelection] : [];
+  }
 
   activeStudio = {
     documentRef, navigation, inspector, scenesHost, previewToolbar,
     manifest, story, sceneIndex, workingCamera,
     onSelectScene, onSelectOverlay, onStoryCommand, onPreviewCommand
   };
+  normalizeSelection();
   ensureHistory(activeStudio);
   bindHistoryButtons(documentRef);
 
@@ -366,15 +443,18 @@ export function mountStudioShell({
   const objects = element(documentRef, 'div', undefined, { className: 'studio-object-list' });
   for (const envelope of active.content.blocks.filter(({ block }) => ['heading', 'paragraph'].includes(block?.type))) {
     const objectButton = element(documentRef, 'button', envelope.id, {
-      type: 'button', className: envelope.id === selectedOverlayId ? 'is-current' : ''
+      type: 'button', className: selectedOverlayIds.includes(envelope.id) ? 'is-current' : ''
     });
-    objectButton.addEventListener('click', () => selectOverlay(envelope.id, { notify: true }));
+    objectButton.addEventListener('click', (event) => selectOverlay(envelope.id, {
+      notify: true,
+      additive: Boolean(event.shiftKey)
+    }));
     objects.append(objectButton);
   }
   navigation.replaceChildren(layersHeading, layers, textHeading, addMenu, objects);
 
   const selected = textEnvelope(story, sceneIndex, selectedOverlayId);
-  if (selected) renderTextProperties({ documentRef, inspector, story, sceneIndex, envelope: selected });
+  if (selected) renderTextProperties({ documentRef, inspector, sceneIndex, envelope: selected });
   else renderSceneProperties({ documentRef, inspector, active, sceneIndex, workingCamera });
 
   if (previewToolbar?.replaceChildren) {
@@ -401,11 +481,12 @@ export function mountStudioShell({
     });
     button.addEventListener('click', () => {
       selectedOverlayId = null;
+      selectedOverlayIds = [];
       onSelectScene(index);
     });
     button.addEventListener('keydown', (event) => {
-      if (event.key === 'ArrowLeft' && index > 0) { selectedOverlayId = null; onSelectScene(index - 1); }
-      if (event.key === 'ArrowRight' && index < story.states.length - 1) { selectedOverlayId = null; onSelectScene(index + 1); }
+      if (event.key === 'ArrowLeft' && index > 0) { selectedOverlayId = null; selectedOverlayIds = []; onSelectScene(index - 1); }
+      if (event.key === 'ArrowRight' && index < story.states.length - 1) { selectedOverlayId = null; selectedOverlayIds = []; onSelectScene(index + 1); }
     });
     sceneList.append(button);
   });
@@ -425,7 +506,7 @@ export function mountStudioShell({
   scenesHost.replaceChildren(scenesHeading, sceneList, commands);
 
   updateHistoryButtons();
-  return Object.freeze({ sceneIndex, selectedOverlayId, history: activeHistory?.status?.() });
+  return Object.freeze({ sceneIndex, selectedOverlayId, selectedOverlayIds: Object.freeze([...selectedOverlayIds]), history: activeHistory?.status?.() });
 }
 
 export function resetStudioAuthoringSession() {
@@ -433,5 +514,6 @@ export function resetStudioAuthoringSession() {
   activeHistory = null;
   activeHistoryKey = null;
   selectedOverlayId = null;
+  selectedOverlayIds = [];
   authoringMode = 'select';
 }
