@@ -6,6 +6,7 @@ import {
   STORY_12_INTERACTIONS,
   STORY_12_TRANSITIONS
 } from '../../src/scene/scene-contract.js';
+import { createRichObjectEnvelope, validateRichBlock } from './scene-object-factories.js';
 
 const DEFAULT_TRANSITION = Object.freeze({ type: 'ease', durationMs: 900 });
 const HEX_COLOR = /^#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$/;
@@ -316,6 +317,30 @@ export function addTextEnvelope(story, { sceneIndex, kind = 'body', frame } = {}
     block: { type: definition.type, text: definition.text }
   };
   next.states[sceneIndex].content.blocks.push(envelope);
+  return next;
+}
+
+export function addRichEnvelope(story, { sceneIndex, kind, catalogs = {}, frame } = {}) {
+  const blocks = blocksAt(story, sceneIndex);
+  const next = clone(story);
+  const envelope = createRichObjectEnvelope(kind, {
+    catalogs,
+    usedIds: blocks.map(({ id }) => id),
+    frame: frame ? normalizeFrame(frame) : undefined,
+    z: Math.min(9999, highestZ(blocks) + 1)
+  });
+  envelope.frame = normalizeFrame(envelope.frame);
+  next.states[sceneIndex].content.blocks.push(envelope);
+  return next;
+}
+
+export function editRichEnvelope(story, { sceneIndex, id, block }) {
+  const index = envelopeIndex(story, sceneIndex, id);
+  const source = blocksAt(story, sceneIndex)[index];
+  if (source.block.type !== block?.type) throw new TypeError('Rich object editing cannot change its semantic family.');
+  const nextBlock = validateRichBlock(block);
+  const next = clone(story);
+  next.states[sceneIndex].content.blocks[index].block = nextBlock;
   return next;
 }
 

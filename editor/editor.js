@@ -104,6 +104,34 @@ export function createEditor({
     return { manifest, item, path, story: path ? draftStore?.get(path) : null };
   }
 
+  function productionContentCatalogs(manifest) {
+    const selectedIds = new Set(['core-content-v1', 'core-map-v1', ...manifest.capabilities.map(({ id }) => id)]);
+    const selectedDescriptors = INSTALLED_CAPABILITY_REGISTRY.catalog().filter(({ id }) => selectedIds.has(id));
+    const tables = Object.entries(manifest.datasets)
+      .filter(([, descriptor]) => descriptor.type === 'table-json')
+      .map(([id, descriptor]) => ({ id, columns: draftStore.get(descriptor.src.replace(/^\.\//, ''))?.columns ?? [] }));
+    const metricFile = manifest.metrics ? draftStore.get(manifest.metrics.src.replace(/^\.\//, '')) : null;
+    const catalogs = {
+      tables,
+      datasets: Object.entries(manifest.datasets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
+      assets: Object.keys(manifest.assets).map((id) => ({ id })),
+      metrics: [
+        ...Object.entries(metricFile?.metrics ?? {}).map(([id, metric]) => ({ id, label: metric.label, format: metric.format })),
+        ...selectedDescriptors.flatMap(({ metrics }) => metrics)
+      ],
+      capabilityTargets: selectedDescriptors.flatMap(({ targets }) => targets.map(({ id, label }) => ({ id, label }))),
+      attribution: Object.keys(manifest.attribution).map((id) => ({ id }))
+    };
+    const datasetTargets = catalogs.datasets;
+    const focusTargets = Object.keys(manifest.focusTargets).map((id) => ({ id }));
+    catalogs.actionTargets = {
+      'map.focus': [...datasetTargets, ...focusTargets, ...catalogs.capabilityTargets],
+      'map.set-visibility': datasetTargets,
+      'map.set-emphasis': datasetTargets
+    };
+    return { catalogs, selectedDescriptors };
+  }
+
   function renderStudioWorkspace() {
     const current = primaryStory();
     if (current.story?.schemaVersion !== '1.2' || !elements.studioScenes) return false;
@@ -118,6 +146,7 @@ export function createEditor({
       scenesHost: elements.studioScenes,
       previewToolbar: elements.previewToolbar,
       manifest: current.manifest,
+      catalogs: productionContentCatalogs(current.manifest).catalogs,
       story: current.story,
       sceneIndex: stateSelection,
       workingCamera: previewTelemetry,
@@ -222,30 +251,7 @@ export function createEditor({
       id,
       draftStore.get(src.replace(/^\.\//, ''))
     ]));
-    const selectedIds = new Set(['core-content-v1', 'core-map-v1', ...manifest.capabilities.map(({ id }) => id)]);
-    const selectedDescriptors = INSTALLED_CAPABILITY_REGISTRY.catalog().filter(({ id }) => selectedIds.has(id));
-    const tables = Object.entries(manifest.datasets)
-      .filter(([, descriptor]) => descriptor.type === 'table-json')
-      .map(([id, descriptor]) => ({ id, columns: draftStore.get(descriptor.src.replace(/^\.\//, ''))?.columns ?? [] }));
-    const metricFile = manifest.metrics ? draftStore.get(manifest.metrics.src.replace(/^\.\//, '')) : null;
-    const catalogs = {
-      tables,
-      datasets: Object.entries(manifest.datasets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
-      assets: Object.keys(manifest.assets).map((id) => ({ id })),
-      metrics: [
-        ...Object.entries(metricFile?.metrics ?? {}).map(([id, metric]) => ({ id, label: metric.label, format: metric.format })),
-        ...selectedDescriptors.flatMap(({ metrics }) => metrics)
-      ],
-      capabilityTargets: selectedDescriptors.flatMap(({ targets }) => targets.map(({ id, label }) => ({ id, label }))),
-      attribution: Object.keys(manifest.attribution).map((id) => ({ id }))
-    };
-    const datasetTargets = catalogs.datasets;
-    const focusTargets = Object.keys(manifest.focusTargets).map((id) => ({ id }));
-    catalogs.actionTargets = {
-      'map.focus': [...datasetTargets, ...focusTargets, ...catalogs.capabilityTargets],
-      'map.set-visibility': datasetTargets,
-      'map.set-emphasis': datasetTargets
-    };
+    const { catalogs, selectedDescriptors } = productionContentCatalogs(manifest);
     return createStoryEditor({
       manifest,
       stories,
