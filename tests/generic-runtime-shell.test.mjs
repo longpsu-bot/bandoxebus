@@ -27,6 +27,7 @@ test('neutral generic app imports no Route 61-2 runtime modules or data', async 
   assert.match(source, /startApplication/);
   assert.match(source, /INSTALLED_CAPABILITY_REGISTRY/);
   assert.match(source, /startEditorPreviewHost/);
+  assert.match(source, /cooperativeGestures:\s*cooperativeScroll/);
 });
 
 test('generic application resolves one bounded output mode before bootstrap', () => {

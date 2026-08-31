@@ -77,11 +77,11 @@ export function createPresentationMode({
   function applyGeometry(surface, fitted) {
     Object.assign(surface.style, {
       position: 'fixed',
+      inset: 'auto',
       width: `${fitted.width}px`,
       height: `${fitted.height}px`,
       left: `${fitted.left}px`,
       top: `${fitted.top}px`,
-      inset: 'auto',
       margin: '0',
       aspectRatio: '16 / 9'
     });

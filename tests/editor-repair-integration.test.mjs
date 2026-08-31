@@ -119,7 +119,7 @@ function editorHarness() {
   const posted = [];
   const ids = [
     'new-project', 'open-folder', 'import-zip', 'save-project', 'export-project-zip',
-    'validate-project', 'preview-status', 'dirty-status', 'validation-status',
+    'validate-project', 'preview-story', 'present-story', 'preview-status', 'dirty-status', 'validation-status',
     'validation-errors', 'project-locale', 'story-heading', 'production-preview',
     'preview-frame', 'preview-paused', 'preview-desktop', 'preview-mobile',
     'ordering-announcements', 'studio-scenes', 'undo-command', 'redo-command'

@@ -104,6 +104,31 @@ test('bootstrap creates one map and destroys capabilities in deterministic rever
   ]);
 });
 
+test('default MapLibre construction receives the output cooperative-gesture policy', async () => {
+  for (const cooperativeScroll of [true, false]) {
+    let mapOptions;
+    class MapLibreMap {
+      constructor(options) { mapOptions = options; }
+      remove() {}
+    }
+    const project = {
+      map: { initialView: { center: [0, 0], zoom: 1, pitch: 0, bearing: 0 } },
+      story: { ...story(), states: [{ ...story().states[0], map: { enter: [], exit: [] } }] },
+      resources: new Map(),
+      capabilities: { ordered: [], settings: {} }
+    };
+
+    const app = await bootstrapProject({
+      project,
+      maplibregl: { Map: MapLibreMap },
+      cooperativeScroll
+    });
+
+    assert.equal(mapOptions.cooperativeGestures, cooperativeScroll);
+    app.destroy();
+  }
+});
+
 test('bootstrap binds the selected Story experience around the same runtime and map', async () => {
   const map = {};
   let received;

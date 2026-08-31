@@ -43,9 +43,10 @@ export function createRuntimeMetricRegistry(project, instances) {
   });
 }
 
-function defaultCreateMap({ project, maplibregl }) {
+function defaultCreateMap({ project, maplibregl, cooperativeScroll = false }) {
   return new maplibregl.Map({
     container: 'map',
+    cooperativeGestures: cooperativeScroll,
     ...project.map.initialView
   });
 }
@@ -114,7 +115,12 @@ export async function bootstrapProject(context) {
   const documentRef = context.documentRef ?? globalThis.document;
   if (documentRef) applyProjectMetadata(project, { documentRef });
   const createMap = context.createMap ?? defaultCreateMap;
-  const map = await createMap({ project, maplibregl: context.maplibregl, documentRef: context.documentRef });
+  const map = await createMap({
+    project,
+    maplibregl: context.maplibregl,
+    documentRef: context.documentRef,
+    cooperativeScroll: context.cooperativeScroll ?? false
+  });
   const instances = [];
   let destroyed = false;
   try {

@@ -359,3 +359,23 @@ test('PR C browser gate covers rich objects, valid templates, neutral root, trus
     'maplibregl-canvas', 'routeModules', '/src/route-61-2/', '390', '844', 'consoleIssues'
   ]) assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
+
+test('PR D browser gate locks outputs, persistence, desktop geometry, and raw performance evidence', async () => {
+  const source = await readFile(
+    path.join(repositoryRoot, 'scripts', 'map-story-studio-browser-smoke.mjs'),
+    'utf8'
+  );
+
+  for (const required of [
+    "GATE === 'pr-d'",
+    'MAP_STORY_STUDIO_PR_D_RESULT: PASS',
+    '1920', '1080', '1366', '768',
+    'Preview Story', 'Present', 'previous valid revision',
+    'flyTo', 'easeTo', 'jumpTo', 'setLayoutProperty', 'setCooperativeGestures',
+    'scroll-story__step', 'documentElement.clientWidth', 'presentation-stage', 'Escape',
+    'content-chart__data', 'content-table', 'content-image', 'content-legend',
+    'requestAnimationFrame', 'rawApproximateFps', 'sampleDurationMs',
+    'MAP_STORY_STUDIO_PR_C_RESULT: PASS', 'consoleIssues', 'maplibregl-canvas'
+  ]) assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(source, /client\.close\(\);\s*const prC/);
+});

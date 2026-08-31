@@ -4,13 +4,14 @@ import { INSTALLED_CAPABILITY_REGISTRY } from '../capabilities/installed-capabil
 import { renderProjectLoadError } from '../project/bootstrap.js';
 import { bindGenericStoryExperience, resolveGenericOutputMode } from './generic-shell.js';
 
-async function createGenericMap({ project, maplibregl }) {
+async function createGenericMap({ project, maplibregl, cooperativeScroll = false }) {
   const response = await fetch(new URL('../../style-openfreemap-dark.json', import.meta.url));
   if (!response.ok) throw new Error(`Could not load basemap style (${response.status}).`);
   const style = prepareBasemapStyle(stripOpenFreeMapDarkStyle(await response.json()));
   return new maplibregl.Map({
     container: 'map',
     style,
+    cooperativeGestures: cooperativeScroll,
     ...project.map.initialView,
     maxPitch: 72,
     antialias: true,

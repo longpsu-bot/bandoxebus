@@ -81,6 +81,24 @@ function createWindowRef({ width = 1600, height = 900 } = {}) {
   };
 }
 
+function cssShorthandAwareStyle() {
+  const values = {
+    position: '', width: '', height: '', left: '', top: '', right: '', bottom: '', inset: '', margin: '', aspectRatio: ''
+  };
+  return new Proxy(values, {
+    set(target, property, value) {
+      target[property] = value;
+      if (property === 'inset') {
+        target.left = value;
+        target.top = value;
+        target.right = value;
+        target.bottom = value;
+      }
+      return true;
+    }
+  });
+}
+
 function fixture(options = {}) {
   const actionEvents = [];
   const controllerEvents = [];
@@ -121,6 +139,19 @@ test('Presentation fits an exact 16:9 stage', () => {
   f.presentation.enter();
   assert.equal(f.stage.style.aspectRatio, '16 / 9');
   assert.equal(Number.parseFloat(f.stage.style.width) / Number.parseFloat(f.stage.style.height), 16 / 9);
+});
+
+test('Presentation CSS shorthand cannot erase centered stage offsets', () => {
+  const f = fixture({ width: 1200, height: 900 });
+  f.stage.style = cssShorthandAwareStyle();
+  f.mapContainer.style = cssShorthandAwareStyle();
+
+  f.presentation.enter();
+
+  for (const surface of [f.mapContainer, f.stage]) {
+    assert.equal(surface.style.left, '0px');
+    assert.equal(surface.style.top, '112.5px');
+  }
 });
 
 test('Presentation uses the existing Scene compositor geometry and content root', () => {
