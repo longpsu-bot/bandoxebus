@@ -1,4 +1,4 @@
-import { resolveStory12Appearance } from './scene-contract.js';
+import { resolveStory12Appearance, STORY_12_ID_PATTERN } from './scene-contract.js';
 
 const FONT_STACKS = Object.freeze({
   sans: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -23,6 +23,11 @@ function applyFrame(node, frame) {
   node.style.width = percent(frame.width);
   node.style.height = percent(frame.height);
   node.style.zIndex = String(frame.z);
+  node.dataset.sceneFrameX = String(frame.x);
+  node.dataset.sceneFrameY = String(frame.y);
+  node.dataset.sceneFrameWidth = String(frame.width);
+  node.dataset.sceneFrameHeight = String(frame.height);
+  node.dataset.sceneFrameZ = String(frame.z);
 }
 
 function applyAppearance(node, envelope) {
@@ -56,6 +61,40 @@ function createOverlay(envelope, renderBlock, documentRef) {
   applyAppearance(wrapper, envelope);
   wrapper.append(renderBlock(envelope.block));
   return wrapper;
+}
+
+export function findSceneOverlay(root, id) {
+  if (!root?.children || !STORY_12_ID_PATTERN.test(id ?? '')) return null;
+  for (const child of root.children) {
+    if (child?.dataset?.sceneOverlayId === id) return child;
+  }
+  return null;
+}
+
+export function readSceneOverlayFrame(root, id) {
+  const overlay = findSceneOverlay(root, id);
+  if (!overlay) return null;
+  const frame = {
+    x: Number(overlay.dataset.sceneFrameX),
+    y: Number(overlay.dataset.sceneFrameY),
+    width: Number(overlay.dataset.sceneFrameWidth),
+    height: Number(overlay.dataset.sceneFrameHeight),
+    z: Number(overlay.dataset.sceneFrameZ)
+  };
+  return Object.values(frame).every(Number.isFinite) ? frame : null;
+}
+
+export function applySceneOverlayFrame(root, id, frame) {
+  const overlay = findSceneOverlay(root, id);
+  if (!overlay) return null;
+  applyFrame(overlay, frame);
+  return overlay;
+}
+
+export function readSceneRootBounds(root) {
+  const rect = root?.getBoundingClientRect?.();
+  if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) return null;
+  return Object.freeze({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
 }
 
 export function createSceneCompositor({ root, renderBlock, documentRef = document } = {}) {

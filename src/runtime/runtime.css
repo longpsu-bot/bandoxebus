@@ -4,6 +4,10 @@ body { position: relative; }
 #scene-compositor { position: absolute; inset: 0; aspect-ratio: 16 / 9; width: min(100vw, calc(100vh * 16 / 9)); height: min(100vh, calc(100vw * 9 / 16)); margin: auto; pointer-events: none; container-type: inline-size; }
 .scene-overlay { overflow: hidden; pointer-events: auto; }
 .scene-overlay img, .scene-overlay canvas, .scene-overlay table { max-width: 100%; }
+.scene-resize-handle { position: absolute; right: 0; bottom: 0; inline-size: 14px; block-size: 14px; border: 1px solid #fff; background: #2bb7ff; padding: 0; cursor: nwse-resize; z-index: 10001; }
+.scene-snap-guide { background: rgb(43 183 255 / 88%); z-index: 10000; }
+.scene-snap-guide[data-scene-snap-guide="x"] { inline-size: 1px; }
+.scene-snap-guide[data-scene-snap-guide="y"] { block-size: 1px; }
 #runtime-status { position: fixed; left: 12px; bottom: 10px; margin: 0; padding: 6px 10px; border-radius: 6px; background: rgb(7 16 28 / 72%); font-size: 12px; z-index: 10000; }
 #project-load-error { position: fixed; inset: 16px auto auto 16px; max-width: min(680px, calc(100vw - 32px)); padding: 12px; background: #3b1111; z-index: 11000; }
 #runtime-navigation, #capability-controls { position: fixed; z-index: 10001; }

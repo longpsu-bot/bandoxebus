@@ -8,7 +8,12 @@ import {
 import { createPreviewBridge } from './preview/bridge.js';
 import { renderEntityInspector } from './ui/inspectors.js';
 import { createStoryEditor } from './ui/story-editor.js';
-import { applyStudioStoryCommand, mountStudioShell } from './ui/studio-shell.js';
+import {
+  applyStudioStoryCommand,
+  getStudioAuthoringMode,
+  mountStudioShell,
+  resetStudioAuthoringSession
+} from './ui/studio-shell.js';
 import { INSTALLED_CAPABILITY_REGISTRY } from '../src/capabilities/installed-capabilities.js';
 import { STORY_10_CONTENT_TYPES } from '../src/content/content-descriptors.js';
 import {
@@ -1011,7 +1016,7 @@ export function createEditor({
         elements.previewStatus.textContent = `Preview revision ${event.revision}`;
         if (primaryStory().story?.schemaVersion === '1.2') {
           bridge.command('activate-scene', { index: stateSelection, animate: false });
-          bridge.command('authoring-mode', { mode: 'select' });
+          bridge.command('authoring-mode', { mode: getStudioAuthoringMode() });
         }
       } else if (event.type === 'editor-preview:runtime-error') {
         elements.previewStatus.textContent = 'Preview runtime error';
@@ -1218,6 +1223,7 @@ export function createEditor({
 
   async function startEntries({ origin, capabilities, entries, adapter = null }) {
     validation?.dispose();
+    resetStudioAuthoringSession();
     packageStore = createPackageStore({
       origin,
       entries
