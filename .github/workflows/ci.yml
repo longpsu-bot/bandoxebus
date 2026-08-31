@@ -21,3 +21,82 @@ jobs:
           node-version: 24
       - name: Run test suite
         run: npm test
+
+  pr-b-certification:
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.body, 'RUN_MAP_STORY_BROWSER_GATE=pr-b')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Verify PR B scope and focused tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main:refs/remotes/origin/main --depth=1
+          git diff --check origin/main...HEAD
+          git diff --exit-code origin/main -- data/schemas/story-1.2.schema.json data/stories/route-61-2.story.json
+          node --check editor/core/history.js
+          node --check editor/core/scene-commands.js
+          node --check editor/ui/studio-shell.js
+          node --check editor/preview/bridge.js
+          node --check editor/preview/package-resolver.js
+          node --check src/scene/scene-compositor.js
+          node --check src/scene/scene-authoring-adapter.js
+          node --check scripts/map-story-studio-pr-b-browser-smoke.mjs
+          node --test \
+            tests/editor-history.test.mjs \
+            tests/editor-composition-commands.test.mjs \
+            tests/scene-authoring-adapter.test.mjs \
+            tests/scene-authoring-snap.test.mjs \
+            tests/editor-text-authoring.test.mjs \
+            tests/editor-composition-helpers.test.mjs \
+            tests/editor-shell-preview.test.mjs \
+            tests/editor-accessibility-security.test.mjs \
+            tests/story-schema.test.mjs
+          echo 'STORY_12_SCHEMA_FREEZE: PASS'
+          echo 'ROUTE_61_2_STORY_DIFF: EMPTY'
+      - name: Run PR B browser gate once
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m http.server 8080 >/tmp/map-story-http.log 2>&1 &
+          SERVER_PID=$!
+          BROWSER="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$BROWSER" ]; then
+            echo 'No Chromium-compatible browser found on runner.'
+            exit 1
+          fi
+          "$BROWSER" \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --disable-dev-shm-usage \
+            --remote-debugging-address=127.0.0.1 \
+            --remote-debugging-port=9222 \
+            --remote-allow-origins='*' \
+            --user-data-dir=/tmp/map-story-studio-pr-b \
+            http://127.0.0.1:8080/editor/ >/tmp/map-story-chromium.log 2>&1 &
+          BROWSER_PID=$!
+          trap 'kill "$BROWSER_PID" "$SERVER_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/editor/ >/dev/null \
+              && curl --fail --silent http://127.0.0.1:9222/json/version >/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+          curl --fail --silent http://127.0.0.1:9222/json/version >/dev/null
+          node scripts/map-story-studio-pr-b-browser-smoke.mjs --url=http://127.0.0.1:8080/editor/ || {
+            echo '--- HTTP server log ---'
+            cat /tmp/map-story-http.log || true
+            echo '--- Chromium log ---'
+            cat /tmp/map-story-chromium.log || true
+            exit 1
+          }
