@@ -114,8 +114,8 @@ export function createHistory({ read, write, limit = 100, onChange = () => {} } 
     markSaved,
     reset,
     status,
-    get canUndo() { return undoStack.length > 0; },
-    get canRedo() { return redoStack.length > 0; },
+    get canUndo() { sync(); return undoStack.length > 0; },
+    get canRedo() { sync(); return redoStack.length > 0; },
     get undoDepth() { return undoStack.length; },
     get redoDepth() { return redoStack.length; }
   });
