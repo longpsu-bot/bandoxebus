@@ -63,7 +63,7 @@ function baseStory() {
   };
 }
 
-function renderHarness({ selectedOverlayId = null } = {}) {
+function renderHarness() {
   resetStudioAuthoringSession();
   const elementsById = new Map();
   const documentRef = {
@@ -89,7 +89,7 @@ function renderHarness({ selectedOverlayId = null } = {}) {
   const previewToolbar = new Element('div');
   const roots = [navigation, inspector, scenesHost, previewToolbar];
   let current = baseStory();
-  let selected = selectedOverlayId;
+  let selected = null;
 
   function render() {
     mountStudioShell({
@@ -101,11 +101,9 @@ function renderHarness({ selectedOverlayId = null } = {}) {
       manifest: { id: 'fixture-project', datasets: {} },
       story: current,
       sceneIndex: 0,
-      selectedOverlayId: selected,
       onSelectOverlay(id) { selected = id; },
       onStoryCommand(name, payload) {
         current = applyStudioStoryCommand(current, name, payload);
-        if (name === 'add-text') selected = current.states[0].content.blocks.at(-1).id;
         render();
       },
       onPreviewCommand() {}
@@ -117,7 +115,6 @@ function renderHarness({ selectedOverlayId = null } = {}) {
     documentRef,
     get story() { return current; },
     get selected() { return selected; },
-    set selected(value) { selected = value; render(); },
     render
   };
 }
@@ -125,11 +122,11 @@ function renderHarness({ selectedOverlayId = null } = {}) {
 test('Studio Add Heading/Body creates valid Text envelopes and selection is UI-only', () => {
   const h = renderHarness();
   findButton(h.roots, 'Add Heading').click();
-  assert.equal(h.selected, 'heading');
   assert.deepEqual(h.story.states[0].content.blocks[0].block, { type: 'heading', text: 'Heading' });
   const afterHeading = JSON.stringify(h.story);
 
-  h.selected = null;
+  findButton(h.roots, 'heading').click();
+  assert.equal(h.selected, 'heading');
   assert.equal(JSON.stringify(h.story), afterHeading, 'selection must not mutate production Story');
   findButton(h.roots, 'Add Body Text').click();
   assert.deepEqual(h.story.states[0].content.blocks.map(({ block }) => block.type), ['heading', 'paragraph']);
