@@ -22,6 +22,7 @@ jobs:
       - name: Run test suite
         run: npm test
 
+  # Opt-in review-boundary gate; enabled only by the PR body marker.
   pr-b-certification:
     if: github.event_name == 'pull_request' && contains(github.event.pull_request.body, 'RUN_MAP_STORY_BROWSER_GATE=pr-b')
     runs-on: ubuntu-latest
