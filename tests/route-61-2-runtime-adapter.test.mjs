@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { createRoute612RuntimeAdapter } from '../src/route-61-2/runtime-adapter.js';
 import { selectRouteComparisonAdapter } from '../src/capabilities/route-comparison-v1.js';
+import { createRoute612Controls } from '../src/route-61-2/controls.js';
 
 const line = (coordinates) => ({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } }] });
 
@@ -58,4 +59,35 @@ test('trusted installed code loads Route 61-2 adapter only for the explicit sett
   assert.equal(await selectRouteComparisonAdapter({ adapter: 'other' }, context(), loadAdapter), null);
   assert.deepEqual(await selectRouteComparisonAdapter({ adapter: 'route-61-2-current' }, context(), loadAdapter), { id: 'adapter' });
   assert.deepEqual(loads, ['load']);
+});
+
+test('trusted Route controls mount mode, reveal, POI, urban, and simulation behavior into a neutral host', () => {
+  class Element {
+    constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; this.dataset = {}; this.textContent = ''; this.checked = false; this.value = ''; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    setAttribute() {}
+    addEventListener(type, listener) { this.listeners[type] = listener; }
+  }
+  const host = new Element('host');
+  const events = [];
+  createRoute612Controls({
+    host,
+    documentRef: { createElement: (tag) => new Element(tag) },
+    onMode: (mode) => events.push(['mode', mode]),
+    onReveal: (active) => events.push(['reveal', active]),
+    onPoi: (active) => events.push(['poi', active]),
+    onUrban: (active) => events.push(['urban', active]),
+    onSimulation: (active, speed) => events.push(['simulation', active, speed])
+  });
+  const nodes = (node) => [node, ...node.children.flatMap(nodes)];
+  const all = nodes(host);
+  for (const label of ['Existing', 'Proposed', 'Difference', 'Route reveal', 'POI emphasis', 'Urban context', 'Simulation']) {
+    assert.ok(all.some(({ textContent }) => textContent === label), label);
+  }
+  all.find(({ textContent }) => textContent === 'Existing').listeners.click();
+  const simulation = all.find(({ textContent }) => textContent === 'Simulation').children[0];
+  simulation.checked = true;
+  simulation.listeners.change();
+  assert.deepEqual(events, [['mode', 'existing'], ['simulation', true, 1]]);
 });

@@ -9,7 +9,7 @@ import { createStoryRuntime } from '../src/story-runtime.js';
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
 test('neutral runtime markup contains only generic map Story hosts', async () => {
-  const html = await read('../src/runtime/index.html');
+  const html = await read('../index.html');
   for (const id of ['map', 'scene-compositor', 'runtime-navigation', 'capability-controls', 'runtime-status', 'project-load-error']) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }

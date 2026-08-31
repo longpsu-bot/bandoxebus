@@ -1,3 +1,5 @@
+import { createRoute612Controls } from './controls.js';
+
 const adapters = new WeakMap();
 
 function resourceByRole(resources, role) {
@@ -43,6 +45,7 @@ export function createRoute612RuntimeAdapter(context = {}) {
   let contextMode = 'off';
   let simulation = Object.freeze({ active: false, speed: 1 });
   let destroyed = false;
+  let controls = null;
 
   const install = () => {
     installDataset(map, ids.existing, existingResource, {
@@ -146,12 +149,25 @@ export function createRoute612RuntimeAdapter(context = {}) {
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      controls?.destroy();
       for (const id of Object.values(ids).toReversed()) {
         if (map?.getLayer?.(id)) map.removeLayer?.(id);
         if (map?.getSource?.(id)) map.removeSource?.(id);
       }
     }
   };
+  if (context.capabilityControlHost) {
+    context.capabilityControlHost.hidden = false;
+    controls = createRoute612Controls({
+      host: context.capabilityControlHost,
+      documentRef: context.documentRef,
+      onMode: adapter.setMode,
+      onReveal: (active) => adapter.setRouteReveal(context.settings?.proposedRouteTarget ?? 'proposed-route', active),
+      onPoi: (active) => adapter.setPoiEmphasis(context.settings?.poiTarget ?? 'connection-pois', active),
+      onUrban: (active) => adapter.setContextMode(active ? 'industrial-context' : 'off'),
+      onSimulation: adapter.setSimulation
+    });
+  }
   return Object.freeze(adapter);
 }
 

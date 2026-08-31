@@ -45,11 +45,11 @@ function envelope(type, revision, payload = {}, requestId = `request-${revision}
   return { protocol: PREVIEW_PROTOCOL_VERSION, type: `editor-preview:${type}`, revision, requestId, payload };
 }
 
-test('preview source selection is version-driven and contains no GUI-only metadata', () => {
-  const sources = { legacy: '../?editorPreview=1', story12: '../src/runtime/?editorPreview=1' };
-  assert.equal(resolvePreviewSourceForSnapshot(snapshot('1.0'), sources), sources.legacy);
-  assert.equal(resolvePreviewSourceForSnapshot(snapshot('1.1'), sources), sources.legacy);
-  assert.equal(resolvePreviewSourceForSnapshot(snapshot('1.2'), sources), sources.story12);
+test('every supported Story version selects the same neutral production root without GUI-only metadata', () => {
+  const sources = { source: '../?editorPreview=1' };
+  assert.equal(resolvePreviewSourceForSnapshot(snapshot('1.0'), sources), sources.source);
+  assert.equal(resolvePreviewSourceForSnapshot(snapshot('1.1'), sources), sources.source);
+  assert.equal(resolvePreviewSourceForSnapshot(snapshot('1.2'), sources), sources.source);
   assert.throws(() => resolvePreviewSourceForSnapshot(snapshot('2.0'), sources), /unsupported Story preview version/i);
 });
 

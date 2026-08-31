@@ -42,7 +42,7 @@ export function createGenericStoryExperience({ runtime, sceneController, authori
   });
 }
 
-export function bindGenericStoryExperience({ runtime, map, sceneController, documentRef = document } = {}) {
+export function bindGenericStoryExperience({ runtime, map, sceneController, contentRenderer, documentRef = document } = {}) {
   const authoringPolicy = {
     apply(mode) {
       const enabled = mode === 'explore';
@@ -55,18 +55,44 @@ export function bindGenericStoryExperience({ runtime, map, sceneController, docu
   };
   const experience = createGenericStoryExperience({ runtime, sceneController, authoringPolicy });
   const status = documentRef.getElementById?.('runtime-status');
+  const navigation = documentRef.getElementById?.('runtime-navigation');
+  const contentRoot = documentRef.getElementById?.('scene-compositor');
   let started = false;
+
+  function renderState(state) {
+    if (!sceneController && contentRenderer && contentRoot && state) contentRenderer.render(contentRoot, state);
+    if (status && state) status.textContent = `Scene ${runtime.currentIndex + 1} of ${runtime.definition.states.length}`;
+  }
+
+  const shell = Object.freeze({
+    enter() { const state = experience.enter(); renderState(state); return state; },
+    activateScene(index, options) { const state = experience.activateScene(index, options); renderState(state); return state; },
+    setAuthoringMode: experience.setAuthoringMode,
+    restoreSceneCamera: experience.restoreSceneCamera,
+    exit() { return experience.exit(); },
+    destroy() { navigation?.replaceChildren?.(); return experience.destroy(); }
+  });
+
+  if (navigation?.replaceChildren && runtime.definition.states.length > 1) {
+    const previous = documentRef.createElement('button');
+    previous.type = 'button'; previous.textContent = 'Previous';
+    previous.addEventListener('click', () => shell.activateScene(Math.max(0, runtime.currentIndex - 1)));
+    const next = documentRef.createElement('button');
+    next.type = 'button'; next.textContent = 'Next';
+    next.addEventListener('click', () => shell.activateScene(Math.min(runtime.definition.states.length - 1, runtime.currentIndex + 1)));
+    navigation.replaceChildren(previous, next);
+    navigation.hidden = false;
+  }
 
   function start() {
     if (started) return;
     started = true;
-    experience.enter();
-    if (status) status.textContent = 'Ready';
+    shell.enter();
   }
 
   if (map?.loaded?.()) start();
   else if (map?.once) map.once('load', start);
   else start();
 
-  return experience;
+  return shell;
 }

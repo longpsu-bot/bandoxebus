@@ -417,9 +417,8 @@ test('static editor shell and production preview mode expose only the PR A spine
   assert.match(html, /id="dirty-status"/);
   assert.match(css, /preview-frame--mobile/);
   assert.doesNotMatch(editorSource, /innerHTML/);
-  assert.match(appSource, /get\(['"]editorPreview['"]\)\s*===\s*['"]1['"]/);
-  assert.match(appSource, /startEditorPreviewHost/);
-  assert.match(appSource, /return startProductionApplication\(\)/);
+  assert.match(appSource, /runtime\/generic-app\.js/);
+  assert.doesNotMatch(appSource, /route-61-2|route-data|route-comparison/);
   assert.match(smokeSource, /project-locale/);
   assert.doesNotMatch(smokeSource, /project-title/);
 });

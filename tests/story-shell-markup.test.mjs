@@ -5,41 +5,26 @@ import { readFile } from 'node:fs/promises';
 const htmlUrl = new URL('../index.html', import.meta.url);
 const cssUrl = new URL('../styles.css', import.meta.url);
 
-test('POC shell markup exposes semantic generated-content and button boundaries', async () => {
+test('neutral production shell exposes generic map, composition, navigation, controls, and status hosts', async () => {
   const html = await readFile(htmlUrl, 'utf8');
-  assert.match(html, /<section id="story-shell"[^>]*hidden/);
-  assert.match(html, /id="story-shell-steps"/);
-  assert.match(html, /<button id="story-previous"[^>]*type="button"/);
-  assert.match(html, /<button id="story-next"[^>]*type="button"/);
-  assert.match(html, /<button id="story-explore"[^>]*type="button"[^>]*>\s*Khám phá bản đồ/);
-  assert.match(html, /id="story-progress-current"/);
-  assert.match(html, /id="story-progress-total"/);
-  assert.doesNotMatch(html, /data-story-state-id=/);
+  for (const id of ['map', 'scene-compositor', 'runtime-navigation', 'capability-controls', 'runtime-status']) {
+    assert.match(html, new RegExp(`id=["']${id}["']`), id);
+  }
+  assert.match(html, /<script type="module" src="\.\/src\/app\.js"/);
+  assert.doesNotMatch(html, /61-2|Existing|Proposed|Difference|simulation|industrial/i);
 });
 
-test('POC CSS uses responsive capability queries and reduced motion without user agents', async () => {
+test('neutral shell CSS keeps 16:9 composition, contained images, touch targets, responsiveness, and reduced motion', async () => {
   const css = await readFile(cssUrl, 'utf8');
-  assert.match(css, /body\.is-story-shell/);
-  assert.match(css, /@media[^\{]*(max-width|max-height|pointer)/);
-  assert.match(css, /prefers-reduced-motion/);
+  assert.match(css, /#scene-compositor[^}]*aspect-ratio:\s*16\s*\/\s*9/s);
+  assert.match(css, /\.scene-overlay img[^}]*object-fit:\s*contain/s);
   assert.match(css, /min-height:\s*44px/);
+  assert.match(css, /@media[^\{]*max-width/);
+  assert.match(css, /prefers-reduced-motion/);
   assert.doesNotMatch(css, /iPhone|Android|Windows Phone/i);
 });
 
-test('story step positioning overrides follow the shared presentation renderer rules', async () => {
-  const css = await readFile(cssUrl, 'utf8');
-  assert.ok(
-    css.lastIndexOf('.story-step__content {') > css.lastIndexOf('.presentation-content {'),
-    'the shell positioning override must win over the shared renderer absolute positioning'
-  );
-});
-
-test('active story mode removes the hidden legacy panel from overflow layout', async () => {
-  const css = await readFile(cssUrl, 'utf8');
-  assert.match(css, /body\.is-story-shell \.panel\s*\{[^}]*display:\s*none/);
-});
-
-test('Story 1.1 content has scoped responsive table, chart, image, and legend rules', async () => {
+test('legacy semantic content keeps scoped table, chart, image, and legend layout rules', async () => {
   const css = await readFile(cssUrl, 'utf8');
   for (const name of ['content-table', 'content-chart', 'content-image', 'content-legend']) assert.match(css, new RegExp(`\\.${name}`));
   assert.match(css, /\.content-table[^}]*overflow-x:\s*auto/s);
