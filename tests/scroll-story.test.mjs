@@ -15,6 +15,10 @@ class TestElement {
     this.listeners = new Map();
     this.hidden = true;
     this.className = '';
+    this.style = {
+      position: '', inset: '', display: '', overflowY: '', width: '', height: '',
+      scrollSnapType: '', minHeight: '', scrollSnapAlign: ''
+    };
   }
 
   append(...children) { this.children.push(...children); }
@@ -166,6 +170,25 @@ test('cooperative map gestures do not trap normal page scrolling', () => {
   assert.equal(f.root.listenerCount('touchmove'), 0);
   assert.equal(f.windowRef.listenerCount('wheel'), 0);
   assert.equal(f.windowRef.listenerCount('touchmove'), 0);
+});
+
+test('Scroll Story owns a viewport scroll surface and restores neutral layout on exit', () => {
+  const f = fixture();
+  f.root.style.position = 'fixed';
+  f.root.style.inset = 'auto 16px 16px auto';
+  f.navigation.enter();
+
+  assert.equal(f.root.style.position, 'fixed');
+  assert.equal(f.root.style.inset, '0');
+  assert.equal(f.root.style.overflowY, 'auto');
+  assert.equal(f.root.style.height, '100vh');
+  assert.equal(f.navigation.sections.every(({ style }) => style.minHeight === '100vh'), true);
+
+  f.navigation.exit();
+  assert.equal(f.root.style.position, 'fixed');
+  assert.equal(f.root.style.inset, 'auto 16px 16px auto');
+  assert.equal(f.root.style.overflowY, '');
+  assert.deepEqual(f.root.children, []);
 });
 
 test('adapter creation does not construct a MapLibre map', () => {

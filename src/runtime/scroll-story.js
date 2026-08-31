@@ -1,4 +1,7 @@
 const OBSERVER_THRESHOLDS = Object.freeze([0, 0.25, 0.5, 0.75, 1]);
+const ROOT_STYLE_PROPERTIES = Object.freeze([
+  'position', 'inset', 'display', 'overflowY', 'width', 'height', 'scrollSnapType'
+]);
 
 function selectActiveIndex(entries, viewportHeight) {
   const activationLine = viewportHeight * 0.45;
@@ -25,6 +28,7 @@ function createSteps(states, documentRef) {
     section.dataset.sceneIndex = String(index);
     section.setAttribute('aria-label', `Scene ${index + 1} of ${states.length}`);
     section.setAttribute('aria-current', 'false');
+    Object.assign(section.style, { minHeight: '100vh', scrollSnapAlign: 'center' });
     return section;
   });
 }
@@ -50,6 +54,7 @@ export function createScrollStoryNavigation({
   let active = false;
   let observer = null;
   let sections = [];
+  let rootSnapshot = null;
   const visibleEntries = new Map();
 
   function updateCurrent(index) {
@@ -84,8 +89,22 @@ export function createScrollStoryNavigation({
   function enter() {
     if (active) return runtime.currentState;
     active = true;
+    rootSnapshot = {
+      className: root.className,
+      styles: Object.fromEntries(ROOT_STYLE_PROPERTIES.map((name) => [name, root.style[name]]))
+    };
     sections = createSteps(runtime.definition.states, documentRef);
     root.replaceChildren(...sections);
+    root.className = `${root.className} scroll-story-navigation`.trim();
+    Object.assign(root.style, {
+      position: 'fixed',
+      inset: '0',
+      display: 'block',
+      overflowY: 'auto',
+      width: '100%',
+      height: '100vh',
+      scrollSnapType: 'y proximity'
+    });
     root.hidden = false;
     root.addEventListener('click', handleClick);
     observer = observerFactory(handleIntersection, { threshold: OBSERVER_THRESHOLDS });
@@ -102,8 +121,13 @@ export function createScrollStoryNavigation({
     observer = null;
     visibleEntries.clear();
     root.removeEventListener('click', handleClick);
+    root.replaceChildren();
     root.hidden = true;
-    return experience.exit();
+    const state = experience.exit();
+    root.className = rootSnapshot.className;
+    Object.assign(root.style, rootSnapshot.styles);
+    rootSnapshot = null;
+    return state;
   }
 
   return Object.freeze({
