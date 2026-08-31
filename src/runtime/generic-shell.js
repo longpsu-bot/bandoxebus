@@ -1,3 +1,5 @@
+import { createScrollStoryNavigation } from './scroll-story.js';
+
 export function createGenericStoryExperience({ runtime, sceneController, authoringPolicy } = {}) {
   if (!runtime?.activate || !runtime?.goTo || !runtime?.deactivate) {
     throw new TypeError('Generic Story experience requires the production Story runtime.');
@@ -42,7 +44,16 @@ export function createGenericStoryExperience({ runtime, sceneController, authori
   });
 }
 
-export function bindGenericStoryExperience({ runtime, map, sceneController, contentRenderer, documentRef = document } = {}) {
+export function bindGenericStoryExperience({
+  runtime,
+  map,
+  sceneController,
+  contentRenderer,
+  documentRef = document,
+  windowRef = window,
+  outputMode = 'explore',
+  observerFactory
+} = {}) {
   const authoringPolicy = {
     apply(mode) {
       const enabled = mode === 'explore';
@@ -58,22 +69,43 @@ export function bindGenericStoryExperience({ runtime, map, sceneController, cont
   const navigation = documentRef.getElementById?.('runtime-navigation');
   const contentRoot = documentRef.getElementById?.('scene-compositor');
   let started = false;
+  let outputAdapter = null;
 
   function renderState(state) {
     if (!sceneController && contentRenderer && contentRoot && state) contentRenderer.render(contentRoot, state);
     if (status && state) status.textContent = `Scene ${runtime.currentIndex + 1} of ${runtime.definition.states.length}`;
   }
 
+  function enterExplore() {
+    const state = experience.enter();
+    renderState(state);
+    return state;
+  }
+
   const shell = Object.freeze({
-    enter() { const state = experience.enter(); renderState(state); return state; },
+    get outputMode() { return outputMode; },
+    enter() { return outputAdapter ? outputAdapter.enter() : enterExplore(); },
     activateScene(index, options) { const state = experience.activateScene(index, options); renderState(state); return state; },
     setAuthoringMode: experience.setAuthoringMode,
     restoreSceneCamera: experience.restoreSceneCamera,
-    exit() { return experience.exit(); },
-    destroy() { navigation?.replaceChildren?.(); return experience.destroy(); }
+    exit() { return outputAdapter ? outputAdapter.exit() : experience.exit(); },
+    destroy() {
+      outputAdapter?.destroy();
+      navigation?.replaceChildren?.();
+      return experience.destroy();
+    }
   });
 
-  if (navigation?.replaceChildren && runtime.definition.states.length > 1) {
+  if (outputMode === 'scroll') {
+    outputAdapter = createScrollStoryNavigation({
+      runtime,
+      experience,
+      root: navigation,
+      documentRef,
+      windowRef,
+      ...(observerFactory ? { observerFactory } : {})
+    });
+  } else if (navigation?.replaceChildren && runtime.definition.states.length > 1) {
     const previous = documentRef.createElement('button');
     previous.type = 'button'; previous.textContent = 'Previous';
     previous.addEventListener('click', () => shell.activateScene(Math.max(0, runtime.currentIndex - 1)));
