@@ -75,3 +75,14 @@ test('editor-style instant apply can reuse the same baseline without authored tr
   controller.apply(state('fly', 3000), { animate: false });
   assert.deepEqual(events.map(([type]) => type), ['layers', 'interaction', 'compositor', 'jumpTo']);
 });
+
+test('editor camera restoration jumps only the saved camera', () => {
+  const { events, controller } = fixture();
+
+  controller.restoreCamera(state('fly', 3000));
+
+  assert.deepEqual(events, [[
+    'jumpTo',
+    { center: [106.63, 11.06], zoom: 12, pitch: 35, bearing: -10 }
+  ]]);
+});

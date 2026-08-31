@@ -36,13 +36,18 @@ export function createSceneStateController({
     return state;
   }
 
-  function beforeEnter(state) {
-    return apply(state, { animate: true });
+  function beforeEnter(state, { animate = true } = {}) {
+    return apply(state, { animate });
+  }
+
+  function restoreCamera(state) {
+    map.jumpTo?.(cameraOptions(state.map.camera));
+    return state;
   }
 
   function afterExit() {
     map.stop?.();
   }
 
-  return Object.freeze({ apply, beforeEnter, afterExit });
+  return Object.freeze({ apply, beforeEnter, restoreCamera, afterExit });
 }

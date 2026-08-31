@@ -26,11 +26,11 @@ export function createStoryRuntime({ definition, actionRunner, lifecycle = {} })
     return clamp(Math.trunc(numericTarget), 0, definition.states.length - 1);
   }
 
-  function contextFor(phase, fromState, toState, state, index) {
-    return Object.freeze({ definition, phase, fromState, toState, state, index });
+  function contextFor(phase, fromState, toState, state, index, { animate = true } = {}) {
+    return Object.freeze({ definition, phase, fromState, toState, state, index, animate });
   }
 
-  function goTo(target) {
+  function goTo(target, { animate = true } = {}) {
     const nextIndex = resolveIndex(target);
     const oldState = definition.states[currentIndex];
     const nextState = definition.states[nextIndex];
@@ -46,7 +46,9 @@ export function createStoryRuntime({ definition, actionRunner, lifecycle = {} })
 
     currentIndex = nextIndex;
     active = true;
-    const enterContext = contextFor('enter', wasActive ? oldState : null, nextState, nextState, currentIndex);
+    const enterContext = contextFor(
+      'enter', wasActive ? oldState : null, nextState, nextState, currentIndex, { animate }
+    );
     beforeEnter(nextState, enterContext);
     actionRunner.run(nextState.map.enter, enterContext);
     return nextState;
@@ -58,8 +60,8 @@ export function createStoryRuntime({ definition, actionRunner, lifecycle = {} })
     get currentIndex() { return currentIndex; },
     get currentState() { return definition.states[currentIndex]; },
     get currentContent() { return definition.states[currentIndex].content; },
-    activate(target = currentIndex) {
-      return goTo(target);
+    activate(target = currentIndex, options) {
+      return goTo(target, options);
     },
     deactivate() {
       const state = definition.states[currentIndex];

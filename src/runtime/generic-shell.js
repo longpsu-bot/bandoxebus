@@ -9,9 +9,9 @@ export function createGenericStoryExperience({ runtime, sceneController, authori
   }
 
   function activateScene(index, { animate = true } = {}) {
-    const state = runtime.active ? runtime.goTo(index) : runtime.activate(index);
-    if (!animate) sceneController?.apply?.(state, { animate: false });
-    return state;
+    return runtime.active
+      ? runtime.goTo(index, { animate })
+      : runtime.activate(index, { animate });
   }
 
   function setAuthoringMode(mode) {
@@ -23,7 +23,7 @@ export function createGenericStoryExperience({ runtime, sceneController, authori
   function restoreSceneCamera(index = runtime.currentIndex) {
     const state = runtime.definition.states[index];
     if (!state) throw new RangeError(`Unknown Scene index: ${index}.`);
-    sceneController?.apply?.(state, { animate: false });
+    sceneController?.restoreCamera?.(state);
     return state;
   }
 

@@ -3,6 +3,8 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
 import { createGenericStoryExperience } from '../src/runtime/generic-shell.js';
+import { createStoryActionRunner } from '../src/story-action-runner.js';
+import { createStoryRuntime } from '../src/story-runtime.js';
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
@@ -41,4 +43,63 @@ test('generic Story experience activates one existing runtime and supports direc
   experience.activateScene(1);
   experience.exit();
   assert.deepEqual(events, [['activate', 0], ['goTo', 1], ['deactivate']]);
+});
+
+test('editor instant Scene activation applies its baseline once before Enter actions', () => {
+  const events = [];
+  const definition = {
+    states: [{
+      id: 'opening',
+      content: { layout: 'freeform-16x9', blocks: [] },
+      map: { enter: [{ type: 'record' }], exit: [] }
+    }]
+  };
+  const sceneController = {
+    beforeEnter(_state, context) { events.push(['baseline', context.animate]); },
+    afterExit() {},
+    apply() { events.push(['late-baseline']); }
+  };
+  const runtime = createStoryRuntime({
+    definition,
+    actionRunner: createStoryActionRunner({ record() { events.push(['enter-action']); } }),
+    lifecycle: {
+      beforeEnter: sceneController.beforeEnter,
+      afterExit: sceneController.afterExit
+    }
+  });
+  const experience = createGenericStoryExperience({ runtime, sceneController });
+
+  experience.activateScene(0, { animate: false });
+
+  assert.deepEqual(events, [
+    ['baseline', false],
+    ['enter-action']
+  ]);
+});
+
+test('Restore Saved Camera uses the camera-only operation and preserves Map mode', () => {
+  const events = [];
+  const runtime = {
+    active: true,
+    currentIndex: 0,
+    currentState: { id: 'opening' },
+    definition: { states: [{ id: 'opening' }] },
+    activate() {}, goTo() {}, deactivate() {}
+  };
+  const sceneController = {
+    apply() { events.push(['full-baseline']); },
+    restoreCamera(state) { events.push(['camera', state.id]); }
+  };
+  const authoringPolicy = {
+    apply(mode) { events.push(['mode', mode]); }
+  };
+  const experience = createGenericStoryExperience({ runtime, sceneController, authoringPolicy });
+
+  experience.setAuthoringMode('map');
+  experience.restoreSceneCamera(0);
+
+  assert.deepEqual(events, [
+    ['mode', 'explore'],
+    ['camera', 'opening']
+  ]);
 });
