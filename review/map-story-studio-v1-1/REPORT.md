@@ -5,9 +5,12 @@
 - Branch: `feat/map-story-studio-v1-1-outputs-certification`
 - PR-D base SHA: `9695c07b85dcf1e5e0d46e182edcfc0793695da2`
 - Evidence HEAD when this report was started: `d5f2abb3e6e193e508ec5d22381fb3145faf5d24`
-- Final PR head: pending Draft PR creation
-- Story 1.2 schema freeze: pending final architecture audit
-- Canonical Route Story diff/hash: pending final architecture audit
+- D4 browser evidence commit: `0484c13516a018cde2b478bb8cf227c6dd502008`
+- Exact HEAD at D5 report finalization time, before the report/docs commit: `0484c13516a018cde2b478bb8cf227c6dd502008`
+- Final PR head: recorded in the Draft PR metadata/body after the documentation commit
+- Story 1.2 schema freeze: PASS — diff from the required base is empty
+- Canonical Route Story diff: EMPTY
+- Canonical Route Story SHA-256: `29597ee58773b13ff9db6eaf3c328240f6bfa85f9bf7161cdca7b20ad55b373a`
 
 ## Certified evidence
 
@@ -98,3 +101,17 @@ Raw performance evidence, sampled once per viewport by the final successful gate
 ## Known non-blocking limitations
 
 The single 1920×1080 headless sample was about 13.08 FPS and was not consistent with smooth 60-FPS-class settled behavior in this environment; the single 1366×768 sample was about 58.74 FPS and was consistent with that class. Hardware/headless scheduling variance was not used as an unrelated correctness threshold. The raw durations, frame counts, map counts, modes, and environment are authoritative; no performance PASS threshold was fabricated.
+
+## D5 architecture audit
+
+- Story/schema freeze command: `git diff --exit-code 9695c07b85dcf1e5e0d46e182edcfc0793695da2 -- data/schemas/story-1.2.schema.json data/stories/route-61-2.story.json`
+- Story/schema freeze result: PASS, empty diff
+- canonical Route hash: PASS, exact expected SHA-256
+- neutrality command: `node --test tests/special-capability-boundary.test.mjs tests/generic-shell-neutrality.test.mjs`
+- neutrality result: 7 tests, 7 pass, 0 fail
+- direct Route dependency search over `index.html`, `src/runtime`, `src/scene`, and `src/app.js`: no matches
+- Layer authoring search: one match in `editor/editor.js` registering the existing `map.set-visibility` advanced/legacy action target catalog; the Story 1.2 Layers UI writes complete `layerVisibility` snapshots and does not create those actions
+- unsafe sink search over `editor`, `src/scene`, and `src/runtime`: no `innerHTML`, `eval(`, or `new Function` matches
+- branch diff cleanliness against `origin/main...HEAD`: PASS
+- generic Blank Route-module loads: NONE
+- GUI-only schema: NONE

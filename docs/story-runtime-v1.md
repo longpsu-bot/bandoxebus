@@ -56,3 +56,21 @@ GitHub Actions runs the authoritative dependency-free source/runtime/unit/config
 ## Responsive and future-editor rules
 
 There is one story definition for all viewport sizes. Responsive rendering and camera padding remain renderer concerns; an optional semantic focus target plus bounded camera overrides avoids separate desktop/mobile stories. Editor-only UI state does not belong in the schema. GUI Editor V1 must manipulate and preview the same production manifest, Story, resource, metric, and capability descriptors; it may not introduce a parallel GUI-only schema or translation layer.
+
+## Additive V1.1 shared output lifecycle
+
+Map Story Studio V1.1 certifies Story 1.2 as an additive production vocabulary. Each ordered Story state is a Scene with `freeform-16x9` composition envelopes and explicit map camera, interaction, transition, complete layer snapshot, enter actions, and exit actions. Story order remains the sole navigation order; Scene IDs still carry identity, not runtime behavior.
+
+Story 1.2 uses the existing Story runtime with one shared Scene-state controller. Before a Scene enters, the controller restores its complete declarative layer baseline, applies its interaction policy, and selects the authored camera primitive (`flyTo`, `easeTo`, or `jumpTo`, with reduced motion collapsing animated transitions to `jumpTo`). After exit it cancels transient camera motion without adding output state to the Story. The shared compositor renders production semantic blocks inside the Scene's normalized 16:9 envelopes.
+
+Output authority stays deliberately narrow:
+
+- Explore is the neutral direct-navigation shell;
+- Scroll Story owns native document activation and cooperative gesture policy only;
+- Presentation owns stage fitting, buttons, keyboard/Page navigation, Escape, and resize only;
+- neither adapter owns a second Story runtime, Scene controller, compositor, map, schema, or saved output mode; and
+- all active outputs reuse one production Story and exactly one active MapLibre map.
+
+The editor preview and both outputs launch only production-loader-validated snapshots. A valid unsaved revision may launch without Save. When the current draft is fatally invalid, output commands can launch the explicitly labeled previous valid revision but cannot launch or silently repair the invalid bytes.
+
+Folder and ZIP persistence serialize production project resources only. Authoring selection, guides, handles, undo/redo history, output choice, and uncaptured camera state remain outside the persisted contract. The certified evidence and architecture audit are recorded in `review/map-story-studio-v1-1/REPORT.md`.
