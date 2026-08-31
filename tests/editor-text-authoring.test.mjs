@@ -167,6 +167,22 @@ test('Text Properties expose approved appearance controls without normalized fra
   assert.equal(envelope.appearance.box.fill, '#112233AA');
 });
 
+test('Shift multi-selection survives Studio rerender and enables alignment', () => {
+  const h = renderHarness();
+  findButton(h.roots, 'Add Heading').click();
+  findButton(h.roots, 'Add Body Text').click();
+
+  findButton(h.roots, 'heading').click();
+  findButton(h.roots, 'body-text').dispatch('click', { shiftKey: true });
+  const align = findButton(h.roots, 'Align Left');
+  assert.ok(align, 'Align Left exists after selecting Text objects');
+  assert.equal(align.disabled, false, 'two-object selection must survive the rerender');
+  align.click();
+
+  const [heading, body] = h.story.states[0].content.blocks;
+  assert.equal(heading.frame.x, body.frame.x);
+});
+
 test('preview frame/text intents and UI commands share history, then undo/redo exact Story state', () => {
   let current = baseStory();
   const history = createHistory({ read: () => current, write(next) { current = structuredClone(next); } });
