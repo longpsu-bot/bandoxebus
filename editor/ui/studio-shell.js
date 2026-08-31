@@ -108,7 +108,7 @@ function normalizeSelection() {
 function rerenderActive() {
   if (!activeStudio) return;
   normalizeSelection();
-  mountStudioShell({ ...activeStudio, selectedOverlayId });
+  mountStudioShell({ ...activeStudio });
 }
 
 function ensureHistory(context) {
