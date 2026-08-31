@@ -90,6 +90,7 @@ function renderHarness() {
   const roots = [navigation, inspector, scenesHost, previewToolbar];
   let current = baseStory();
   let selected = null;
+  let activeSceneIndex = 0;
 
   function render() {
     mountStudioShell({
@@ -100,7 +101,11 @@ function renderHarness() {
       previewToolbar,
       manifest: { id: 'fixture-project', datasets: {} },
       story: current,
-      sceneIndex: 0,
+      sceneIndex: activeSceneIndex,
+      onSelectScene(index) {
+        activeSceneIndex = index;
+        render();
+      },
       onSelectOverlay(id) { selected = id; },
       onStoryCommand(name, payload) {
         current = applyStudioStoryCommand(current, name, payload);
@@ -115,6 +120,7 @@ function renderHarness() {
     documentRef,
     get story() { return current; },
     get selected() { return selected; },
+    get sceneIndex() { return activeSceneIndex; },
     render
   };
 }
@@ -181,6 +187,18 @@ test('Shift multi-selection survives Studio rerender and enables alignment', () 
 
   const [heading, body] = h.story.states[0].content.blocks;
   assert.equal(heading.frame.x, body.frame.x);
+});
+
+test('history-wrapped Scene creation preserves PR A new-Scene selection and empty composition', () => {
+  const h = renderHarness();
+  findButton(h.roots, 'Add Heading').click();
+  assert.equal(h.sceneIndex, 0);
+
+  findButton(h.roots, 'Add Scene').click();
+
+  assert.equal(h.story.states.length, 2);
+  assert.equal(h.sceneIndex, 1, 'new Scene should become the active authored Scene');
+  assert.deepEqual(h.story.states[1].content.blocks, [], 'new Scene starts with an empty composition');
 });
 
 test('preview frame/text intents and UI commands share history, then undo/redo exact Story state', () => {
