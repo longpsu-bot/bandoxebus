@@ -265,6 +265,11 @@ try {
   })()`);
   if (Math.abs(aligned.a - aligned.b) > 1e-9) throw new Error(`Alignment did not persist: ${JSON.stringify(aligned)}`);
 
+  const zBefore = await evaluate(client, `(() => {
+    const child = document.getElementById('production-preview').contentDocument;
+    const value = (id) => Number(child.querySelector('[data-scene-overlay-id="' + id + '"]').dataset.sceneFrameZ);
+    return { heading: value('heading'), body: value('body-text'), copy: value('heading-copy') };
+  })()`);
   await evaluate(client, `(() => {
     const heading = [...document.querySelectorAll('.studio-object-list button')].find((button) => button.textContent.trim() === 'heading');
     heading.click();
@@ -276,31 +281,29 @@ try {
   revision = await waitRevision(client, revision, 'z-order revision');
   const zForward = await evaluate(client, `(() => {
     const child = document.getElementById('production-preview').contentDocument;
-    const a = child.querySelector('[data-scene-overlay-id="heading"]');
-    const b = child.querySelector('[data-scene-overlay-id="heading-copy"]');
-    return [Number(a.dataset.sceneFrameZ), Number(b.dataset.sceneFrameZ)];
+    const value = (id) => Number(child.querySelector('[data-scene-overlay-id="' + id + '"]').dataset.sceneFrameZ);
+    return { heading: value('heading'), body: value('body-text'), copy: value('heading-copy') };
   })()`);
-  if (!(zForward[0] > zForward[1])) throw new Error(`Bring Forward did not change z-order: ${JSON.stringify(zForward)}`);
+  if (!(zForward.heading > zBefore.heading)) throw new Error(`Bring Forward did not advance one z-order step: ${JSON.stringify({ zBefore, zForward })}`);
+  if (zForward.copy !== zBefore.copy) throw new Error(`Bring Forward incorrectly changed the top object: ${JSON.stringify({ zBefore, zForward })}`);
 
   await evaluate(client, clickButton('Undo'));
   revision = await waitRevision(client, revision, 'Undo revision');
   const zUndo = await evaluate(client, `(() => {
     const child = document.getElementById('production-preview').contentDocument;
-    const a = child.querySelector('[data-scene-overlay-id="heading"]');
-    const b = child.querySelector('[data-scene-overlay-id="heading-copy"]');
-    return [Number(a.dataset.sceneFrameZ), Number(b.dataset.sceneFrameZ)];
+    const value = (id) => Number(child.querySelector('[data-scene-overlay-id="' + id + '"]').dataset.sceneFrameZ);
+    return { heading: value('heading'), body: value('body-text'), copy: value('heading-copy') };
   })()`);
-  if (!(zUndo[0] < zUndo[1])) throw new Error(`Undo did not restore z-order: ${JSON.stringify(zUndo)}`);
+  if (JSON.stringify(zUndo) !== JSON.stringify(zBefore)) throw new Error(`Undo did not restore one-step z-order: ${JSON.stringify({ zBefore, zUndo })}`);
 
   await evaluate(client, clickButton('Redo'));
   revision = await waitRevision(client, revision, 'Redo revision');
   const zRedo = await evaluate(client, `(() => {
     const child = document.getElementById('production-preview').contentDocument;
-    const a = child.querySelector('[data-scene-overlay-id="heading"]');
-    const b = child.querySelector('[data-scene-overlay-id="heading-copy"]');
-    return [Number(a.dataset.sceneFrameZ), Number(b.dataset.sceneFrameZ)];
+    const value = (id) => Number(child.querySelector('[data-scene-overlay-id="' + id + '"]').dataset.sceneFrameZ);
+    return { heading: value('heading'), body: value('body-text'), copy: value('heading-copy') };
   })()`);
-  if (!(zRedo[0] > zRedo[1])) throw new Error(`Redo did not restore z-order: ${JSON.stringify(zRedo)}`);
+  if (JSON.stringify(zRedo) !== JSON.stringify(zForward)) throw new Error(`Redo did not restore one-step z-order: ${JSON.stringify({ zForward, zRedo })}`);
 
   const persistedFrame = await previewFrame(client, 'heading');
   await evaluate(client, clickButton('Add Scene'));
