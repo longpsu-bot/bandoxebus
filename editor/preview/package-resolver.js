@@ -1,4 +1,5 @@
 import { PREVIEW_PROTOCOL_VERSION, validatePreviewSnapshot } from './bridge.js';
+import { createSceneAuthoringAdapter } from '../../src/scene/scene-authoring-adapter.js';
 
 const DEFAULT_PACKAGE_ORIGIN = globalThis.location?.origin ?? 'http://localhost';
 
@@ -155,6 +156,7 @@ export function startEditorPreviewHost({
   let disposed = false;
   let replacement = Promise.resolve();
   let removeCameraListener = null;
+  let activeAuthoringAdapter = null;
 
   function post(type, revision = activeSnapshot?.revision ?? 0, payload = {}, requestId = null) {
     windowRef.parent?.postMessage({
@@ -166,8 +168,14 @@ export function startEditorPreviewHost({
     }, expectedOrigin);
   }
 
+  function destroyAuthoringAdapter() {
+    activeAuthoringAdapter?.destroy?.();
+    activeAuthoringAdapter = null;
+  }
+
   async function replace(snapshot, requestId = null) {
     if (disposed) return;
+    destroyAuthoringAdapter();
     removeCameraListener?.();
     removeCameraListener = null;
     await activeRuntime?.destroy?.();
@@ -195,6 +203,17 @@ export function startEditorPreviewHost({
       activeSnapshot = structuredClone(snapshot);
       activeResolver = resolver;
       activeRuntime = runtime;
+      if (runtime?.project?.story?.schemaVersion === '1.2') {
+        const root = windowRef.document?.getElementById?.('scene-compositor');
+        if (root) {
+          activeAuthoringAdapter = createSceneAuthoringAdapter({
+            root,
+            documentRef: windowRef.document,
+            emit(type, payload) { post(type, snapshot.revision, payload); }
+          });
+          activeAuthoringAdapter.setMode('select');
+        }
+      }
       post('loaded', snapshot.revision, {}, requestId);
       const map = runtime?.map;
       const postCamera = () => {
@@ -218,6 +237,7 @@ export function startEditorPreviewHost({
         removeCameraListener = () => map.off('moveend', postCamera);
       }
     } catch (error) {
+      destroyAuthoringAdapter();
       resolver.revoke();
       post('runtime-error', snapshot.revision, toRuntimeErrorPayload(error), requestId);
       throw error;
@@ -245,8 +265,14 @@ export function startEditorPreviewHost({
       if (root?.dataset) root.dataset.reducedMotion = String(viewport.reducedMotion);
       post('state', activeSnapshot?.revision ?? 0, { viewport }, data.requestId);
     }
-    else if (name === 'activate-scene') activeRuntime?.shell?.activateScene?.(payload.index, { animate: payload.animate });
-    else if (name === 'authoring-mode') activeRuntime?.shell?.setAuthoringMode?.(payload.mode);
+    else if (name === 'activate-scene') {
+      activeRuntime?.shell?.activateScene?.(payload.index, { animate: payload.animate });
+      activeAuthoringAdapter?.clearSelection?.();
+    }
+    else if (name === 'authoring-mode') {
+      activeRuntime?.shell?.setAuthoringMode?.(payload.mode);
+      activeAuthoringAdapter?.setMode?.(payload.mode);
+    }
     else if (name === 'restore-scene-camera') activeRuntime?.shell?.restoreSceneCamera?.(payload.index);
   }
 
@@ -277,6 +303,7 @@ export function startEditorPreviewHost({
     disposed = true;
     windowRef.removeEventListener('message', handleMessage);
     replacement = replacement.then(async () => {
+      destroyAuthoringAdapter();
       removeCameraListener?.();
       removeCameraListener = null;
       await activeRuntime?.destroy?.();

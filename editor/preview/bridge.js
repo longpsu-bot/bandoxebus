@@ -7,12 +7,16 @@ const EVENT_TYPES = new Set([
   'editor-preview:loaded',
   'editor-preview:runtime-error',
   'editor-preview:state',
-  'editor-preview:camera'
+  'editor-preview:camera',
+  'editor-preview:select-overlay',
+  'editor-preview:commit-frame',
+  'editor-preview:commit-text'
 ]);
 const START_RESPONSE_TYPES = new Set([
   'editor-preview:loaded',
   'editor-preview:runtime-error'
 ]);
+const STABLE_ID = /^[a-z][a-z0-9-]*$/;
 
 function isRecord(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -46,6 +50,19 @@ function validRuntimeError(payload) {
     && typeof payload.message === 'string' && payload.message.length <= 4096;
 }
 
+function validOverlayId(value) {
+  return typeof value === 'string' && value.length <= 128 && STABLE_ID.test(value);
+}
+
+function validFrame(frame) {
+  if (!hasExactKeys(frame, ['x', 'y', 'width', 'height', 'z'])) return false;
+  if (![frame.x, frame.y, frame.width, frame.height].every(Number.isFinite)) return false;
+  if (frame.x < 0 || frame.y < 0 || frame.width <= 0 || frame.height <= 0) return false;
+  if (frame.x > 1 || frame.y > 1 || frame.width > 1 || frame.height > 1) return false;
+  if (frame.x + frame.width > 1 || frame.y + frame.height > 1) return false;
+  return Number.isInteger(frame.z) && frame.z >= 0 && frame.z <= 9999;
+}
+
 function validEventPayload(data) {
   if (data.type === 'editor-preview:ready' || data.type === 'editor-preview:loaded') {
     return hasExactKeys(data.payload, []);
@@ -54,6 +71,18 @@ function validEventPayload(data) {
   if (data.type === 'editor-preview:state') return hasExactKeys(data.payload, ['viewport']);
   if (data.type === 'editor-preview:camera') {
     return hasExactKeys(data.payload, ['center', 'zoom', 'pitch', 'bearing', 'bounds']);
+  }
+  if (data.type === 'editor-preview:select-overlay') {
+    return hasExactKeys(data.payload, ['id']) && validOverlayId(data.payload.id);
+  }
+  if (data.type === 'editor-preview:commit-frame') {
+    return hasExactKeys(data.payload, ['id', 'frame'])
+      && validOverlayId(data.payload.id) && validFrame(data.payload.frame);
+  }
+  if (data.type === 'editor-preview:commit-text') {
+    return hasExactKeys(data.payload, ['id', 'text'])
+      && validOverlayId(data.payload.id)
+      && typeof data.payload.text === 'string' && data.payload.text.length <= 100000;
   }
   return false;
 }
