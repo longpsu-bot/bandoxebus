@@ -334,9 +334,16 @@ try {
   await evaluate(client, clickButton('Map'));
   await evaluate(client, `(() => {
     const child = document.getElementById('production-preview').contentDocument;
-    const zoom = child.querySelector('.maplibregl-ctrl-zoom-in');
-    if (!zoom) throw new Error('Map zoom control unavailable');
-    zoom.click();
+    const canvas = child.querySelector('.maplibregl-canvas');
+    if (!canvas) throw new Error('Map canvas unavailable before Capture Camera');
+    const rect = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new child.defaultView.WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+      deltaY: -500
+    }));
     return true;
   })()`);
   await waitFor(client, `!document.getElementById('studio-camera-capture')?.disabled`, 'Map camera change');
@@ -352,11 +359,12 @@ try {
     const child = document.getElementById('production-preview').contentDocument;
     const canvas = child.querySelector('.maplibregl-canvas');
     if (!canvas) throw new Error('Map canvas unavailable after Capture Camera');
+    const rect = canvas.getBoundingClientRect();
     canvas.dispatchEvent(new child.defaultView.WheelEvent('wheel', {
       bubbles: true,
       cancelable: true,
-      clientX: canvas.clientWidth / 2,
-      clientY: canvas.clientHeight / 2,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
       deltaY: -500
     }));
     return true;
