@@ -3,7 +3,6 @@ import { deepFreeze } from './descriptor-schema.js';
 import { createLegacyActionNormalizer } from './story-1.0-normalizer.js';
 import { compareRoutes, haversineMeters } from '../comparison.js';
 import { buildGeoJsonLayerDefinitions } from '../map/geojson-renderer.js';
-import { getRoute612RuntimeAdapter } from '../route-61-2/runtime-adapter.js';
 
 function action(type, label, description, required, properties) {
   return {
@@ -136,9 +135,13 @@ function unavailable(type) {
   };
 }
 
-export function selectRouteComparisonAdapter(settings, context, loadAdapter = () => ({ getRoute612RuntimeAdapter })) {
+export async function selectRouteComparisonAdapter(
+  settings,
+  context,
+  loadAdapter = () => import('../route-61-2/runtime-adapter.js')
+) {
   if (settings?.adapter !== 'route-61-2-current') return null;
-  const module = loadAdapter();
+  const module = await loadAdapter();
   return module.getRoute612RuntimeAdapter(context);
 }
 
@@ -257,12 +260,13 @@ export function createRouteComparisonCapability(context = {}) {
       ? Object.freeze({ ...implementation, ...declarativeLayers })
       : implementation;
   }
-  const adapter = selectRouteComparisonAdapter(context.settings, context);
-  const implementation = createRouteComparisonImplementation({
-    ...context,
-    setMode: adapter.setMode,
-    setRouteReveal: adapter.setRouteReveal,
-    setPoiEmphasis: adapter.setPoiEmphasis
+  return selectRouteComparisonAdapter(context.settings, context).then((adapter) => {
+    const implementation = createRouteComparisonImplementation({
+      ...context,
+      setMode: adapter.setMode,
+      setRouteReveal: adapter.setRouteReveal,
+      setPoiEmphasis: adapter.setPoiEmphasis
+    });
+    return Object.freeze({ ...implementation, sceneLayers: adapter.sceneLayers, destroy: adapter.destroy });
   });
-  return Object.freeze({ ...implementation, sceneLayers: adapter.sceneLayers, destroy: adapter.destroy });
 }

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { createRoute612RuntimeAdapter, installRoute612Styles } from '../src/route-61-2/runtime-adapter.js';
 import { selectRouteComparisonAdapter } from '../src/capabilities/route-comparison-v1.js';
+import { selectUrbanContextAdapter } from '../src/capabilities/urban-context-v1.js';
 import { createRoute612Controls } from '../src/route-61-2/controls.js';
 
 const line = (coordinates) => ({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } }] });
@@ -72,7 +73,10 @@ test('trusted installed code loads Route 61-2 adapter only for the explicit sett
   assert.equal(await selectRouteComparisonAdapter({}, context(), loadAdapter), null);
   assert.equal(await selectRouteComparisonAdapter({ adapter: 'other' }, context(), loadAdapter), null);
   assert.deepEqual(await selectRouteComparisonAdapter({ adapter: 'route-61-2-current' }, context(), loadAdapter), { id: 'adapter' });
-  assert.deepEqual(loads, ['load']);
+  assert.equal(await selectUrbanContextAdapter({}, context(), loadAdapter), null);
+  assert.equal(await selectUrbanContextAdapter({ adapter: 'other' }, context(), loadAdapter), null);
+  assert.deepEqual(await selectUrbanContextAdapter({ adapter: 'route-61-2-current' }, context(), loadAdapter), { id: 'adapter' });
+  assert.deepEqual(loads, ['load', 'load']);
 });
 
 test('trusted Route controls mount mode, reveal, POI, urban, and simulation behavior into a neutral host', () => {

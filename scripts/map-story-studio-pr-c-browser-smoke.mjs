@@ -86,9 +86,13 @@ try {
     const frame = document.getElementById('production-preview'); const child = frame?.contentDocument;
     return child?.querySelectorAll('.maplibregl-canvas').length === 1
       && child.getElementById('scene-compositor') && !child.getElementById('presentation-open')
-      ? { maps: 1, path: new URL(frame.src).pathname, controlsHidden: child.getElementById('capability-controls').hidden } : null;
+      ? { maps: 1, path: new URL(frame.src).pathname, controlsHidden: child.getElementById('capability-controls').hidden,
+        routeModules: child.defaultView.performance.getEntriesByType('resource').map(({ name }) => new URL(name).pathname)
+          .filter((path) => path.startsWith('/src/route-61-2/')) } : null;
   })()`, 'neutral Blank root');
-  if (/src\/runtime/.test(blank.path) || !blank.controlsHidden) throw new Error(`Blank did not use neutral root: ${JSON.stringify(blank)}`);
+  if (/src\/runtime/.test(blank.path) || !blank.controlsHidden || blank.routeModules.length) {
+    throw new Error(`Blank did not use a Route-independent neutral root: ${JSON.stringify(blank)}`);
+  }
 
   const templates = {};
   for (const [id, scenes] of [['route-proposal', 5], ['network-service-plan', 3]]) {
@@ -334,7 +338,7 @@ try {
 
   console.log(JSON.stringify({
     gate: 'pr-c', rich: rich.types, templates, importExisting: importChoices, zipReopen: true,
-    neutralRoot: true, routeBehavior: { ...routeBehavior, ...routeVisuals },
+    neutralRoot: true, blankRouteModules: blank.routeModules, routeBehavior: { ...routeBehavior, ...routeVisuals },
     oneMap: blank.maps === 1 && rich.maps === 1 && route.maps === 1
       && legacy10Mobile.maps === 1 && legacy11Mobile.maps === 1,
     legacy390x844: {

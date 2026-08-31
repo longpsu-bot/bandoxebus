@@ -65,6 +65,16 @@ test('generic runtime, shell, and Scene modules contain no concrete Route assump
   assert.doesNotMatch(html, ROUTE_ASSUMPTION, '../index.html');
 });
 
+test('installed Blank root defers the Route 61-2 adapter outside the static ESM graph', async () => {
+  const installed = await readFile(new URL('../src/capabilities/installed-capabilities.js', import.meta.url), 'utf8');
+  for (const path of ['route-comparison-v1.js', 'urban-context-v1.js']) assert.match(installed, new RegExp(path));
+  for (const path of ['../src/capabilities/route-comparison-v1.js', '../src/capabilities/urban-context-v1.js']) {
+    const source = await readFile(new URL(path, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /^\s*import\s+.*route-61-2\/runtime-adapter\.js.*$/m, path);
+    assert.match(source, /import\(['"]\.\.\/route-61-2\/runtime-adapter\.js['"]\)/, path);
+  }
+});
+
 test('generic application lifecycle uses the explicit replaceExisting API without source obfuscation', async () => {
   const source = await readFile(new URL('../src/runtime/generic-app.js', import.meta.url), 'utf8');
   assert.match(source, /\breplaceExisting\b/);

@@ -1,7 +1,6 @@
 import { ProjectLoadError } from '../project/project-error.js';
 import { deepFreeze } from './descriptor-schema.js';
 import { createLegacyActionNormalizer } from './story-1.0-normalizer.js';
-import { getRoute612RuntimeAdapter } from '../route-61-2/runtime-adapter.js';
 
 const MODES = ['off', 'industrial-context'];
 
@@ -67,13 +66,22 @@ function unavailable() {
   throw new ProjectLoadError('CAPABILITY_NOT_INITIALIZED', '$.capabilities.urban-context-v1.handlers.context.set-mode', 'Urban context is not initialized.');
 }
 
+export async function selectUrbanContextAdapter(
+  settings,
+  context,
+  loadAdapter = () => import('../route-61-2/runtime-adapter.js')
+) {
+  if (settings?.adapter !== 'route-61-2-current') return null;
+  const module = await loadAdapter();
+  return module.getRoute612RuntimeAdapter(context);
+}
+
 export function createUrbanContextCapability(context = {}) {
   if (context.settings?.adapter === 'route-61-2-current' && context.map) {
-    const adapter = getRoute612RuntimeAdapter(context);
-    return Object.freeze({
+    return selectUrbanContextAdapter(context.settings, context).then((adapter) => Object.freeze({
       handlers: Object.freeze({ 'context.set-mode': (descriptor) => adapter.setContextMode(descriptor.mode) }),
       datasetRoles: Object.freeze({ 'context.area': true })
-    });
+    }));
   }
   return Object.freeze({
     handlers: Object.freeze({
