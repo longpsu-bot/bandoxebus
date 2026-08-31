@@ -168,26 +168,42 @@ try {
     const labels = [...child.querySelectorAll('#capability-controls button, #capability-controls label')].map((node) => node.textContent.trim());
     const beacons = child.querySelectorAll('.transport-poi-beacon').length;
     const buses = child.querySelectorAll('.bus-marker').length;
-    return child.querySelectorAll('.maplibregl-canvas').length === 1 && labels.includes('Existing')
+    return child.querySelectorAll('.maplibregl-canvas').length === 1 && labels.includes('Existing') && labels.includes('Compare')
       && labels.includes('Route reveal') && beacons === 3 && buses === 2
       ? { maps: 1, labels, beacons, buses } : null;
   })()`, 'trusted Route controls');
-  for (const label of ['Existing', 'Proposed', 'Difference', 'Route reveal', 'POI emphasis', 'Urban context', 'Simulation']) {
+  for (const label of ['Difference', 'Existing', 'Proposed', 'Compare', 'Route reveal', 'POI emphasis', 'Urban context', 'Simulation']) {
     if (!route.labels.includes(label)) throw new Error(`Missing trusted Route control ${label}.`);
   }
   const routeBehavior = await evaluate(client, `(() => {
     const child = document.getElementById('production-preview').contentDocument;
     const clickText = (selector, text) => [...child.querySelectorAll(selector)].find((node) => node.textContent.trim() === text).click();
-    clickText('#capability-controls button', 'Difference');
-    clickText('#capability-controls button', 'Existing');
+    const map = child.getElementById('map'); const modes = {};
+    for (const [label, mode] of [['Difference', 'difference'], ['Existing', 'existing'], ['Proposed', 'proposed'], ['Compare', 'compare']]) {
+      clickText('#capability-controls button', label);
+      modes[mode] = {
+        mode: map.dataset.routeMode,
+        existingVisible: map.dataset.routeExistingVisible,
+        proposedVisible: map.dataset.routeProposedVisible,
+        existingOffset: map.dataset.routeExistingOffset,
+        proposedOffset: map.dataset.routeProposedOffset,
+        stopMode: map.dataset.routeStopMode
+      };
+    }
     clickText('#capability-controls label', 'Route reveal');
     clickText('#capability-controls label', 'Route reveal');
     for (const label of ['POI emphasis', 'Urban context', 'Simulation']) clickText('#capability-controls label', label);
-    const map = child.getElementById('map');
-    return { mode: map.dataset.routeMode, reveal: map.dataset.routeReveal, poi: map.dataset.poiEmphasis,
+    return { mode: map.dataset.routeMode, modes, reveal: map.dataset.routeReveal, poi: map.dataset.poiEmphasis,
       urban: map.dataset.urbanContext, simulation: map.dataset.simulationActive };
   })()`);
-  if (routeBehavior.mode !== 'existing' || routeBehavior.reveal !== 'true' || routeBehavior.poi !== 'true'
+  const expectedModes = {
+    difference: { mode: 'difference', existingVisible: 'false', proposedVisible: 'false', existingOffset: '0', proposedOffset: '0', stopMode: 'difference' },
+    existing: { mode: 'existing', existingVisible: 'true', proposedVisible: 'false', existingOffset: '0', proposedOffset: '0', stopMode: 'existing' },
+    proposed: { mode: 'proposed', existingVisible: 'false', proposedVisible: 'true', existingOffset: '0', proposedOffset: '0', stopMode: 'proposed' },
+    compare: { mode: 'compare', existingVisible: 'true', proposedVisible: 'true', existingOffset: '-4.5', proposedOffset: '4.5', stopMode: 'proposed' }
+  };
+  if (JSON.stringify(routeBehavior.modes) !== JSON.stringify(expectedModes)
+    || routeBehavior.mode !== 'compare' || routeBehavior.reveal !== 'true' || routeBehavior.poi !== 'true'
     || routeBehavior.urban !== 'industrial-context' || routeBehavior.simulation !== 'true') {
     throw new Error(`Trusted Route behavior failed: ${JSON.stringify(routeBehavior)}`);
   }
@@ -197,10 +213,13 @@ try {
     const beacons = [...child.querySelectorAll('.transport-poi-beacon')];
     const buses = [...child.querySelectorAll('.bus-marker:not([hidden])')];
     const movingBuses = buses.filter((node) => Number(node.dataset.simulationDistance) > 0);
+    const provider = map.dataset.urbanContextProvider;
     return beacons.length === 3 && beacons.every((node) => node.classList.contains('is-emphasized'))
       && buses.length === 2 && movingBuses.length === 2 && map.dataset.urbanLayerVisible === 'true'
+      && map.dataset.urbanGroundState === 'visible' && ['overture', 'synthetic-v2'].includes(provider)
       ? { emphasizedBeacons: beacons.length, visibleBuses: buses.length, movingBuses: movingBuses.length,
-        urbanLayerVisible: true } : null;
+        urbanLayerVisible: true, urbanContextProvider: provider,
+        urbanContextState: map.dataset.urbanContextState, urbanGroundState: map.dataset.urbanGroundState } : null;
   })()`, 'visible Route POI, urban, and simulation behavior');
 
   await evaluate(client, `(async () => {
@@ -230,20 +249,84 @@ try {
   })()`);
   const legacy11Mobile = await waitFor(client, `(() => {
     const frame = document.getElementById('production-preview'); const child = frame?.contentDocument;
+    const content = child?.querySelector('#scene-compositor.presentation-content');
+    const heading = content?.querySelector('.presentation-content__title');
+    const navigation = child?.querySelector('#runtime-navigation');
+    if (!content || !heading || !navigation) return null;
+    const contentRect = content.getBoundingClientRect(); const headingRect = heading.getBoundingClientRect();
+    const headingStyle = frame.contentWindow.getComputedStyle(heading);
+    const contentStyle = frame.contentWindow.getComputedStyle(content);
+    const navigationRect = navigation.getBoundingClientRect();
+    const visuallyUsable = headingRect.width > 0 && headingRect.height > 0
+      && Number.parseFloat(headingStyle.fontSize) >= 20
+      && headingStyle.visibility !== 'hidden' && headingStyle.color !== 'rgba(0, 0, 0, 0)'
+      && Number.parseFloat(contentStyle.opacity) > 0 && contentRect.width >= 300 && contentRect.height >= 100
+      && contentRect.left >= 0 && contentRect.top >= 0
+      && contentRect.right <= frame.contentWindow.innerWidth + 1 && contentRect.bottom <= frame.contentWindow.innerHeight + 1
+      && navigationRect.width > 0 && navigationRect.height > 0
+      && child.documentElement.scrollWidth <= frame.contentWindow.innerWidth + 1;
     return frame?.contentWindow.innerWidth === 390 && frame.contentWindow.innerHeight === 844
       && child?.querySelectorAll('.maplibregl-canvas').length === 1
       && child.getElementById('runtime-status')?.textContent === 'Scene 1 of 6'
-      && child.getElementById('scene-compositor')?.textContent.includes('Route realignment')
-      ? { width: frame.contentWindow.innerWidth, height: frame.contentWindow.innerHeight, maps: 1, scenes: 6 } : null;
+      && content.textContent.includes('Route realignment') && visuallyUsable
+      ? { width: frame.contentWindow.innerWidth, height: frame.contentWindow.innerHeight, maps: 1, scenes: 6,
+        headingFontSize: headingStyle.fontSize, contentWidth: contentRect.width, contentHeight: contentRect.height,
+        horizontalOverflow: child.documentElement.scrollWidth - frame.contentWindow.innerWidth } : null;
   })()`, '390 x 844 Story 1.1 production regression');
+  const legacy11Navigation = await evaluate(client, `(() => {
+    const child = document.getElementById('production-preview').contentDocument;
+    const next = child.querySelector('#runtime-navigation button:last-child'); next.click();
+    return { status: child.getElementById('runtime-status').textContent, disabled: next.disabled };
+  })()`);
+  if (legacy11Navigation.status !== 'Scene 2 of 6' || legacy11Navigation.disabled) {
+    throw new Error(`Story 1.1 navigation is not operable: ${JSON.stringify(legacy11Navigation)}`);
+  }
+  await evaluate(client, `(() => {
+    const next = document.getElementById('production-preview').contentDocument.querySelector('#runtime-navigation button:last-child');
+    next.click(); next.click(); return true;
+  })()`);
+  const legacy11RichLayout = await waitFor(client, `(() => {
+    const child = document.getElementById('production-preview').contentDocument;
+    if (child.getElementById('runtime-status')?.textContent !== 'Scene 4 of 6') return null;
+    const metrics = child.querySelector('.presentation-metrics')?.getBoundingClientRect();
+    const table = child.querySelector('.content-table')?.getBoundingClientRect();
+    const chart = child.querySelector('.content-chart')?.getBoundingClientRect();
+    return metrics?.width > 100 && metrics.height > 40 && table?.width > 100 && table.height > 40
+      && chart?.width > 100 && chart.height >= 220
+      ? { metrics: { width: metrics.width, height: metrics.height }, table: { width: table.width, height: table.height },
+        chart: { width: chart.width, height: chart.height } } : null;
+  })()`, 'Story 1.1 metric, table, and chart layout');
 
   await client.send('Page.navigate', { url: new URL('../', APP_URL).href });
-  const legacy10Mobile = await waitFor(client, `(() => document.readyState === 'complete'
-    && document.querySelectorAll('.maplibregl-canvas').length === 1
-    && document.getElementById('capability-controls')?.hidden === false
-    ? { width: innerWidth, height: innerHeight, maps: 1 } : null)()`, '390 x 844 legacy production regression');
+  const legacy10Mobile = await waitFor(client, `(() => {
+    if (document.readyState !== 'complete' || document.querySelectorAll('.maplibregl-canvas').length !== 1
+      || document.getElementById('capability-controls')?.hidden !== false) return null;
+    const content = document.querySelector('#scene-compositor.presentation-content');
+    const heading = content?.querySelector('.presentation-content__title');
+    const navigation = document.getElementById('runtime-navigation');
+    if (!content || !heading || !navigation) return null;
+    const contentRect = content.getBoundingClientRect(); const headingRect = heading.getBoundingClientRect();
+    const headingStyle = getComputedStyle(heading); const contentStyle = getComputedStyle(content);
+    const navigationRect = navigation.getBoundingClientRect();
+    const visuallyUsable = headingRect.width > 0 && headingRect.height > 0
+      && Number.parseFloat(headingStyle.fontSize) >= 20
+      && headingStyle.visibility !== 'hidden' && headingStyle.color !== 'rgba(0, 0, 0, 0)'
+      && Number.parseFloat(contentStyle.opacity) > 0 && contentRect.width >= 300 && contentRect.height >= 100
+      && contentRect.left >= 0 && contentRect.top >= 0 && contentRect.right <= innerWidth + 1 && contentRect.bottom <= innerHeight + 1
+      && navigationRect.width > 0 && navigationRect.height > 0 && document.documentElement.scrollWidth <= innerWidth + 1;
+    return visuallyUsable ? { width: innerWidth, height: innerHeight, maps: 1,
+      headingFontSize: headingStyle.fontSize, contentWidth: contentRect.width, contentHeight: contentRect.height,
+      horizontalOverflow: document.documentElement.scrollWidth - innerWidth } : null;
+  })()`, '390 x 844 legacy production regression');
   if (legacy10Mobile.width !== 390 || legacy10Mobile.height !== 844) {
     throw new Error(`Unexpected Story 1.0 viewport: ${JSON.stringify(legacy10Mobile)}`);
+  }
+  const legacy10Navigation = await evaluate(client, `(() => {
+    const next = document.querySelector('#runtime-navigation button:last-child'); next.click();
+    return { status: document.getElementById('runtime-status').textContent, disabled: next.disabled };
+  })()`);
+  if (legacy10Navigation.status !== 'Scene 2 of 7' || legacy10Navigation.disabled) {
+    throw new Error(`Story 1.0 navigation is not operable: ${JSON.stringify(legacy10Navigation)}`);
   }
   if (consoleIssues.length) throw new Error(`Unexpected browser console issues: ${JSON.stringify(consoleIssues)}`);
 
@@ -252,7 +335,10 @@ try {
     neutralRoot: true, routeBehavior: { ...routeBehavior, ...routeVisuals },
     oneMap: blank.maps === 1 && rich.maps === 1 && route.maps === 1
       && legacy10Mobile.maps === 1 && legacy11Mobile.maps === 1,
-    legacy390x844: { story10: legacy10Mobile, story11: legacy11Mobile }, console: 'clean'
+    legacy390x844: {
+      story10: { ...legacy10Mobile, navigation: legacy10Navigation },
+      story11: { ...legacy11Mobile, navigation: legacy11Navigation, richLayout: legacy11RichLayout }
+    }, console: 'clean'
   }));
   console.log('MAP_STORY_STUDIO_PR_C_RESULT: PASS');
 } finally {

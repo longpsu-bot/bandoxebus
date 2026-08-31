@@ -26,8 +26,19 @@ test('neutral shell CSS keeps 16:9 composition, contained images, touch targets,
 
 test('legacy semantic content keeps scoped table, chart, image, and legend layout rules', async () => {
   const css = await readFile(cssUrl, 'utf8');
-  for (const name of ['content-table', 'content-chart', 'content-image', 'content-legend']) assert.match(css, new RegExp(`\\.${name}`));
+  for (const name of [
+    'presentation-content__title', 'presentation-content__subtitle', 'presentation-content__narrative',
+    'presentation-metrics', 'presentation-metric', 'presentation-callout',
+    'content-table', 'content-chart', 'content-image', 'content-legend'
+  ]) assert.match(css, new RegExp(`\\.${name}`));
+  assert.match(css, /#scene-compositor\.presentation-content[^}]*aspect-ratio:\s*auto/s);
+  assert.match(css, /#scene-compositor\.presentation-content[^}]*overflow:\s*auto/s);
+  assert.match(css, /\.presentation-content__title[^}]*font-size:\s*(?:clamp\(|[2-9][0-9]px)/s);
+  assert.match(css, /\.presentation-content__narrative[^}]*line-height:\s*1\.[4-9]/s);
+  assert.match(css, /\.presentation-metrics[^}]*grid-template-columns/s);
+  assert.match(css, /\.presentation-metric[^}]*min-height/s);
   assert.match(css, /\.content-table[^}]*overflow-x:\s*auto/s);
   assert.match(css, /\.content-chart[^}]*min-height/s);
   assert.match(css, /\.content-image img[^}]*max-width:\s*100%/s);
+  assert.match(css, /@media[^\{]*max-width:\s*600px[\s\S]*#scene-compositor\.presentation-content[^}]*width:\s*calc\(100vw\s*-\s*28px\)/s);
 });
