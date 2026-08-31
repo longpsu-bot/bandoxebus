@@ -28,17 +28,16 @@ export function createGenericApplicationOptions({
   windowRef = globalThis.window,
   maplibregl = globalThis.maplibregl,
   Chart = globalThis.Chart,
-  ...transport
+  replaceExisting = false
 } = {}) {
   const reducedMotion = windowRef?.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-  const replacementKey = ['replace', 'Exist', 'ing'].join('');
   return {
     manifestUrl,
     fetchImpl,
     resolveAssetUrl,
     signal,
     owner,
-    [replacementKey]: transport[replacementKey] ?? false,
+    replaceExisting,
     capabilityRegistry: INSTALLED_CAPABILITY_REGISTRY,
     maplibregl,
     Chart,
