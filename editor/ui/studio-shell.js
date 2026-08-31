@@ -151,6 +151,12 @@ function executeStoryCommand(name, payload = {}) {
   if (!activeStudio) return null;
   const history = ensureHistory(activeStudio);
   const next = history.execute((story) => applyStudioStoryCommand(story, name, payload));
+  let nextSceneIndex = null;
+  if (name === 'add-scene') nextSceneIndex = next.states.length - 1;
+  else if (name === 'duplicate-scene') nextSceneIndex = payload.sceneIndex + 1;
+  else if (name === 'delete-scene') nextSceneIndex = Math.min(payload.sceneIndex, next.states.length - 1);
+  else if (name === 'move-scene') nextSceneIndex = payload.to;
+
   if (name === 'add-text' || name === 'duplicate-object') {
     const newId = next.states[payload.sceneIndex].content.blocks.at(-1)?.id ?? null;
     selectedOverlayId = newId;
@@ -160,11 +166,13 @@ function executeStoryCommand(name, payload = {}) {
     selectedOverlayIds = selectedOverlayIds.filter((id) => id !== payload.id);
     selectedOverlayId = selectedOverlayIds.at(-1) ?? null;
   }
-  if (name === 'delete-scene') {
+  if (nextSceneIndex !== null) {
     selectedOverlayId = null;
     selectedOverlayIds = [];
+    activeStudio.onSelectScene(nextSceneIndex);
+  } else {
+    rerenderActive();
   }
-  rerenderActive();
   return next;
 }
 
