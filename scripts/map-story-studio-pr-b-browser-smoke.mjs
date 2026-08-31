@@ -309,18 +309,21 @@ try {
   await evaluate(client, clickButton('Add Scene'));
   revision = await waitRevision(client, revision, 'Add Scene revision');
   await waitFor(client, `document.querySelectorAll('.studio-scene-list button').length === 2`, 'two Scene buttons');
-  const switchResult = await evaluate(client, `(() => {
-    const scenes = [...document.querySelectorAll('.studio-scene-list button')];
-    const before = Number(document.getElementById('production-preview').dataset.previewRevision);
-    scenes[1].click();
-    const empty = document.getElementById('production-preview').contentDocument.querySelectorAll('.scene-overlay').length === 0;
-    scenes[0].click();
-    return { before, empty };
-  })()`);
-  if (!switchResult.empty) throw new Error('New Scene unexpectedly inherited Text overlays.');
-  await waitFor(client,
-    `Boolean(document.getElementById('production-preview').contentDocument.querySelector('[data-scene-overlay-id="heading"]'))`,
-    'return to authored Scene');
+  await waitFor(client, `(() => {
+    const child = document.getElementById('production-preview').contentDocument;
+    const compositor = child?.getElementById('scene-compositor');
+    return compositor?.dataset.sceneId === 'scene' && child.querySelectorAll('.scene-overlay').length === 0;
+  })()`, 'new empty Scene activation');
+  const beforeSwitch = await evaluate(client, `Number(document.getElementById('production-preview').dataset.previewRevision)`);
+  if (beforeSwitch !== revision) throw new Error('Add Scene activation changed the certified revision unexpectedly.');
+
+  await evaluate(client, `document.querySelectorAll('.studio-scene-list button')[0].click()`);
+  await waitFor(client, `(() => {
+    const child = document.getElementById('production-preview').contentDocument;
+    const compositor = child?.getElementById('scene-compositor');
+    return compositor?.dataset.sceneId === 'opening'
+      && Boolean(child.querySelector('[data-scene-overlay-id="heading"]'));
+  })()`, 'return to authored Scene');
   const switchRevision = await evaluate(client, `Number(document.getElementById('production-preview').dataset.previewRevision)`);
   if (switchRevision !== revision) throw new Error('Scene switching created a production revision.');
   const restoredFrame = await previewFrame(client, 'heading');
