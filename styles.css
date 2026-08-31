@@ -1,4 +1,5 @@
 :root { --semantic-panel: rgb(6 13 24 / 90%); --semantic-border: rgb(148 163 184 / 20%); --semantic-blue: #2bb7ff; --semantic-cyan: #67e8f9; }
+* { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #07101c; color: #f6f8fc; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 body { position: relative; }
 button, input { font: inherit; }

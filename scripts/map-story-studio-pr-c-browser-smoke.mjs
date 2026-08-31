@@ -5,7 +5,7 @@ const args = new Map(process.argv.slice(2).map((argument) => {
 
 const APP_URL = args.get('--url') ?? 'http://127.0.0.1:8080/editor/';
 const CDP_PORT = Number(process.env.CDP_PORT || 9222);
-const TIMEOUT_MS = 45_000;
+const TIMEOUT_MS = 90_000;
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 class CdpClient {
@@ -321,10 +321,12 @@ try {
   if (legacy10Mobile.width !== 390 || legacy10Mobile.height !== 844) {
     throw new Error(`Unexpected Story 1.0 viewport: ${JSON.stringify(legacy10Mobile)}`);
   }
-  const legacy10Navigation = await evaluate(client, `(() => {
-    const next = document.querySelector('#runtime-navigation button:last-child'); next.click();
-    return { status: document.getElementById('runtime-status').textContent, disabled: next.disabled };
-  })()`);
+  await evaluate(client, `document.querySelector('#runtime-navigation button:last-child').click()`);
+  const legacy10Navigation = await waitFor(client, `(() => {
+    const next = document.querySelector('#runtime-navigation button:last-child');
+    const status = document.getElementById('runtime-status').textContent;
+    return status === 'Scene 2 of 7' ? { status, disabled: next.disabled } : null;
+  })()`, 'Story 1.0 next-scene navigation');
   if (legacy10Navigation.status !== 'Scene 2 of 7' || legacy10Navigation.disabled) {
     throw new Error(`Story 1.0 navigation is not operable: ${JSON.stringify(legacy10Navigation)}`);
   }

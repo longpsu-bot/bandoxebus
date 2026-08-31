@@ -34,9 +34,11 @@ export function createRuntimeMetricRegistry(project, instances) {
     descriptor,
     compute: implementation.metricProviders?.[descriptor.id]
   })));
+  const aliases = Object.assign({}, ...instances.map(({ implementation }) => implementation.legacyMetricAliases ?? {}));
   return createMetricRegistry({
     staticMetrics: project.resources.get('metrics')?.value?.metrics ?? {},
     providers,
+    aliases,
     context: { project, instances }
   });
 }

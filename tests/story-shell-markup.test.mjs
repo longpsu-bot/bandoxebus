@@ -31,6 +31,7 @@ test('legacy semantic content keeps scoped table, chart, image, and legend layou
     'presentation-metrics', 'presentation-metric', 'presentation-callout',
     'content-table', 'content-chart', 'content-image', 'content-legend'
   ]) assert.match(css, new RegExp(`\\.${name}`));
+  assert.match(css, /\*\s*\{[^}]*box-sizing:\s*border-box/s);
   assert.match(css, /#scene-compositor\.presentation-content[^}]*aspect-ratio:\s*auto/s);
   assert.match(css, /#scene-compositor\.presentation-content[^}]*overflow:\s*auto/s);
   assert.match(css, /\.presentation-content__title[^}]*font-size:\s*(?:clamp\(|[2-9][0-9]px)/s);

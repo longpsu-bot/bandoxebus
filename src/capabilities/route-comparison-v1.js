@@ -1,7 +1,7 @@
 import { ProjectLoadError } from '../project/project-error.js';
 import { deepFreeze } from './descriptor-schema.js';
 import { createLegacyActionNormalizer } from './story-1.0-normalizer.js';
-import { haversineMeters } from '../comparison.js';
+import { compareRoutes, haversineMeters } from '../comparison.js';
 import { buildGeoJsonLayerDefinitions } from '../map/geojson-renderer.js';
 import { getRoute612RuntimeAdapter } from '../route-61-2/runtime-adapter.js';
 
@@ -54,6 +54,9 @@ export const ROUTE_COMPARISON_V1_DESCRIPTOR = deepFreeze({
   metrics: [
     { id: 'route-existing-length', label: 'Existing route length', valueType: 'number', format: { type: 'distance', decimals: 1 } },
     { id: 'route-proposed-length', label: 'Proposed route length', valueType: 'number', format: { type: 'distance', decimals: 1 } },
+    { id: 'route-retained-length', label: 'Retained route length', valueType: 'number', format: { type: 'distance', decimals: 1 } },
+    { id: 'route-added-length', label: 'Added route length', valueType: 'number', format: { type: 'distance', decimals: 1 } },
+    { id: 'route-removed-length', label: 'Removed route length', valueType: 'number', format: { type: 'distance', decimals: 1 } },
     { id: 'route-length-delta', label: 'Route length change', valueType: 'number', format: { type: 'distance', decimals: 1 } },
     { id: 'route-stop-count', label: 'Existing stop count', valueType: 'number', format: { type: 'integer' } }
   ],
@@ -159,6 +162,16 @@ function createRouteComparisonImplementation(context = {}) {
       return total + lines.reduce((lineTotal, coordinates) => lineTotal + coordinates.slice(1).reduce((sum, coordinate, index) => sum + haversineMeters(coordinates[index], coordinate), 0), 0);
     }, 0);
   };
+  const routeCoordinates = (role) => {
+    const geometry = byRole(role)?.features?.[0]?.geometry;
+    if (geometry?.type === 'LineString') return geometry.coordinates;
+    if (geometry?.type === 'MultiLineString') return geometry.coordinates.flat();
+    return [];
+  };
+  let comparison;
+  const routeComparison = () => comparison ??= compareRoutes(
+    routeCoordinates('route.existing'), routeCoordinates('route.proposed')
+  );
   return Object.freeze({
     handlers: Object.freeze(handlers),
     datasetRoles: Object.freeze(Object.fromEntries(
@@ -167,8 +180,19 @@ function createRouteComparisonImplementation(context = {}) {
     metricProviders: Object.freeze({
       'route-existing-length': () => routeLength('route.existing'),
       'route-proposed-length': () => routeLength('route.proposed'),
+      'route-retained-length': () => routeComparison().metrics.retainedLengthMeters,
+      'route-added-length': () => routeComparison().metrics.addedLengthMeters,
+      'route-removed-length': () => routeComparison().metrics.removedLengthMeters,
       'route-length-delta': () => routeLength('route.proposed') - routeLength('route.existing'),
       'route-stop-count': () => byRole('stops.existing')?.features?.length ?? 0
+    }),
+    legacyMetricAliases: Object.freeze({
+      existingLengthMeters: 'route-existing-length',
+      proposedLengthMeters: 'route-proposed-length',
+      retainedLengthMeters: 'route-retained-length',
+      addedLengthMeters: 'route-added-length',
+      removedLengthMeters: 'route-removed-length',
+      existingStopCount: 'route-stop-count'
     })
   });
 }
