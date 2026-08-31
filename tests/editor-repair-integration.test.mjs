@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createNewProjectEntries } from '../editor/core/package-store.js';
+import { addTextEnvelope } from '../editor/core/scene-commands.js';
 import { createEditor } from '../editor/editor.js';
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 class TestClassList {
   constructor(owner) {
@@ -39,6 +41,8 @@ class TestElement {
     this.hidden = false;
     this.disabled = false;
     this.required = false;
+    this.checked = false;
+    this.selected = false;
     this.contentWindow = { postMessage() {} };
     this.contentDocument = null;
   }
@@ -69,7 +73,7 @@ class TestElement {
     for (const listener of this.listeners.get(event.type) ?? []) listener(event);
     return true;
   }
-  click() { this.dispatchEvent({ type: 'click' }); }
+  click() { if (!this.disabled) this.dispatchEvent({ type: 'click' }); }
   focus() {}
   setAttribute(name, value) {
     const text = String(value);
@@ -112,12 +116,13 @@ class TestElement {
 }
 
 function editorHarness() {
+  const posted = [];
   const ids = [
     'new-project', 'open-folder', 'import-zip', 'save-project', 'export-project-zip',
     'validate-project', 'preview-status', 'dirty-status', 'validation-status',
     'validation-errors', 'project-locale', 'story-heading', 'production-preview',
     'preview-frame', 'preview-paused', 'preview-desktop', 'preview-mobile',
-    'ordering-announcements', 'studio-scenes'
+    'ordering-announcements', 'studio-scenes', 'undo-command', 'redo-command'
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, new TestElement('div', id)]));
   const roots = {
@@ -130,6 +135,9 @@ function editorHarness() {
     previewSrc: '../?editorPreview=1',
     previewSrcLegacy: '../?editorPreview=1',
     previewSrcStory12: '../src/runtime/?editorPreview=1'
+  };
+  elements['production-preview'].contentWindow = {
+    postMessage(message, origin) { posted.push({ message, origin }); }
   };
   const allRoots = [...Object.values(roots), ...Object.values(elements)];
   const documentRef = {
@@ -155,7 +163,48 @@ function editorHarness() {
     matchMedia() { return { matches: false }; },
     confirm() { return false; }
   };
-  return { documentRef, windowRef, editor: createEditor({ documentRef, windowRef }) };
+  return {
+    documentRef,
+    windowRef,
+    posted,
+    preview: elements['production-preview'],
+    emitMessage(data) {
+      listeners.get('message')?.({
+        type: 'message',
+        source: elements['production-preview'].contentWindow,
+        origin: windowRef.location.origin,
+        data
+      });
+    },
+    editor: createEditor({ documentRef, windowRef })
+  };
+}
+
+function entriesWithHeading() {
+  return createNewProjectEntries({ id: 'shared-project', title: 'Shared project' }).map((entry) => {
+    if (entry.path !== 'stories/main.story.json') return entry;
+    const story = JSON.parse(decoder.decode(entry.bytes));
+    return { ...entry, bytes: encoder.encode(`${JSON.stringify(addTextEnvelope(story, {
+      sceneIndex: 0,
+      kind: 'heading'
+    }), null, 2)}\n`) };
+  });
+}
+
+function walk(root) {
+  return [root, ...root.children.flatMap((child) => walk(child))];
+}
+
+function findButton(documentRef, text) {
+  const roots = [
+    documentRef.querySelector('.editor-navigation'),
+    documentRef.querySelector('.editor-inspector'),
+    documentRef.querySelector('.preview-toolbar'),
+    documentRef.getElementById('studio-scenes')
+  ];
+  return roots.flatMap((root) => walk(root)).find((node) => (
+    node.tagName === 'BUTTON' && node.textContent === text
+  )) ?? null;
 }
 
 function malformedEntries(path, text) {
@@ -181,3 +230,48 @@ for (const [label, path] of [
     harness.editor.dispose();
   });
 }
+
+test('preview reload reapplies the Studio authoring mode shown by the toolbar', async () => {
+  const harness = editorHarness();
+  await harness.editor.openEntries(createNewProjectEntries(), { label: 'Map mode project' });
+
+  harness.preview.dispatchEvent({ type: 'load' });
+  const hello = harness.posted.findLast(({ message }) => message.type === 'editor-preview:hello').message;
+  harness.emitMessage({ ...hello, type: 'editor-preview:ready', payload: {} });
+  const start = harness.posted.findLast(({ message }) => message.type === 'editor-preview:start').message;
+
+  findButton(harness.documentRef, 'Map').click();
+  harness.emitMessage({
+    protocol: 1,
+    type: 'editor-preview:loaded',
+    revision: start.revision,
+    requestId: start.requestId,
+    payload: {}
+  });
+
+  const authoringModes = harness.posted
+    .filter(({ message }) => message.type === 'editor-preview:command' && message.payload.name === 'authoring-mode')
+    .map(({ message }) => message.payload.payload.mode);
+  assert.deepEqual(authoringModes, ['map', 'map']);
+  harness.editor.dispose();
+});
+
+test('opening a replacement package clears Redo even when project and Story IDs match', async () => {
+  const harness = editorHarness();
+  const entries = entriesWithHeading();
+  await harness.editor.openEntries(entries, { label: 'Project A' });
+
+  findButton(harness.documentRef, 'heading').click();
+  const text = harness.documentRef.getElementById('studio-text-content');
+  text.value = 'Project A only';
+  text.dispatchEvent({ type: 'change' });
+  harness.documentRef.getElementById('undo-command').click();
+  assert.equal(harness.documentRef.getElementById('redo-command').disabled, false);
+
+  await harness.editor.openEntries(entries, { label: 'Project B' });
+
+  assert.equal(harness.documentRef.getElementById('redo-command').disabled, true);
+  findButton(harness.documentRef, 'heading').click();
+  assert.equal(harness.documentRef.getElementById('studio-text-content').value, 'Heading');
+  harness.editor.dispose();
+});

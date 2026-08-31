@@ -331,6 +331,40 @@ try {
     if (Math.abs(restoredFrame[field] - persistedFrame[field]) > 1e-9) throw new Error(`Scene switch changed ${field}.`);
   }
 
+  await evaluate(client, clickButton('Map'));
+  await evaluate(client, `(() => {
+    const child = document.getElementById('production-preview').contentDocument;
+    const zoom = child.querySelector('.maplibregl-ctrl-zoom-in');
+    if (!zoom) throw new Error('Map zoom control unavailable');
+    zoom.click();
+    return true;
+  })()`);
+  await waitFor(client, `!document.getElementById('studio-camera-capture')?.disabled`, 'Map camera change');
+  await evaluate(client, clickButton('Capture Camera'));
+  revision = await waitRevision(client, revision, 'Capture Camera revision');
+  await waitFor(client, `(() => {
+    const map = document.getElementById('studio-mode-map');
+    const select = document.getElementById('studio-mode-select');
+    return map?.getAttribute('aria-pressed') === 'true'
+      && select?.getAttribute('aria-pressed') === 'false';
+  })()`, 'Map toolbar mode after preview reload');
+  await evaluate(client, `(() => {
+    const child = document.getElementById('production-preview').contentDocument;
+    const canvas = child.querySelector('.maplibregl-canvas');
+    if (!canvas) throw new Error('Map canvas unavailable after Capture Camera');
+    canvas.dispatchEvent(new child.defaultView.WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      clientX: canvas.clientWidth / 2,
+      clientY: canvas.clientHeight / 2,
+      deltaY: -500
+    }));
+    return true;
+  })()`);
+  await waitFor(client, `!document.getElementById('studio-camera-capture')?.disabled`, 'Map interaction after preview reload');
+  await evaluate(client, clickButton('Restore Saved Camera'));
+  await waitFor(client, `document.getElementById('studio-camera-capture')?.disabled`, 'saved camera restoration');
+
   const finalState = await evaluate(client, `(() => {
     const frame = document.getElementById('production-preview');
     return {
@@ -350,6 +384,7 @@ try {
     composition: ['drag', 'resize', 'duplicate', 'align', 'z-order'],
     history: ['undo', 'redo'],
     scenePersistence: true,
+    mapModeReload: true,
     oneMap: true,
     console: 'clean'
   }));

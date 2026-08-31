@@ -32,6 +32,10 @@ let selectedOverlayId = null;
 let selectedOverlayIds = [];
 let authoringMode = 'select';
 
+export function getStudioAuthoringMode() {
+  return authoringMode;
+}
+
 function clone(value) {
   return structuredClone(value);
 }
