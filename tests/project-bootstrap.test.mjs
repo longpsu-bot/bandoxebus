@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { ProjectLoadError } from '../src/project/project-error.js';
 import { bootstrapProject, renderProjectLoadError } from '../src/project/bootstrap.js';
+import { createGenericApplicationOptions } from '../src/runtime/generic-app.js';
 
 function story() {
   return {
@@ -17,7 +18,7 @@ function story() {
   };
 }
 
-function story12() {
+function story12(interaction = 'locked') {
   return {
     schemaVersion: '1.2', id: 'main', title: 'Main',
     states: [{
@@ -25,7 +26,7 @@ function story12() {
       content: { layout: 'freeform-16x9', blocks: [] },
       map: {
         camera: { center: [106.63, 11.06], zoom: 12, pitch: 35, bearing: -10 },
-        interaction: 'locked',
+        interaction,
         transition: { type: 'instant', durationMs: 0 },
         layerVisibility: {},
         enter: [], exit: []
@@ -151,6 +152,45 @@ test('Story 1.2 bootstrap wires the shared Scene controller into the existing ru
   assert.equal(cameraCalls[0][0], 'jumpTo');
   app.destroy();
   assert.deepEqual(cameraCalls.map(([type]) => type), ['jumpTo', 'stop', 'remove']);
+});
+
+test('scroll output reaches the existing Scene interaction policy before first activation', async () => {
+  for (const [search, expectedMode, expectedCooperative] of [
+    ['?outputMode=scroll', 'scroll', true],
+    ['?outputMode=presentation', 'presentation', false],
+    ['?editorPreview=1', 'explore', false]
+  ]) {
+    const sceneRoot = new Element('section');
+    const cooperative = [];
+    const map = {
+      jumpTo() {}, stop() {}, remove() {},
+      setCooperativeGestures(value) { cooperative.push(value); }
+    };
+    const project = {
+      locale: 'en-US',
+      map: { initialView: { center: [0, 0], zoom: 1, pitch: 0, bearing: 0 } },
+      story: story12('explore'),
+      resources: new Map(), tables: new Map(), attribution: {},
+      capabilities: { ordered: [], settings: {} }
+    };
+    const documentRef = sceneDocument(sceneRoot);
+    const options = createGenericApplicationOptions({
+      documentRef,
+      windowRef: { location: { search }, matchMedia: () => ({ matches: false }) },
+      Chart: function Chart() {}
+    });
+    assert.equal(options.outputMode, expectedMode);
+    const app = await bootstrapProject({
+      ...options,
+      project,
+      createMap: () => map,
+      bindStoryExperience: undefined
+    });
+
+    app.storyRuntime.activate();
+    assert.deepEqual(cooperative, [expectedCooperative]);
+    app.destroy();
+  }
 });
 
 test('fatal error text is assigned as text and never parsed as HTML', () => {

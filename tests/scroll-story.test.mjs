@@ -17,7 +17,7 @@ class TestElement {
     this.className = '';
     this.style = {
       position: '', inset: '', display: '', overflowY: '', width: '', height: '',
-      scrollSnapType: '', minHeight: '', scrollSnapAlign: ''
+      left: '', top: '', margin: '', pointerEvents: '', minHeight: '', scrollSnapAlign: ''
     };
   }
 
@@ -86,7 +86,16 @@ function fixture(ids) {
   });
   const experience = createGenericStoryExperience({ runtime, sceneController });
   const root = new TestElement('main');
-  const documentRef = { createElement: (tagName) => new TestElement(tagName) };
+  const mapContainer = new TestElement('main');
+  const map = { getContainer: () => mapContainer };
+  const stage = new TestElement('section');
+  const documentElement = new TestElement('html');
+  const body = new TestElement('body');
+  const documentRef = {
+    body,
+    documentElement,
+    createElement: (tagName) => new TestElement(tagName)
+  };
   const observers = [];
   const windowListeners = new Map();
   const windowRef = {
@@ -100,12 +109,17 @@ function fixture(ids) {
   const navigation = createScrollStoryNavigation({
     runtime,
     experience,
+    map,
+    stage,
     root,
     documentRef,
     windowRef,
     observerFactory: createObserverFactory(observers)
   });
-  return { actionEvents, controllerEvents, definition, experience, navigation, observers, root, runtime, windowRef };
+  return {
+    actionEvents, body, controllerEvents, definition, documentElement, experience,
+    map, mapContainer, navigation, observers, root, runtime, stage, windowRef
+  };
 }
 
 test('ordered scroll sections map directly to Story Scene order', () => {
@@ -172,23 +186,97 @@ test('cooperative map gestures do not trap normal page scrolling', () => {
   assert.equal(f.windowRef.listenerCount('touchmove'), 0);
 });
 
-test('Scroll Story owns a viewport scroll surface and restores neutral layout on exit', () => {
+test('Scroll Story uses native document height without covering the map with an interactive scroll box', () => {
   const f = fixture();
   f.root.style.position = 'fixed';
   f.root.style.inset = 'auto 16px 16px auto';
   f.navigation.enter();
 
-  assert.equal(f.root.style.position, 'fixed');
-  assert.equal(f.root.style.inset, '0');
-  assert.equal(f.root.style.overflowY, 'auto');
-  assert.equal(f.root.style.height, '100vh');
+  assert.equal(f.documentElement.style.overflowY, 'auto');
+  assert.equal(f.body.style.overflowY, 'auto');
+  assert.equal(f.root.style.position, 'relative');
+  assert.equal(f.root.style.inset, 'auto');
+  assert.equal(f.root.style.overflowY, 'visible');
+  assert.equal(f.root.style.height, 'auto');
+  assert.equal(f.root.style.pointerEvents, 'none');
   assert.equal(f.navigation.sections.every(({ style }) => style.minHeight === '100vh'), true);
+  assert.equal(f.navigation.sections.every(({ style }) => style.pointerEvents === 'none'), true);
 
   f.navigation.exit();
   assert.equal(f.root.style.position, 'fixed');
   assert.equal(f.root.style.inset, 'auto 16px 16px auto');
   assert.equal(f.root.style.overflowY, '');
+  assert.equal(f.documentElement.style.overflowY, '');
+  assert.equal(f.body.style.overflowY, '');
   assert.deepEqual(f.root.children, []);
+});
+
+test('Scroll Story keeps the existing map full-bleed and compositor fixed to its safe geometry', () => {
+  const f = fixture();
+  f.mapContainer.style.position = 'absolute';
+  f.mapContainer.style.inset = '0';
+  f.stage.style.position = 'absolute';
+  f.stage.style.width = 'safe-width';
+  f.stage.style.height = 'safe-height';
+  f.navigation.enter();
+
+  assert.deepEqual({
+    position: f.mapContainer.style.position,
+    inset: f.mapContainer.style.inset,
+    width: f.mapContainer.style.width,
+    height: f.mapContainer.style.height
+  }, { position: 'fixed', inset: '0', width: '100%', height: '100%' });
+  assert.equal(f.stage.style.position, 'fixed');
+  assert.equal(f.stage.style.width, 'safe-width');
+  assert.equal(f.stage.style.height, 'safe-height');
+});
+
+test('Scroll Story activation surface leaves map and overlay pointer interaction available', () => {
+  const f = fixture();
+  f.navigation.enter();
+
+  assert.equal(f.root.style.pointerEvents, 'none');
+  assert.equal(f.navigation.sections.every(({ style }) => style.pointerEvents === 'none'), true);
+  assert.equal(f.root.listenerCount('click'), 0);
+  assert.equal(f.root.listenerCount('wheel'), 0);
+  assert.equal(f.root.listenerCount('touchmove'), 0);
+});
+
+test('Scroll Story exit and re-entry restore document map compositor and activation layout exactly', () => {
+  const f = fixture();
+  Object.assign(f.documentElement.style, { overflowY: 'hidden', height: 'html-height' });
+  Object.assign(f.body.style, { overflowY: 'hidden', height: 'body-height' });
+  Object.assign(f.root.style, { position: 'fixed', inset: 'root-inset', pointerEvents: 'auto' });
+  Object.assign(f.mapContainer.style, { position: 'absolute', inset: 'map-inset', width: 'map-width', height: 'map-height' });
+  Object.assign(f.stage.style, { position: 'absolute', inset: 'stage-inset', width: 'stage-width', height: 'stage-height' });
+
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    f.navigation.enter();
+    f.navigation.exit();
+    assert.deepEqual({
+      htmlOverflow: f.documentElement.style.overflowY,
+      htmlHeight: f.documentElement.style.height,
+      bodyOverflow: f.body.style.overflowY,
+      bodyHeight: f.body.style.height,
+      rootPosition: f.root.style.position,
+      rootInset: f.root.style.inset,
+      rootPointers: f.root.style.pointerEvents,
+      mapPosition: f.mapContainer.style.position,
+      mapInset: f.mapContainer.style.inset,
+      mapWidth: f.mapContainer.style.width,
+      mapHeight: f.mapContainer.style.height,
+      stagePosition: f.stage.style.position,
+      stageInset: f.stage.style.inset,
+      stageWidth: f.stage.style.width,
+      stageHeight: f.stage.style.height
+    }, {
+      htmlOverflow: 'hidden', htmlHeight: 'html-height',
+      bodyOverflow: 'hidden', bodyHeight: 'body-height',
+      rootPosition: 'fixed', rootInset: 'root-inset', rootPointers: 'auto',
+      mapPosition: 'absolute', mapInset: 'map-inset', mapWidth: 'map-width', mapHeight: 'map-height',
+      stagePosition: 'absolute', stageInset: 'stage-inset', stageWidth: 'stage-width', stageHeight: 'stage-height'
+    });
+  }
 });
 
 test('adapter creation does not construct a MapLibre map', () => {
@@ -212,15 +300,22 @@ test('the supplied runtime and Scene controller lifecycle are reused', () => {
 test('generic shell binds Scroll Story over the supplied production runtime', () => {
   const f = fixture();
   const documentRef = {
+    body: f.body,
+    documentElement: f.documentElement,
     createElement: (tagName) => new TestElement(tagName),
-    getElementById(id) { return id === 'runtime-navigation' ? f.root : null; }
+    getElementById(id) {
+      if (id === 'runtime-navigation') return f.root;
+      if (id === 'scene-compositor') return f.stage;
+      return null;
+    }
   };
+  f.map.loaded = () => true;
   const shell = bindGenericStoryExperience({
     runtime: f.runtime,
     sceneController: {},
     documentRef,
     windowRef: f.windowRef,
-    map: { loaded: () => true },
+    map: f.map,
     outputMode: 'scroll',
     observerFactory: createObserverFactory(f.observers)
   });
@@ -235,7 +330,7 @@ test('generic shell binds Scroll Story over the supplied production runtime', ()
 test('exit disconnects observer ownership and removes navigation listeners', () => {
   const f = fixture();
   f.navigation.enter();
-  assert.equal(f.root.listenerCount('click'), 1);
+  assert.equal(f.root.listenerCount('click'), 0);
 
   f.navigation.exit();
 
@@ -250,7 +345,7 @@ test('re-entry never accumulates observers or listener state', () => {
   f.navigation.enter();
   f.navigation.enter();
   assert.equal(f.observers.length, 1);
-  assert.equal(f.root.listenerCount('click'), 1);
+  assert.equal(f.root.listenerCount('click'), 0);
 
   f.navigation.exit();
   f.navigation.enter();

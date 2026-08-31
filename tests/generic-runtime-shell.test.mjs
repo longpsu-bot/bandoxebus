@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
 import { createGenericStoryExperience } from '../src/runtime/generic-shell.js';
+import { createGenericApplicationOptions } from '../src/runtime/generic-app.js';
 import { createStoryActionRunner } from '../src/story-action-runner.js';
 import { createStoryRuntime } from '../src/story-runtime.js';
 
@@ -26,6 +27,31 @@ test('neutral generic app imports no Route 61-2 runtime modules or data', async 
   assert.match(source, /startApplication/);
   assert.match(source, /INSTALLED_CAPABILITY_REGISTRY/);
   assert.match(source, /startEditorPreviewHost/);
+});
+
+test('generic application resolves one bounded output mode before bootstrap', () => {
+  const documentRef = { getElementById: () => null };
+  const optionsFor = (search) => createGenericApplicationOptions({
+    documentRef,
+    windowRef: {
+      location: { search },
+      matchMedia: () => ({ matches: false })
+    }
+  });
+
+  assert.deepEqual(
+    ['?outputMode=scroll', '?outputMode=presentation', '?editorPreview=1', '?outputMode=unknown']
+      .map((search) => {
+        const options = optionsFor(search);
+        return [options.outputMode, options.cooperativeScroll];
+      }),
+    [
+      ['scroll', true],
+      ['presentation', false],
+      ['explore', false],
+      ['explore', false]
+    ]
+  );
 });
 
 test('generic Story experience activates one existing runtime and supports direct Scene selection', () => {

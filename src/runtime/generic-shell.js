@@ -3,9 +3,9 @@ import { createPresentationMode } from './presentation-mode.js';
 
 const OUTPUT_MODES = new Set(['explore', 'scroll', 'presentation']);
 
-function resolveOutputMode(explicitMode, windowRef) {
+export function resolveGenericOutputMode(explicitMode, search = '') {
   const requested = explicitMode
-    ?? new URLSearchParams(windowRef?.location?.search ?? '').get('outputMode')
+    ?? new URLSearchParams(search).get('outputMode')
     ?? 'explore';
   return OUTPUT_MODES.has(requested) ? requested : 'explore';
 }
@@ -78,7 +78,7 @@ export function bindGenericStoryExperience({
   const status = documentRef.getElementById?.('runtime-status');
   const navigation = documentRef.getElementById?.('runtime-navigation');
   const contentRoot = documentRef.getElementById?.('scene-compositor');
-  const selectedOutputMode = resolveOutputMode(outputMode, windowRef);
+  const selectedOutputMode = resolveGenericOutputMode(outputMode, windowRef?.location?.search ?? '');
   let started = false;
   let outputAdapter = null;
 
@@ -111,6 +111,8 @@ export function bindGenericStoryExperience({
     outputAdapter = createScrollStoryNavigation({
       runtime,
       experience,
+      map,
+      stage: contentRoot,
       root: navigation,
       documentRef,
       windowRef,
