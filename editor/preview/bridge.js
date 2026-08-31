@@ -2,21 +2,35 @@ export const PREVIEW_PROTOCOL_VERSION = 1;
 export const PREVIEW_PACKAGE_MAX_BYTES = 256 * 1024 * 1024;
 
 const decoder = new TextDecoder();
+const AUTHORING_EVENT_TYPES = new Set([
+  'editor-preview:select-overlay',
+  'editor-preview:commit-frame',
+  'editor-preview:commit-text'
+]);
+const authoringListeners = new Set();
 const EVENT_TYPES = new Set([
   'editor-preview:ready',
   'editor-preview:loaded',
   'editor-preview:runtime-error',
   'editor-preview:state',
   'editor-preview:camera',
-  'editor-preview:select-overlay',
-  'editor-preview:commit-frame',
-  'editor-preview:commit-text'
+  ...AUTHORING_EVENT_TYPES
 ]);
 const START_RESPONSE_TYPES = new Set([
   'editor-preview:loaded',
   'editor-preview:runtime-error'
 ]);
 const STABLE_ID = /^[a-z][a-z0-9-]*$/;
+
+export function subscribePreviewAuthoringEvents(listener) {
+  if (typeof listener !== 'function') throw new TypeError('Preview authoring subscriber must be a function.');
+  authoringListeners.add(listener);
+  return () => authoringListeners.delete(listener);
+}
+
+function publishAuthoringEvent(event) {
+  for (const listener of authoringListeners) listener(event);
+}
 
 function isRecord(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -204,6 +218,7 @@ export function createPreviewBridge({
     }
     if (data.revision !== currentRevision) return;
     if (START_RESPONSE_TYPES.has(data.type) && data.requestId !== currentStartRequestId) return;
+    if (AUTHORING_EVENT_TYPES.has(data.type)) publishAuthoringEvent(data);
     onEvent(data);
   }
 

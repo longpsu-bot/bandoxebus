@@ -4,7 +4,11 @@ import { readFile } from 'node:fs/promises';
 
 import { createHistory } from '../editor/core/history.js';
 import { createScene12 } from '../editor/core/scene-commands.js';
-import { applyStudioStoryCommand, mountStudioShell } from '../editor/ui/studio-shell.js';
+import {
+  applyStudioStoryCommand,
+  mountStudioShell,
+  resetStudioAuthoringSession
+} from '../editor/ui/studio-shell.js';
 import { validateStoryDefinition } from '../src/story-schema.js';
 
 class ClassList {
@@ -60,7 +64,25 @@ function baseStory() {
 }
 
 function renderHarness({ selectedOverlayId = null } = {}) {
-  const documentRef = { createElement: (tag) => new Element(tag) };
+  resetStudioAuthoringSession();
+  const elementsById = new Map();
+  const documentRef = {
+    createElement(tag) {
+      const node = new Element(tag);
+      const original = node.setAttribute.bind(node);
+      node.setAttribute = (name, value) => {
+        original(name, value);
+        if (name === 'id') elementsById.set(String(value), node);
+      };
+      return node;
+    },
+    getElementById(id) { return elementsById.get(id) ?? null; }
+  };
+  for (const id of ['undo-command', 'redo-command']) {
+    const button = documentRef.createElement('button');
+    button.setAttribute('id', id);
+    button.disabled = true;
+  }
   const navigation = new Element('nav');
   const inspector = new Element('aside');
   const scenesHost = new Element('section');
@@ -68,10 +90,6 @@ function renderHarness({ selectedOverlayId = null } = {}) {
   const roots = [navigation, inspector, scenesHost, previewToolbar];
   let current = baseStory();
   let selected = selectedOverlayId;
-  const history = createHistory({
-    read: () => current,
-    write(next) { current = structuredClone(next); }
-  });
 
   function render() {
     mountStudioShell({
@@ -80,13 +98,13 @@ function renderHarness({ selectedOverlayId = null } = {}) {
       inspector,
       scenesHost,
       previewToolbar,
-      manifest: { datasets: {} },
+      manifest: { id: 'fixture-project', datasets: {} },
       story: current,
       sceneIndex: 0,
       selectedOverlayId: selected,
-      onSelectOverlay(id) { selected = id; render(); },
+      onSelectOverlay(id) { selected = id; },
       onStoryCommand(name, payload) {
-        history.execute((story) => applyStudioStoryCommand(story, name, payload));
+        current = applyStudioStoryCommand(current, name, payload);
         if (name === 'add-text') selected = current.states[0].content.blocks.at(-1).id;
         render();
       },
@@ -96,7 +114,7 @@ function renderHarness({ selectedOverlayId = null } = {}) {
   render();
   return {
     roots,
-    history,
+    documentRef,
     get story() { return current; },
     get selected() { return selected; },
     set selected(value) { selected = value; render(); },
@@ -109,10 +127,10 @@ test('Studio Add Heading/Body creates valid Text envelopes and selection is UI-o
   findButton(h.roots, 'Add Heading').click();
   assert.equal(h.selected, 'heading');
   assert.deepEqual(h.story.states[0].content.blocks[0].block, { type: 'heading', text: 'Heading' });
-  const depthAfterHeading = h.history.undoDepth;
+  const afterHeading = JSON.stringify(h.story);
 
   h.selected = null;
-  assert.equal(h.history.undoDepth, depthAfterHeading, 'selection must not enter production history');
+  assert.equal(JSON.stringify(h.story), afterHeading, 'selection must not mutate production Story');
   findButton(h.roots, 'Add Body Text').click();
   assert.deepEqual(h.story.states[0].content.blocks.map(({ block }) => block.type), ['heading', 'paragraph']);
   assert.equal(validateStoryDefinition(h.story, { actionContracts: {} }), h.story);
@@ -169,12 +187,15 @@ test('preview frame/text intents and UI commands share history, then undo/redo e
   assert.equal(validateStoryDefinition(current, { actionContracts: {} }), current);
 });
 
-test('editor integrates one Studio history with preview authoring intents and Undo/Redo controls', async () => {
-  const source = await readFile(new URL('../editor/editor.js', import.meta.url), 'utf8');
+test('Studio module integrates one bounded history with validated preview intents and topbar Undo/Redo', async () => {
+  const [studioSource, bridgeSource] = await Promise.all([
+    readFile(new URL('../editor/ui/studio-shell.js', import.meta.url), 'utf8'),
+    readFile(new URL('../editor/preview/bridge.js', import.meta.url), 'utf8')
+  ]);
   for (const required of [
     /createHistory/, /undo-command/, /redo-command/,
     /editor-preview:select-overlay/, /editor-preview:commit-frame/, /editor-preview:commit-text/,
-    /history\.execute|studioHistory\.execute/, /markSaved/
-  ]) assert.match(source, required);
-  assert.doesNotMatch(source, /selectedOverlayId\s*=.*draftStore\.mutate/);
+    /history\.execute|activeHistory\.execute/
+  ]) assert.match(`${studioSource}\n${bridgeSource}`, required);
+  assert.doesNotMatch(studioSource, /selectedOverlayId\s*=.*onStoryCommand\(['"]replace-story/);
 });
