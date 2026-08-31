@@ -53,6 +53,26 @@ export async function exportPackageZip({ packageStore, validation }) {
   return createZipStorageAdapter().export(packageStore);
 }
 
+export function createOutputPreviewLaunch(validation, outputMode) {
+  if (!['scroll', 'presentation'].includes(outputMode)) {
+    throw new TypeError(`Unsupported output preview mode: ${outputMode}.`);
+  }
+  if (!validation?.lastValid?.snapshot) {
+    throw new TypeError('Output preview is unavailable because there is no valid revision.');
+  }
+  const usingPreviousValidRevision = validation.status === 'invalid';
+  const label = outputMode === 'scroll' ? 'Preview Story' : 'Present';
+  const status = usingPreviousValidRevision
+    ? `${label} using previous valid revision ${validation.lastValid.revision}`
+    : `${label} revision ${validation.lastValid.revision}`;
+  return Object.freeze({
+    lastValid: validation.lastValid,
+    outputMode,
+    usingPreviousValidRevision,
+    status
+  });
+}
+
 export function createEditor({
   documentRef = globalThis.document,
   windowRef = globalThis.window
@@ -72,6 +92,8 @@ export function createEditor({
     save: documentRef.getElementById('save-project'),
     exportZip: documentRef.getElementById('export-project-zip'),
     validate: documentRef.getElementById('validate-project'),
+    previewStory: documentRef.getElementById('preview-story'),
+    presentStory: documentRef.getElementById('present-story'),
     previewStatus: documentRef.getElementById('preview-status'),
     dirtyStatus: documentRef.getElementById('dirty-status'),
     validationStatus: documentRef.getElementById('validation-status'),
@@ -105,6 +127,16 @@ export function createEditor({
   let blockSelection = 0;
   let actionSelection = '';
   let viewportPreset = 'desktop';
+  let outputPreviewStatus = null;
+
+  function launchOutputPreview(outputMode) {
+    const launch = createOutputPreviewLaunch(validation, outputMode);
+    outputPreviewStatus = launch.status;
+    bridge.start(launch.lastValid, { outputMode: launch.outputMode });
+    elements.previewStatus.textContent = launch.status;
+    elements.paused.hidden = !launch.usingPreviousValidRevision;
+    return launch;
+  }
 
   function primaryStory() {
     const manifest = draftStore?.get('project.json');
@@ -174,7 +206,8 @@ export function createEditor({
         renderDirty();
         renderStudioWorkspace();
       },
-      onPreviewCommand(name, payload) { bridge.command(name, payload); }
+      onPreviewCommand(name, payload) { bridge.command(name, payload); },
+      onOutputPreview: launchOutputPreview
     });
     return true;
   }
@@ -1028,7 +1061,7 @@ export function createEditor({
         setViewport(viewportPreset);
       } else if (event.type === 'editor-preview:loaded') {
         elements.iframe.dataset.previewRevision = String(event.revision);
-        elements.previewStatus.textContent = `Preview revision ${event.revision}`;
+        elements.previewStatus.textContent = outputPreviewStatus ?? `Preview revision ${event.revision}`;
         if (primaryStory().story?.schemaVersion === '1.2') {
           bridge.command('activate-scene', { index: stateSelection, animate: false });
           bridge.command('authoring-mode', { mode: getStudioAuthoringMode() });
@@ -1176,6 +1209,8 @@ export function createEditor({
     navigationIndex = buildNavigationIndex();
     renderDirty();
     renderDiagnostics(state.diagnostics);
+    elements.previewStory.disabled = !state.lastValid;
+    elements.presentStory.disabled = !state.lastValid;
     if (state.status === 'validating') {
       elements.validationStatus.textContent = 'Validating through the production loader…';
       return;
@@ -1195,6 +1230,7 @@ export function createEditor({
       elements.paused.hidden = true;
       if (state.lastValid.revision !== lastSentRevision) {
         lastSentRevision = state.lastValid.revision;
+        outputPreviewStatus = null;
         bridge.start(state.lastValid);
       }
     }
@@ -1254,6 +1290,7 @@ export function createEditor({
     actionPhaseSelection = 'enter';
     blockSelection = 0;
     actionSelection = '';
+    outputPreviewStatus = null;
     if (storageAdapter && !storageAdapter.capabilities && capabilities) {
       storageAdapter = { ...storageAdapter, capabilities };
     }
@@ -1375,6 +1412,14 @@ export function createEditor({
     }).catch((error) => { elements.validationStatus.textContent = error.message; });
   });
   elements.validate.addEventListener('click', () => { void validation?.validateNow(); });
+  elements.previewStory.addEventListener('click', () => {
+    try { launchOutputPreview('scroll'); }
+    catch (error) { elements.previewStatus.textContent = error.message; }
+  });
+  elements.presentStory.addEventListener('click', () => {
+    try { launchOutputPreview('presentation'); }
+    catch (error) { elements.previewStatus.textContent = error.message; }
+  });
   elements.heading.addEventListener('input', () => {
     if (!draftStore || !primaryStoryPath) return;
     draftStore.mutate(primaryStoryPath, (story) => {

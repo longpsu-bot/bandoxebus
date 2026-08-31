@@ -80,6 +80,18 @@ function element(documentRef, tag, text, attributes = {}) {
   return node;
 }
 
+export function createStudioOutputPreviewControls({ documentRef = document, onOutputPreview = () => {} } = {}) {
+  const previewStory = element(documentRef, 'button', 'Preview Story', {
+    type: 'button', id: 'studio-preview-story'
+  });
+  const present = element(documentRef, 'button', 'Present', {
+    type: 'button', id: 'studio-present-story'
+  });
+  previewStory.addEventListener('click', () => onOutputPreview('scroll'));
+  present.addEventListener('click', () => onOutputPreview('presentation'));
+  return Object.freeze({ previewStory, present });
+}
+
 function cameraEqual(left, right) {
   return Boolean(left && right)
     && left.zoom === right.zoom && left.pitch === right.pitch && left.bearing === right.bearing
@@ -511,7 +523,8 @@ export function mountStudioShell({
   onSelectScene = () => {},
   onSelectOverlay = () => {},
   onStoryCommand = () => {},
-  onPreviewCommand = () => {}
+  onPreviewCommand = () => {},
+  onOutputPreview = () => {}
 } = {}) {
   if (!navigation?.replaceChildren || !inspector?.replaceChildren || !scenesHost?.replaceChildren) {
     throw new TypeError('Studio shell requires Layers, Properties, and Scenes hosts.');
@@ -526,7 +539,7 @@ export function mountStudioShell({
   activeStudio = {
     documentRef, navigation, inspector, scenesHost, previewToolbar,
     manifest, story, catalogs, sceneIndex, workingCamera,
-    onSelectScene, onSelectOverlay, onStoryCommand, onPreviewCommand
+    onSelectScene, onSelectOverlay, onStoryCommand, onPreviewCommand, onOutputPreview
   };
   normalizeSelection();
   ensureHistory(activeStudio);
@@ -590,7 +603,8 @@ export function mountStudioShell({
     };
     select.addEventListener('click', () => chooseMode('select'));
     map.addEventListener('click', () => chooseMode('map'));
-    previewToolbar.replaceChildren(canvasLabel, select, map);
+    const outputControls = createStudioOutputPreviewControls({ documentRef, onOutputPreview });
+    previewToolbar.replaceChildren(canvasLabel, select, map, outputControls.previewStory, outputControls.present);
   }
 
   const scenesHeading = element(documentRef, 'h2', 'Scenes');

@@ -1,4 +1,14 @@
 import { createScrollStoryNavigation } from './scroll-story.js';
+import { createPresentationMode } from './presentation-mode.js';
+
+const OUTPUT_MODES = new Set(['explore', 'scroll', 'presentation']);
+
+function resolveOutputMode(explicitMode, windowRef) {
+  const requested = explicitMode
+    ?? new URLSearchParams(windowRef?.location?.search ?? '').get('outputMode')
+    ?? 'explore';
+  return OUTPUT_MODES.has(requested) ? requested : 'explore';
+}
 
 export function createGenericStoryExperience({ runtime, sceneController, authoringPolicy } = {}) {
   if (!runtime?.activate || !runtime?.goTo || !runtime?.deactivate) {
@@ -51,7 +61,7 @@ export function bindGenericStoryExperience({
   contentRenderer,
   documentRef = document,
   windowRef = window,
-  outputMode = 'explore',
+  outputMode,
   observerFactory
 } = {}) {
   const authoringPolicy = {
@@ -68,6 +78,7 @@ export function bindGenericStoryExperience({
   const status = documentRef.getElementById?.('runtime-status');
   const navigation = documentRef.getElementById?.('runtime-navigation');
   const contentRoot = documentRef.getElementById?.('scene-compositor');
+  const selectedOutputMode = resolveOutputMode(outputMode, windowRef);
   let started = false;
   let outputAdapter = null;
 
@@ -83,7 +94,7 @@ export function bindGenericStoryExperience({
   }
 
   const shell = Object.freeze({
-    get outputMode() { return outputMode; },
+    get outputMode() { return selectedOutputMode; },
     enter() { return outputAdapter ? outputAdapter.enter() : enterExplore(); },
     activateScene(index, options) { const state = experience.activateScene(index, options); renderState(state); return state; },
     setAuthoringMode: experience.setAuthoringMode,
@@ -96,7 +107,7 @@ export function bindGenericStoryExperience({
     }
   });
 
-  if (outputMode === 'scroll') {
+  if (selectedOutputMode === 'scroll') {
     outputAdapter = createScrollStoryNavigation({
       runtime,
       experience,
@@ -104,6 +115,15 @@ export function bindGenericStoryExperience({
       documentRef,
       windowRef,
       ...(observerFactory ? { observerFactory } : {})
+    });
+  } else if (selectedOutputMode === 'presentation') {
+    outputAdapter = createPresentationMode({
+      runtime,
+      experience,
+      stage: contentRoot,
+      navigation,
+      documentRef,
+      windowRef
     });
   } else if (navigation?.replaceChildren && runtime.definition.states.length > 1) {
     const previous = documentRef.createElement('button');

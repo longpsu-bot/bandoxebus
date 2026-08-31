@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import { createPreviewBridge, PREVIEW_PROTOCOL_VERSION } from '../editor/preview/bridge.js';
+import { createStudioOutputPreviewControls } from '../editor/ui/studio-shell.js';
 import { startEditorPreviewHost } from '../editor/preview/package-resolver.js';
 import { createNewProjectEntries } from '../editor/core/package-store.js';
 import { validateProjectManifest } from '../src/project/project-schema.js';
@@ -325,6 +326,48 @@ test('Story 1.2 authoring commands use exact bounded preview payloads', () => {
   assert.throws(() => bridge.command('authoring-mode', { mode: 'anything' }), /payload/i);
   assert.throws(() => bridge.command('restore-scene-camera', { index: -1 }), /payload/i);
   bridge.dispose();
+});
+
+test('output preview mode selection accepts only exact known session modes', () => {
+  const windowRef = fakeWindow();
+  let loadListener;
+  const iframe = {
+    contentWindow: { postMessage() {} },
+    dataset: { previewSrc: '../?editorPreview=1' },
+    src: '../?editorPreview=1',
+    addEventListener(type, listener) { if (type === 'load') loadListener = listener; },
+    removeEventListener() {}
+  };
+  const bridge = createPreviewBridge({ iframe, windowRef, origin: windowRef.location.origin });
+  const lastValid = { revision: 3, snapshot: { revision: 3, entries: [] } };
+
+  bridge.start(lastValid, { outputMode: 'scroll' });
+  assert.equal(iframe.src, '../?editorPreview=1&outputMode=scroll');
+  loadListener();
+  bridge.start(lastValid, { outputMode: 'presentation' });
+  assert.equal(iframe.src, '../?editorPreview=1&outputMode=presentation');
+  assert.throws(() => bridge.start(lastValid, { outputMode: 'unknown' }), TypeError);
+  assert.throws(() => bridge.start(lastValid, { outputMode: 'scroll', command: 'anything' }), /options/i);
+  bridge.dispose();
+});
+
+test('Studio output controls issue only Preview Story and Present mode requests', () => {
+  class Button {
+    constructor() { this.listeners = new Map(); this.textContent = ''; }
+    setAttribute() {}
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    click() { this.listeners.get('click')?.(); }
+  }
+  const calls = [];
+  const controls = createStudioOutputPreviewControls({
+    documentRef: { createElement: () => new Button() },
+    onOutputPreview(mode) { calls.push(mode); }
+  });
+  controls.previewStory.click();
+  controls.present.click();
+  assert.deepEqual(calls, ['scroll', 'presentation']);
+  assert.equal(controls.previewStory.textContent, 'Preview Story');
+  assert.equal(controls.present.textContent, 'Present');
 });
 
 test('preview host routes bounded Story commands only to the active production shell', async () => {
