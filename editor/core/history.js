@@ -17,7 +17,8 @@ export function createHistory({ read, write, limit = 100, onChange = () => {} } 
 
   const undoStack = [];
   const redoStack = [];
-  let saved = clone(read());
+  let known = clone(read());
+  let saved = clone(known);
 
   function status() {
     return Object.freeze({
@@ -37,40 +38,61 @@ export function createHistory({ read, write, limit = 100, onChange = () => {} } 
     if (stack.length > limit) stack.splice(0, stack.length - limit);
   }
 
+  function sync() {
+    const current = clone(read());
+    if (equivalent(current, known)) return false;
+    undoStack.length = 0;
+    redoStack.length = 0;
+    known = clone(current);
+    saved = clone(current);
+    notify();
+    return true;
+  }
+
+  function writeKnown(next) {
+    known = clone(next);
+    write(clone(next));
+  }
+
   function execute(update) {
     if (typeof update !== 'function') throw new TypeError('History execution requires an update function.');
+    sync();
     const before = clone(read());
     const after = clone(update(clone(before)));
     if (equivalent(before, after)) return before;
     boundedPush(undoStack, before);
     redoStack.length = 0;
-    write(clone(after));
+    writeKnown(after);
     notify();
     return clone(after);
   }
 
   function undo() {
+    sync();
     if (!undoStack.length) return clone(read());
     const current = clone(read());
     const previous = undoStack.pop();
     boundedPush(redoStack, current);
-    write(clone(previous));
+    writeKnown(previous);
     notify();
     return clone(previous);
   }
 
   function redo() {
+    sync();
     if (!redoStack.length) return clone(read());
     const current = clone(read());
     const next = redoStack.pop();
     boundedPush(undoStack, current);
-    write(clone(next));
+    writeKnown(next);
     notify();
     return clone(next);
   }
 
   function markSaved() {
+    sync();
     saved = clone(read());
+    known = clone(saved);
     notify();
     return clone(saved);
   }
@@ -78,7 +100,8 @@ export function createHistory({ read, write, limit = 100, onChange = () => {} } 
   function reset() {
     undoStack.length = 0;
     redoStack.length = 0;
-    saved = clone(read());
+    known = clone(read());
+    saved = clone(known);
     notify();
     return clone(saved);
   }
@@ -87,6 +110,7 @@ export function createHistory({ read, write, limit = 100, onChange = () => {} } 
     execute,
     undo,
     redo,
+    sync,
     markSaved,
     reset,
     status,
