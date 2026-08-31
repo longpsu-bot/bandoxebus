@@ -37,7 +37,11 @@ test('stripped Dark retains geographic context while removing noisy POIs and bui
 });
 
 test('application-owned map labels use the available fixed glyph stack', async () => {
-  const source = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /Roboto Regular/);
-  assert.match(source, /Noto Sans Regular/);
+  const [applicationSource, basemapSource] = await Promise.all([
+    readFile(new URL('../src/runtime/generic-app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/basemap-style.js', import.meta.url), 'utf8')
+  ]);
+  assert.match(applicationSource, /prepareBasemapStyle\(stripOpenFreeMapDarkStyle\(/);
+  assert.doesNotMatch(`${applicationSource}\n${basemapSource}`, /Roboto Regular/);
+  assert.match(basemapSource, /Noto Sans Regular/);
 });

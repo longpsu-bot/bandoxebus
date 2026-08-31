@@ -1,6 +1,7 @@
 import { createCoreMap10Normalizers } from './capabilities/core-map-v1.js';
 import { ROUTE_COMPARISON_V1_NORMALIZERS } from './capabilities/route-comparison-v1.js';
 import { URBAN_CONTEXT_V1_NORMALIZERS } from './capabilities/urban-context-v1.js';
+export { createRouteRevealController } from './route-61-2/reveal-controller.js';
 
 const FOCUS_TARGETS = [
   'overview',
@@ -39,33 +40,6 @@ export const ROUTE_612_STORY_ACTION_CONTRACTS = Object.freeze(Object.fromEntries
 export const ROUTE_612_STORY_ACTION_TYPES = Object.freeze(
   Object.keys(ROUTE_612_STORY_ACTION_CONTRACTS)
 );
-
-export function createRouteRevealController({
-  start,
-  cancel,
-  schedule,
-  clear,
-  reducedMotion
-}) {
-  let timerId = null;
-
-  return Object.freeze({
-    setActive(active, delayMs = 0) {
-      if (timerId !== null) {
-        clear(timerId);
-        timerId = null;
-      }
-      if (!active) {
-        cancel();
-        return;
-      }
-      timerId = schedule(() => {
-        timerId = null;
-        start();
-      }, reducedMotion ? 0 : delayMs);
-    }
-  });
-}
 
 export function createRoute612StoryActionHandlers({
   setMode,

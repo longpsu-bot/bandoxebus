@@ -220,7 +220,8 @@ test('editor shell exposes persistent labels, help/error associations, commands,
   assert.match(css, /\.editor-inspector[^}]+overflow[^}]+auto/s);
   assert.match(css, /@media \(max-width: 900px\)[\s\S]+minmax\(0, 1fr\)/);
   assert.match(css, /prefers-reduced-motion: reduce/);
-  assert.doesNotMatch(html, /<dialog\b/i);
+  assert.match(html, /<dialog[^>]+id="project-template-chooser"[^>]+aria-labelledby="project-template-heading"/i);
+  assert.match(html, /<form method="dialog"><button type="submit">Cancel<\/button><\/form>/i);
 });
 
 test('editor authored rendering and protocol sources prohibit executable and unsafe sinks', async () => {

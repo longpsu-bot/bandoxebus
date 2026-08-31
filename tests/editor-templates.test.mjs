@@ -8,6 +8,8 @@ import {
   createRouteProposalTemplate
 } from '../editor/core/templates.js';
 import { INSTALLED_CAPABILITY_REGISTRY } from '../src/capabilities/installed-capabilities.js';
+import { createRouteComparisonCapability } from '../src/capabilities/route-comparison-v1.js';
+import { buildGeoJsonLayerDefinitions } from '../src/map/geojson-renderer.js';
 import { loadProject } from '../src/project/project-loader.js';
 
 const decoder = new TextDecoder();
@@ -61,6 +63,29 @@ test('Route Proposal satisfies required route roles with bounded empty resources
   assert.deepEqual((await load(entries)).manifest.capabilities, [{ id: 'route-comparison-v1' }]);
 });
 
+test('Route Proposal has a capability-owned production Scene-layer provider without the special adapter', async () => {
+  const project = await load(createRouteProposalTemplate({ id: 'route-plan', title: 'Route plan' }));
+  const calls = [];
+  const layers = new Set();
+  const sources = new Set();
+  const map = {
+    loaded: () => true,
+    getSource: (id) => sources.has(id),
+    addSource(id) { sources.add(id); calls.push(['add-source', id]); },
+    getLayer: (id) => layers.has(id),
+    addLayer(layer) { layers.add(layer.id); calls.push(['add-layer', layer.id]); },
+    setLayoutProperty(id, property, value) { calls.push(['layout', id, property, value]); },
+    removeLayer() {}, removeSource() {}
+  };
+  const capability = createRouteComparisonCapability({
+    settings: {}, map, project, resources: project.resources
+  });
+  assert.deepEqual(capability.sceneLayers.ids, ['existing-route', 'proposed-route']);
+  capability.sceneLayers.setVisible('existing-route', false);
+  assert.ok(calls.some(([type, id, property, value]) => type === 'layout'
+    && id.includes('existing-route') && property === 'visibility' && value === 'none'));
+});
+
 test('Network / Service Plan is neutral ordinary data with no unsatisfied capability role', async () => {
   const entries = createNetworkServicePlanTemplate({ id: 'network-plan', title: 'Network plan' });
   const manifest = parse(entries, 'project.json');
@@ -68,7 +93,13 @@ test('Network / Service Plan is neutral ordinary data with no unsatisfied capabi
   assert.deepEqual(manifest.capabilities, []);
   assert.deepEqual(Object.keys(manifest.datasets).sort(), ['network-lines', 'service-points']);
   assert.deepEqual(story.states.map(({ id }) => id), ['network-overview', 'service-needs', 'service-plan']);
-  assert.equal((await load(entries)).story.states.length, 3);
+  const project = await load(entries);
+  assert.equal(project.story.states.length, 3);
+  for (const [id, resource] of project.resources) {
+    if (resource.descriptor?.type === 'geojson' && resource.descriptor.render) {
+      assert.doesNotThrow(() => buildGeoJsonLayerDefinitions(id, resource.descriptor, resource.value), id);
+    }
+  }
 });
 
 test('templates persist no template runtime identity or metadata', () => {

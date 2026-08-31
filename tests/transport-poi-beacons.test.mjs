@@ -34,7 +34,7 @@ test('trusted POI beacons are created and emphasized without changing generic po
 });
 
 test('the MapLibre marker root remains absolutely positioned at its geographic anchor', async () => {
-  const css = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/route-61-2/styles.css', import.meta.url), 'utf8');
   assert.match(css, /\.maplibregl-marker\.transport-poi-beacon\s*\{[^}]*position:\s*absolute/s);
   assert.doesNotMatch(css, /\.transport-poi-beacon\s*\{[^}]*position:\s*relative/s);
   assert.match(css, /\.transport-poi-beacon__pillar\s*\{[^}]*bottom:\s*0(?:px)?\s*;/s);

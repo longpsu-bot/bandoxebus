@@ -8,7 +8,8 @@ import {
   existingRouteLatLng,
   proposedRouteLatLng,
   existingStopsLatLng,
-  proposedStopsLatLng
+  proposedStopsLatLng,
+  landmarks
 } from '../src/route-data.js';
 
 const PROJECT_URL = new URL('../project.json', import.meta.url);
@@ -61,4 +62,18 @@ test('static Route 61-2 GeoJSON bridge exactly matches current JavaScript geomet
     assert.equal(collection.features.length, geometryType === 'LineString' ? 1 : latLng.length, filename);
     assert.deepEqual(actual, expected, filename);
   }
+});
+
+test('Route POI geometry is ordinary project-owned GeoJSON', async () => {
+  const manifest = JSON.parse(await readFile(PROJECT_URL, 'utf8'));
+  assert.equal(manifest.datasets['connection-pois'].role, 'transport.poi');
+  assert.equal(manifest.datasets['connection-pois'].src, './data/route-61-2/connection-pois.geojson');
+  const collection = JSON.parse(await readFile(new URL('connection-pois.geojson', DATA_ROOT), 'utf8'));
+  assert.deepEqual(collection.features.map(({ properties, geometry }) => ({
+    name: properties.name,
+    type: properties.type,
+    glyph: properties.glyph,
+    sourceUrl: properties.sourceUrl,
+    coordinates: geometry.coordinates
+  })), landmarks.map(({ name, type, glyph, sourceUrl, coordinates }) => ({ name, type, glyph, sourceUrl, coordinates })));
 });

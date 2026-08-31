@@ -340,3 +340,18 @@ test('PR A browser gate certifies bounded Studio revisions and compatibility', a
     'consoleIssues'
   ]) assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
+
+test('PR C browser gate covers rich objects, valid templates, neutral root, trusted Route behavior, and legacy regression', async () => {
+  const source = await readFile(
+    path.join(repositoryRoot, 'scripts', 'map-story-studio-pr-c-browser-smoke.mjs'),
+    'utf8'
+  );
+  for (const required of [
+    'MAP_STORY_STUDIO_PR_C_RESULT: PASS',
+    'stat-group', 'chart', 'table', 'image', 'legend',
+    'route-proposal', 'network-service-plan', 'Import Existing',
+    'capability-controls', 'Route reveal', 'POI emphasis', 'Urban context', 'Simulation',
+    'transport-poi-beacon', 'bus-marker', 'simulationDistance',
+    'maplibregl-canvas', '390', '844', 'consoleIssues'
+  ]) assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});

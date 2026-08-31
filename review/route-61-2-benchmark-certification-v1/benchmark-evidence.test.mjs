@@ -13,7 +13,6 @@ import { ROUTE_612_STORY_ACTION_CONTRACTS } from '../../src/route-61-2-story-act
 
 const STORY_URL = new URL('../../data/stories/route-61-2.story.json', import.meta.url);
 const APP_URL = new URL('../../src/app.js', import.meta.url);
-const ROUTE_DATA_URL = new URL('../../src/route-data.js', import.meta.url);
 const PROJECT_URL = new URL('../../project.json', import.meta.url);
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -233,19 +232,20 @@ test('canonical Route 61-2 story remains unchanged after all in-memory experimen
 });
 
 test('production now consumes project.json while retaining trusted Route 61-2 adapters', async () => {
-  const [appSource, routeDataSource, projectSource] = await Promise.all([
+  const [entrySource, appSource, adapterSource, projectSource] = await Promise.all([
     readFile(APP_URL, 'utf8'),
-    readFile(ROUTE_DATA_URL, 'utf8'),
+    readFile(new URL('../../src/runtime/generic-app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../../src/route-61-2/runtime-adapter.js', import.meta.url), 'utf8'),
     readFile(PROJECT_URL, 'utf8')
   ]);
   const project = JSON.parse(projectSource);
   assert.equal(project.id, 'route-61-2');
   assert.equal(project.stories.items[0].src, './data/stories/route-61-2.story.json');
-  assert.match(appSource, /startProductionApplication\(\)/);
-  assert.match(appSource, /manifestUrl\s*=\s*['"]\.\/project\.json['"]/);
-  assert.doesNotMatch(appSource, /loadStoryDefinition\(['"]\.\/data\/stories\/route-61-2\.story\.json/);
-  assert.match(appSource, /from ['"]\.\/route-data\.js['"]/);
-  assert.match(routeDataSource, /export const existingRouteLatLng/);
-  assert.match(routeDataSource, /export const proposedRouteLatLng/);
-  assert.match(routeDataSource, /export const landmarks/);
+  assert.match(entrySource, /runtime\/generic-app\.js/);
+  assert.match(appSource, /startGenericProductionApplication\(\)/);
+  assert.match(appSource, /manifestUrl\s*=\s*new URL\(['"]\.\.\/\.\.\/project\.json['"],\s*import\.meta\.url\)\.href/);
+  assert.doesNotMatch(`${entrySource}\n${appSource}`, /route-61-2|route-data|loadStoryDefinition/);
+  assert.match(adapterSource, /resourceByRole\(context\.resources, ['"]route\.existing['"]\)/);
+  assert.match(adapterSource, /resourceByRole\(context\.resources, ['"]route\.proposed['"]\)/);
+  assert.doesNotMatch(adapterSource, /from ['"]\.\.\/route-data\.js['"]/);
 });

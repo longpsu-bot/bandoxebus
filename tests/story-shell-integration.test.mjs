@@ -3,27 +3,32 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const appUrl = new URL('../src/app.js', import.meta.url);
+const genericAppUrl = new URL('../src/runtime/generic-app.js', import.meta.url);
+const genericShellUrl = new URL('../src/runtime/generic-shell.js', import.meta.url);
 
-test('application selects Story Shell by default and retains explicit legacy binding', async () => {
+test('root application delegates only to the neutral production entry', async () => {
   const source = await readFile(appUrl, 'utf8');
-  assert.match(source, /resolveStoryExperience\(window\.location\.search\)/);
-  assert.match(source, /storyExperience\s*===\s*['"]legacy['"]\s*\?\s*bindPresentation\(\)\s*:\s*bindStoryShell\(\)/);
+  assert.match(source, /^import ['"]\.\/runtime\/generic-app\.js['"];?\s*$/);
+  assert.doesNotMatch(source, /route-61-2|route-data|transport-poi|urban-context|simulation/i);
 });
 
-test('default application bootstrap binds the launcher without auto-entering Story Shell', async () => {
-  const source = await readFile(appUrl, 'utf8');
-  assert.match(source, /openButton\.addEventListener\(['"]click['"],\s*\(\)\s*=>\s*storyShell\.enter\(\)\)/);
-  assert.doesNotMatch(source, /map\.on\(['"]load['"][\s\S]*?storyShell\.enter\(\)[\s\S]*?map\.once\(['"]idle['"]/);
+test('neutral production entry uses the same bootstrap for root and editor preview', async () => {
+  const source = await readFile(genericAppUrl, 'utf8');
+  assert.match(source, /startApplication\(createGenericApplicationOptions\(transport\)\)/);
+  assert.match(source, /editorPreview['"]\)\s*===\s*['"]1['"]/);
+  assert.match(source, /startProductionApplication:\s*startGenericProductionApplication/);
+  assert.match(source, /return startGenericProductionApplication\(\)/);
 });
 
 test('application keeps one MapLibre map and one generic story runtime', async () => {
-  const source = await readFile(appUrl, 'utf8');
-  assert.equal((source.match(/new maplibregl\.Map\(/g) ?? []).length, 1);
-  assert.equal((source.match(/createStoryRuntime\(/g) ?? []).length, 0);
-  assert.match(source, /startProductionApplication\(\)/);
-  assert.doesNotMatch(source, /loadStoryDefinition\(['"]\.\/data\/stories\/route-61-2\.story\.json['"]/);
-  assert.match(source, /createStoryShell\(\{\s*runtime:\s*storyRuntime,/);
-  assert.match(source, /renderContent:\s*renderPresentationContent/);
-  assert.match(source, /function bindPresentation\(\)/);
-  assert.doesNotMatch(source, /story-poc-content|mobile-story|scroll-story/i);
+  const [appSource, shellSource] = await Promise.all([
+    readFile(genericAppUrl, 'utf8'),
+    readFile(genericShellUrl, 'utf8')
+  ]);
+  assert.equal((appSource.match(/new maplibregl\.Map\(/g) ?? []).length, 1);
+  assert.equal((appSource.match(/createStoryRuntime\(/g) ?? []).length, 0);
+  assert.match(appSource, /bindStoryExperience:\s*bindGenericStoryExperience/);
+  assert.match(shellSource, /createGenericStoryExperience\(\{\s*runtime,\s*sceneController,\s*authoringPolicy\s*\}\)/);
+  assert.match(shellSource, /map\?\.once[^\n]*map\.once\(['"]load['"],\s*start\)/);
+  assert.doesNotMatch(`${appSource}\n${shellSource}`, /route-61-2|route-data|transport-poi|urban-context|simulation/i);
 });

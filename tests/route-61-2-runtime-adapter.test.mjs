@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createRoute612RuntimeAdapter } from '../src/route-61-2/runtime-adapter.js';
+import { createRoute612RuntimeAdapter, installRoute612Styles } from '../src/route-61-2/runtime-adapter.js';
 import { selectRouteComparisonAdapter } from '../src/capabilities/route-comparison-v1.js';
 import { createRoute612Controls } from '../src/route-61-2/controls.js';
 
@@ -40,6 +40,20 @@ test('trusted adapter uses project route resources and preserves mode/reveal/POI
     ['mode', 'difference'], ['reveal', 'proposed-route', true, 250],
     ['poi', 'connection-pois', true], ['urban', 'industrial-context'], ['simulation', true, 1.25]
   ]);
+});
+
+test('trusted adapter owns and installs its compatibility stylesheet', () => {
+  const appended = [];
+  const documentRef = {
+    getElementById() { return null; },
+    createElement(tagName) { return { tagName, remove() { this.removed = true; } }; },
+    head: { append(node) { appended.push(node); } }
+  };
+  const stylesheet = installRoute612Styles(documentRef);
+  assert.equal(stylesheet.id, 'route-61-2-styles');
+  assert.equal(stylesheet.rel, 'stylesheet');
+  assert.match(stylesheet.href, /\/route-61-2\/styles\.css$/);
+  assert.deepEqual(appended, [stylesheet]);
 });
 
 test('route and urban capability contexts attach to the same map-owned adapter', () => {
@@ -90,4 +104,78 @@ test('trusted Route controls mount mode, reveal, POI, urban, and simulation beha
   simulation.checked = true;
   simulation.listeners.change();
   assert.deepEqual(events, [['mode', 'existing'], ['simulation', true, 1]]);
+});
+
+test('trusted adapter renders derived comparison, POI beacons, reveal, urban context, and moving buses', () => {
+  class Element {
+    constructor(tagName) {
+      this.tagName = tagName; this.children = []; this.dataset = {}; this.attributes = {}; this.className = ''; this.hidden = false;
+      this.classList = { values: new Set(), toggle: (name, active) => active ? this.classList.values.add(name) : this.classList.values.delete(name), contains: (name) => this.classList.values.has(name) };
+    }
+    append(...children) { this.children.push(...children); }
+    setAttribute(name, value) { this.attributes[name] = value; }
+    remove() { this.removed = true; }
+  }
+  const mapElement = new Element('map');
+  const documentRef = {
+    head: { append() {} },
+    createElement: (tagName) => new Element(tagName),
+    getElementById: (id) => id === 'map' ? mapElement : null
+  };
+  const sources = new Map(); const layers = new Map(); const paint = [];
+  const map = {
+    loaded: () => true,
+    getSource: (id) => sources.get(id), addSource(id, spec) { sources.set(id, spec); }, removeSource(id) { sources.delete(id); },
+    getLayer: (id) => layers.get(id), addLayer(layer) { layers.set(layer.id, structuredClone(layer)); }, removeLayer(id) { layers.delete(id); },
+    setLayoutProperty(id, property, value) { layers.get(id).layout = { ...layers.get(id).layout, [property]: value }; },
+    setPaintProperty(id, property, value) { paint.push([id, property, value]); }
+  };
+  const markers = [];
+  class Marker {
+    constructor(options) { this.options = options; this.positions = []; markers.push(this); }
+    setLngLat(position) { this.positions.push(position); return this; }
+    addTo() { return this; }
+    remove() { this.removed = true; }
+  }
+  const frames = [];
+  const resources = new Map([
+    ['existing-route', { descriptor: { role: 'route.existing' }, value: line([[106.6, 11], [106.61, 11.01], [106.62, 11.02]]) }],
+    ['proposed-route', { descriptor: { role: 'route.proposed' }, value: line([[106.6, 11], [106.615, 11.02], [106.63, 11.03]]) }],
+    ['existing-stops', { descriptor: { role: 'stops.existing' }, value: { type: 'FeatureCollection', features: [] } }],
+    ['industrial-zone', { descriptor: { role: 'context.area' }, value: { type: 'FeatureCollection', features: [] } }],
+    ['connection-pois', { descriptor: { role: 'transport.poi' }, value: { type: 'FeatureCollection', features: [
+      { type: 'Feature', properties: { name: 'Station' }, geometry: { type: 'Point', coordinates: [106.62, 11.01] } },
+      { type: 'Feature', properties: { name: 'University' }, geometry: { type: 'Point', coordinates: [106.63, 11.02] } }
+    ] } }]
+  ]);
+  const adapter = createRoute612RuntimeAdapter({
+    map, resources, settings: {}, documentRef, maplibregl: { Marker },
+    requestAnimationFrame: (callback) => { frames.push(callback); return frames.length; },
+    cancelAnimationFrame() {},
+    setTimeout(callback) { callback(); return 1; },
+    clearTimeout() {}
+  });
+
+  assert.ok(layers.has('route-61-2-difference-added'));
+  assert.ok(layers.has('route-61-2-difference-removed'));
+  assert.equal(markers.filter(({ options }) => options.element.className === 'transport-poi-beacon').length, 2);
+  adapter.setPoiEmphasis('connection-pois', true);
+  assert.equal(markers.filter(({ options }) => options.element.className === 'transport-poi-beacon')
+    .every(({ options }) => options.element.classList.contains('is-emphasized')), true);
+
+  adapter.setRouteReveal('proposed-route', true);
+  assert.ok(paint.some(([id, property, value]) => (
+    id === 'route-61-2-proposed' && property === 'line-gradient' && Array.isArray(value)
+  )));
+  adapter.setContextMode('industrial-context');
+  assert.equal(layers.get('route-61-2-urban-context').layout.visibility, 'visible');
+
+  adapter.setSimulation(true, 2);
+  const buses = markers.filter(({ options }) => options.element.className.includes('bus-marker'));
+  assert.equal(buses.length, 2);
+  frames.shift()(1000);
+  frames.shift()(1100);
+  assert.equal(buses.every(({ positions }) => positions.length >= 2), true);
+  adapter.destroy();
+  assert.equal(markers.every(({ removed }) => removed), true);
 });

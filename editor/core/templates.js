@@ -91,7 +91,7 @@ export function createNetworkServicePlanTemplate(value = {}) {
     },
     'service-points': {
       type: 'geojson', geometry: 'point', src: './data/service-points.geojson', label: 'Service points',
-      render: { type: 'point', color: '#F59E0B', radius: 6, opacity: 0.95, strokeColor: '#FFFFFF', strokeWidth: 1 }
+      render: { type: 'point', color: '#F59E0B', radius: 6, strokeColor: '#FFFFFF', strokeWidth: 1 }
     }
   };
   const project = manifest({ ...selected, datasets });

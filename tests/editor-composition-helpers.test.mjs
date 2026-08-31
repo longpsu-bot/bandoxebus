@@ -52,6 +52,6 @@ test('Studio UI exposes constrained object helpers and no out-of-scope transform
   ]) assert.match(source, new RegExp(label.replaceAll(' ', '\\s+')));
   assert.match(source, /shiftKey|selectedOverlayIds/);
   for (const forbidden of ['Distribute', 'Group', 'Rotate', 'Custom guide', 'Constraint']) {
-    assert.doesNotMatch(source, new RegExp(forbidden, 'i'));
+    assert.doesNotMatch(source, new RegExp(`['\"\`]${forbidden}['\"\`]`, 'i'));
   }
 });

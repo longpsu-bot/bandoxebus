@@ -2,6 +2,7 @@ import { ProjectLoadError } from '../project/project-error.js';
 import { deepFreeze } from './descriptor-schema.js';
 import { createLegacyActionNormalizer } from './story-1.0-normalizer.js';
 import { haversineMeters } from '../comparison.js';
+import { buildGeoJsonLayerDefinitions } from '../map/geojson-renderer.js';
 import { getRoute612RuntimeAdapter } from '../route-61-2/runtime-adapter.js';
 
 function action(type, label, description, required, properties) {
@@ -30,7 +31,8 @@ export const ROUTE_COMPARISON_V1_DESCRIPTOR = deepFreeze({
   datasetRoles: [
     { role: 'route.existing', types: ['geojson'], geometry: ['line'], required: true, render: true },
     { role: 'route.proposed', types: ['geojson'], geometry: ['line'], required: true, render: true },
-    { role: 'stops.existing', types: ['geojson'], geometry: ['point'], required: false, render: true }
+    { role: 'stops.existing', types: ['geojson'], geometry: ['point'], required: false, render: true },
+    { role: 'transport.poi', types: ['geojson'], geometry: ['point'], required: false, render: true }
   ],
   actions: [
     action('route.set-mode', 'Set route mode', 'Select the visible route comparison mode.', ['mode'], {
@@ -170,8 +172,66 @@ function createRouteComparisonImplementation(context = {}) {
   });
 }
 
+function createDeclarativeRouteLayerProvider(context) {
+  if (!context.map || !context.resources) return null;
+  const ownedRoles = new Set(ROUTE_COMPARISON_V1_DESCRIPTOR.datasetRoles
+    .filter(({ render }) => render)
+    .map(({ role }) => role));
+  const datasets = new Map();
+  for (const [id, resource] of context.resources) {
+    const descriptor = resource.descriptor;
+    if (!ownedRoles.has(descriptor?.role) || !descriptor.render) continue;
+    datasets.set(id, buildGeoJsonLayerDefinitions(id, descriptor, resource.value));
+  }
+  let destroyed = false;
+  const install = () => {
+    if (destroyed) return;
+    for (const [, definitions] of datasets) {
+      if (!context.map.getSource?.(definitions.source.id)) {
+        context.map.addSource(definitions.source.id, definitions.source.spec);
+      }
+      for (const layer of definitions.layers) {
+        if (!context.map.getLayer?.(layer.id)) context.map.addLayer(layer);
+      }
+    }
+  };
+  if (context.map.loaded?.() === false && context.map.once) context.map.once('load', install);
+  else install();
+
+  const setVisible = (id, visible) => {
+    for (const layer of datasets.get(id)?.layers ?? []) {
+      if (context.map.getLayer?.(layer.id)) {
+        context.map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none');
+      }
+    }
+  };
+  return Object.freeze({
+    sceneLayers: Object.freeze({
+      ids: Object.freeze([...datasets.keys()]),
+      setVisible,
+      reset() { for (const id of datasets.keys()) setVisible(id, true); }
+    }),
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      for (const definitions of [...datasets.values()].toReversed()) {
+        for (const layer of definitions.layers.toReversed()) {
+          if (context.map.getLayer?.(layer.id)) context.map.removeLayer?.(layer.id);
+        }
+        if (context.map.getSource?.(definitions.source.id)) context.map.removeSource?.(definitions.source.id);
+      }
+    }
+  });
+}
+
 export function createRouteComparisonCapability(context = {}) {
-  if (context.settings?.adapter !== 'route-61-2-current' || !context.map) return createRouteComparisonImplementation(context);
+  if (context.settings?.adapter !== 'route-61-2-current' || !context.map) {
+    const implementation = createRouteComparisonImplementation(context);
+    const declarativeLayers = createDeclarativeRouteLayerProvider(context);
+    return declarativeLayers
+      ? Object.freeze({ ...implementation, ...declarativeLayers })
+      : implementation;
+  }
   const adapter = selectRouteComparisonAdapter(context.settings, context);
   const implementation = createRouteComparisonImplementation({
     ...context,
