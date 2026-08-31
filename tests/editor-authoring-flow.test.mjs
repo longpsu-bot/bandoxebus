@@ -10,8 +10,45 @@ import { createNewProjectEntries, createPackageStore } from '../editor/core/pack
 import { createPackageFetch } from '../editor/preview/package-resolver.js';
 import { renderEntityInspector } from '../editor/ui/inspectors.js';
 import { createStoryEditor } from '../editor/ui/story-editor.js';
+import {
+  createStudioProjectEntries,
+  routeStudioImportExisting,
+  STUDIO_PROJECT_CHOICES
+} from '../editor/ui/studio-shell.js';
+import {
+  createBlankMapStoryTemplate,
+  createNetworkServicePlanTemplate,
+  createRouteProposalTemplate
+} from '../editor/core/templates.js';
 
 const encoder = new TextEncoder();
+
+test('Studio project choices delegate to production-valid template factories', () => {
+  assert.deepEqual(STUDIO_PROJECT_CHOICES, [
+    { id: 'blank', label: 'Blank' },
+    { id: 'route-proposal', label: 'Route Proposal' },
+    { id: 'network-service-plan', label: 'Network / Service Plan' },
+    { id: 'import-existing', label: 'Import Existing' }
+  ]);
+  const options = { id: 'chosen-project', title: 'Chosen project' };
+  assert.deepEqual(createStudioProjectEntries('blank', options), createBlankMapStoryTemplate(options));
+  assert.deepEqual(createStudioProjectEntries('route-proposal', options), createRouteProposalTemplate(options));
+  assert.deepEqual(createStudioProjectEntries('network-service-plan', options), createNetworkServicePlanTemplate(options));
+  assert.throws(() => createStudioProjectEntries('import-existing', options), /Open Folder or Import ZIP/i);
+});
+
+test('Import Existing routes to the certified Folder and ZIP paths', async () => {
+  const calls = [];
+  const handlers = {
+    openFolder: async () => { calls.push(['folder']); return 'folder-opened'; },
+    importZip: async (file, options) => { calls.push(['zip', file, options]); return 'zip-opened'; }
+  };
+  assert.equal(await routeStudioImportExisting('folder', handlers), 'folder-opened');
+  const file = { name: 'existing.zip' };
+  assert.equal(await routeStudioImportExisting('zip', handlers, file), 'zip-opened');
+  assert.deepEqual(calls, [['folder'], ['zip', file, { label: 'existing.zip' }]]);
+  assert.throws(() => routeStudioImportExisting('remote', handlers), /unsupported import/i);
+});
 
 function geo(type, coordinates, properties = {}) {
   return { type: 'FeatureCollection', features: [{ type: 'Feature', properties, geometry: { type, coordinates } }] };

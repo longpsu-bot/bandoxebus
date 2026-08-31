@@ -1,5 +1,5 @@
 import { createDraftStore } from './core/draft-store.js';
-import { createNewProjectEntries, createPackageStore } from './core/package-store.js';
+import { createPackageStore } from './core/package-store.js';
 import {
   createSourceRepairModel,
   createValidationCoordinator,
@@ -10,6 +10,7 @@ import { renderEntityInspector } from './ui/inspectors.js';
 import { createStoryEditor } from './ui/story-editor.js';
 import {
   applyStudioStoryCommand,
+  createStudioProjectEntries,
   getStudioAuthoringMode,
   mountStudioShell,
   resetStudioAuthoringSession
@@ -60,6 +61,14 @@ export function createEditor({
     newProject: documentRef.getElementById('new-project'),
     openFolder: documentRef.getElementById('open-folder'),
     importZip: documentRef.getElementById('import-zip'),
+    templateChooser: documentRef.getElementById('project-template-chooser'),
+    chooseBlank: documentRef.getElementById('choose-template-blank'),
+    chooseRouteProposal: documentRef.getElementById('choose-template-route-proposal'),
+    chooseNetworkService: documentRef.getElementById('choose-template-network-service'),
+    chooseImportExisting: documentRef.getElementById('choose-import-existing'),
+    importExistingChoices: documentRef.getElementById('import-existing-choices'),
+    chooserOpenFolder: documentRef.getElementById('chooser-open-folder'),
+    chooserImportZip: documentRef.getElementById('chooser-import-zip'),
     save: documentRef.getElementById('save-project'),
     exportZip: documentRef.getElementById('export-project-zip'),
     validate: documentRef.getElementById('validate-project'),
@@ -1254,10 +1263,10 @@ export function createEditor({
     return validation.validateNow();
   }
 
-  async function newProject() {
+  async function newProject(template = 'blank') {
     const adapter = createMemoryStorageAdapter({
       label: 'New project',
-      entries: createNewProjectEntries({ id: 'new-project', title: 'New project', locale: 'en-US' })
+      entries: createStudioProjectEntries(template, { id: 'new-project', title: 'New project', locale: 'en-US' })
     });
     return openStorage(adapter);
   }
@@ -1314,7 +1323,22 @@ export function createEditor({
     });
   }
 
-  elements.newProject.addEventListener('click', () => { void newProject(); });
+  const closeTemplateChooser = () => elements.templateChooser?.close?.();
+  elements.newProject.addEventListener('click', () => {
+    if (elements.importExistingChoices) elements.importExistingChoices.hidden = true;
+    if (elements.templateChooser?.showModal) elements.templateChooser.showModal();
+    else void newProject('blank');
+  });
+  for (const [button, template] of [
+    [elements.chooseBlank, 'blank'],
+    [elements.chooseRouteProposal, 'route-proposal'],
+    [elements.chooseNetworkService, 'network-service-plan']
+  ]) button?.addEventListener('click', () => { closeTemplateChooser(); void newProject(template); });
+  elements.chooseImportExisting?.addEventListener('click', () => {
+    if (elements.importExistingChoices) elements.importExistingChoices.hidden = false;
+  });
+  elements.chooserOpenFolder?.addEventListener('click', () => { closeTemplateChooser(); elements.openFolder.click(); });
+  elements.chooserImportZip?.addEventListener('click', () => { closeTemplateChooser(); elements.importZip.click(); });
   elements.openFolder.disabled = !canOpenFolder(windowRef);
   elements.openFolder.addEventListener('click', () => {
     void openFolder().catch((error) => { elements.validationStatus.textContent = error.message; });

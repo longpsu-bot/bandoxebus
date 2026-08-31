@@ -26,6 +26,32 @@ import {
   STORY_12_FONT_FAMILIES
 } from '../../src/scene/scene-contract.js';
 import { subscribePreviewAuthoringEvents } from '../preview/bridge.js';
+import {
+  createBlankMapStoryTemplate,
+  createNetworkServicePlanTemplate,
+  createRouteProposalTemplate
+} from '../core/templates.js';
+
+export const STUDIO_PROJECT_CHOICES = Object.freeze([
+  Object.freeze({ id: 'blank', label: 'Blank' }),
+  Object.freeze({ id: 'route-proposal', label: 'Route Proposal' }),
+  Object.freeze({ id: 'network-service-plan', label: 'Network / Service Plan' }),
+  Object.freeze({ id: 'import-existing', label: 'Import Existing' })
+]);
+
+export function createStudioProjectEntries(choice, options = {}) {
+  if (choice === 'blank') return createBlankMapStoryTemplate(options);
+  if (choice === 'route-proposal') return createRouteProposalTemplate(options);
+  if (choice === 'network-service-plan') return createNetworkServicePlanTemplate(options);
+  if (choice === 'import-existing') throw new TypeError('Import Existing uses Open Folder or Import ZIP.');
+  throw new TypeError(`Unknown Studio project choice: ${choice}.`);
+}
+
+export function routeStudioImportExisting(kind, { openFolder, importZip }, value) {
+  if (kind === 'folder') return openFolder();
+  if (kind === 'zip') return importZip(value, { label: value?.name ?? 'Imported project.zip' });
+  throw new TypeError(`Unsupported import path: ${kind}.`);
+}
 
 let activeStudio = null;
 let activeHistory = null;

@@ -31,6 +31,21 @@
     </div>
   </header>
 
+  <dialog id="project-template-chooser" aria-labelledby="project-template-heading">
+    <h2 id="project-template-heading">Create a project</h2>
+    <div class="template-choices">
+      <button id="choose-template-blank" type="button">Blank</button>
+      <button id="choose-template-route-proposal" type="button">Route Proposal</button>
+      <button id="choose-template-network-service" type="button">Network / Service Plan</button>
+      <button id="choose-import-existing" type="button">Import Existing</button>
+    </div>
+    <div id="import-existing-choices" hidden>
+      <button id="chooser-open-folder" type="button">Open Folder</button>
+      <button id="chooser-import-zip" type="button">Import ZIP</button>
+    </div>
+    <form method="dialog"><button type="submit">Cancel</button></form>
+  </dialog>
+
   <div class="editor-layout">
     <nav class="editor-navigation" aria-label="Project navigation">
       <h2>Project</h2>
