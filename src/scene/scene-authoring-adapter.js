@@ -6,6 +6,7 @@ import {
 } from './scene-compositor.js';
 
 export const SNAP_TOLERANCE_PX = 8;
+const SNAP_EPSILON_PX = 1e-9;
 const NUDGE_PX = 1;
 const LARGE_NUDGE_PX = 10;
 
@@ -58,7 +59,7 @@ function bestCorrection(frame, otherFrames, axis, pixels, tolerancePx) {
       const delta = target - anchor.position;
       const distancePx = Math.abs(delta * pixels);
       if (distancePx > tolerancePx) continue;
-      if (!best || distancePx < best.distancePx) best = { delta, target, distancePx };
+      if (!best || distancePx + SNAP_EPSILON_PX < best.distancePx) best = { delta, target, distancePx };
     }
   }
   return best;
@@ -98,7 +99,7 @@ function snapResizeFrame(frame, otherFrames, bounds, tolerancePx) {
   let bestRight = null;
   for (const target of targetPositions(otherFrames, 'x')) {
     const distancePx = Math.abs((target - right) * bounds.width);
-    if (distancePx <= tolerancePx && (!bestRight || distancePx < bestRight.distancePx)) {
+    if (distancePx <= tolerancePx && (!bestRight || distancePx + SNAP_EPSILON_PX < bestRight.distancePx)) {
       bestRight = { target, distancePx };
     }
   }
@@ -109,7 +110,7 @@ function snapResizeFrame(frame, otherFrames, bounds, tolerancePx) {
   let bestBottom = null;
   for (const target of targetPositions(otherFrames, 'y')) {
     const distancePx = Math.abs((target - bottom) * bounds.height);
-    if (distancePx <= tolerancePx && (!bestBottom || distancePx < bestBottom.distancePx)) {
+    if (distancePx <= tolerancePx && (!bestBottom || distancePx + SNAP_EPSILON_PX < bestBottom.distancePx)) {
       bestBottom = { target, distancePx };
     }
   }
