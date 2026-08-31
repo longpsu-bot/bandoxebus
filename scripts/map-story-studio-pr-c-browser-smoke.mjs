@@ -203,20 +203,56 @@ try {
         urbanLayerVisible: true } : null;
   })()`, 'visible Route POI, urban, and simulation behavior');
 
+  await evaluate(client, `(async () => {
+    const fixtureBase = '../tests/fixtures/well-rounded-template-v1/';
+    const manifest = await fetch(fixtureBase + 'project.json').then((response) => response.json());
+    const declared = [
+      ...manifest.stories.items.map((item) => ({ path: item.src.slice(2), kind: 'story', mediaType: 'application/json' })),
+      ...Object.values(manifest.datasets).map((item) => ({ path: item.src.slice(2), kind: 'dataset',
+        mediaType: item.type === 'geojson' ? 'application/geo+json' : 'application/json' })),
+      ...Object.values(manifest.assets).map((item) => ({ path: item.src.slice(2), kind: 'asset', mediaType: item.mediaType })),
+      ...(manifest.metrics ? [{ path: manifest.metrics.src.slice(2), kind: 'metrics', mediaType: 'application/json' }] : [])
+    ];
+    const encoder = new TextEncoder();
+    const entries = [{ path: 'project.json', bytes: encoder.encode(JSON.stringify(manifest)),
+      kind: 'manifest', mediaType: 'application/json', managed: true }];
+    for (const item of declared) entries.push({ ...item,
+      bytes: new Uint8Array(await fetch(fixtureBase + item.path).then((response) => response.arrayBuffer())), managed: true });
+    await window.__GUI_EDITOR__.openEntries(entries, { label: 'Story 1.1 mobile regression' });
+  })()`);
+  await waitFor(client, `document.getElementById('production-preview').contentDocument
+    ?.querySelectorAll('.maplibregl-canvas').length === 1`, 'Story 1.1 production preview');
   await client.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await evaluate(client, `(() => {
+    const frame = document.getElementById('production-preview');
+    Object.assign(frame.style, { position: 'fixed', inset: '0', width: '390px', height: '844px', border: '0', zIndex: '2147483647' });
+    return true;
+  })()`);
+  const legacy11Mobile = await waitFor(client, `(() => {
+    const frame = document.getElementById('production-preview'); const child = frame?.contentDocument;
+    return frame?.contentWindow.innerWidth === 390 && frame.contentWindow.innerHeight === 844
+      && child?.querySelectorAll('.maplibregl-canvas').length === 1
+      && child.getElementById('runtime-status')?.textContent === 'Scene 1 of 6'
+      && child.getElementById('scene-compositor')?.textContent.includes('Route realignment')
+      ? { width: frame.contentWindow.innerWidth, height: frame.contentWindow.innerHeight, maps: 1, scenes: 6 } : null;
+  })()`, '390 x 844 Story 1.1 production regression');
+
   await client.send('Page.navigate', { url: new URL('../', APP_URL).href });
-  const mobile = await waitFor(client, `(() => document.readyState === 'complete'
+  const legacy10Mobile = await waitFor(client, `(() => document.readyState === 'complete'
     && document.querySelectorAll('.maplibregl-canvas').length === 1
     && document.getElementById('capability-controls')?.hidden === false
     ? { width: innerWidth, height: innerHeight, maps: 1 } : null)()`, '390 x 844 legacy production regression');
-  if (mobile.width !== 390 || mobile.height !== 844) throw new Error(`Unexpected legacy viewport: ${JSON.stringify(mobile)}`);
+  if (legacy10Mobile.width !== 390 || legacy10Mobile.height !== 844) {
+    throw new Error(`Unexpected Story 1.0 viewport: ${JSON.stringify(legacy10Mobile)}`);
+  }
   if (consoleIssues.length) throw new Error(`Unexpected browser console issues: ${JSON.stringify(consoleIssues)}`);
 
   console.log(JSON.stringify({
     gate: 'pr-c', rich: rich.types, templates, importExisting: importChoices, zipReopen: true,
     neutralRoot: true, routeBehavior: { ...routeBehavior, ...routeVisuals },
-    oneMap: blank.maps === 1 && rich.maps === 1 && route.maps === 1 && mobile.maps === 1,
-    legacy390x844: mobile, console: 'clean'
+    oneMap: blank.maps === 1 && rich.maps === 1 && route.maps === 1
+      && legacy10Mobile.maps === 1 && legacy11Mobile.maps === 1,
+    legacy390x844: { story10: legacy10Mobile, story11: legacy11Mobile }, console: 'clean'
   }));
   console.log('MAP_STORY_STUDIO_PR_C_RESULT: PASS');
 } finally {

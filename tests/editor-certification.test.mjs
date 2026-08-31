@@ -352,6 +352,7 @@ test('PR C browser gate covers rich objects, valid templates, neutral root, trus
     'route-proposal', 'network-service-plan', 'Import Existing',
     'capability-controls', 'Route reveal', 'POI emphasis', 'Urban context', 'Simulation',
     'transport-poi-beacon', 'bus-marker', 'simulationDistance',
+    'well-rounded-template-v1', 'Scene 1 of 6', 'contentWindow.innerWidth',
     'maplibregl-canvas', '390', '844', 'consoleIssues'
   ]) assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
