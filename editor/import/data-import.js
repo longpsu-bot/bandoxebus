@@ -163,7 +163,9 @@ function publicSourceItem(item) {
 
 function replacementError(candidate, replacement) {
   if (!replacement) return undefined;
-  if (candidate.kind !== replacement.kind) return `Replacement is incompatible; expected ${replacement.kind} data.`;
+  const replacementKind = replacement.kind ?? (replacement.type === 'geojson' ? 'spatial'
+    : replacement.type === 'table-json' ? 'table' : undefined);
+  if (candidate.kind !== replacementKind) return `Replacement is incompatible; expected ${replacementKind} data.`;
   if (candidate.kind === 'spatial' && candidate.geometry !== replacement.geometry) {
     return `Replacement is incompatible; expected ${replacement.geometry} geometry.`;
   }
@@ -265,7 +267,9 @@ export function createDataImportSession({
       try {
         const preparedConfig = { ...config };
         if ((detection.format === 'csv' && preparedConfig.mode === 'points')
-          || (detection.format === 'shapefile' && preparedConfig.crsMode === 'manual')) {
+          || (detection.format === 'shapefile' && preparedConfig.crsMode === 'manual')
+          || (['geojson', 'kml', 'kmz', 'gpx'].includes(detection.format)
+            && preparedConfig.sourceCrs && preparedConfig.sourceCrs !== 'EPSG:4326')) {
           preparedConfig.proj4 = await loaders.loadProj4();
         }
         const result = await source.prepare(selectedItemId, preparedConfig);

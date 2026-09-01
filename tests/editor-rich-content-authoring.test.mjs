@@ -126,6 +126,30 @@ test('Blank Studio inserts Heading, Body text, and Legend immediately while reso
   assert.equal(requests.every(({ insert }) => typeof insert === 'function'), true);
 });
 
+test('Studio Layers exposes Add data, layer summaries, and Replace data callbacks', () => {
+  resetStudioAuthoringSession();
+  const documentRef = { createElement: (tag) => new Element(tag), getElementById: () => null };
+  const roots = [new Element('nav'), new Element('aside'), new Element('section'), new Element('div')];
+  const story = applyStudioStoryCommand(baseStory(), 'add-project-layer', { sceneIndex: 0, datasetId: 'route' });
+  const calls = [];
+  mountStudioShell({
+    documentRef, navigation: roots[0], inspector: roots[1], scenesHost: roots[2], previewToolbar: roots[3],
+    manifest: { id: 'data-project', datasets: { route: { type: 'geojson', geometry: 'line', label: 'Route' } }, assets: {} },
+    story,
+    catalogs: { datasets: [{ id: 'route', label: 'Route', geometry: 'line', featureCount: 2 }] },
+    onAddData() { calls.push(['add']); },
+    onReplaceData(id) { calls.push(['replace', id]); }
+  });
+  const button = (label) => roots.flatMap(walk).find((node) => node.tagName === 'BUTTON' && node.textContent === label);
+  assert.ok(button('+ Add data'));
+  assert.match(roots.flatMap(walk).map((node) => node.textContent).join(' '), /Line · 2 features/);
+  button('+ Add data').click();
+  button('Route').click();
+  assert.ok(button('Replace data…'));
+  button('Replace data…').click();
+  assert.deepEqual(calls, [['add'], ['replace', 'route']]);
+});
+
 test('guided rich insertion commits an explicit resource and selects the production-valid object', () => {
   resetStudioAuthoringSession();
   const byId = new Map();

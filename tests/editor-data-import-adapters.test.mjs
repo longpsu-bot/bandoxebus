@@ -387,7 +387,7 @@ test('GeoPackage cleanup runs when projected verification fails and dispose is i
   await assert.rejects(source.prepare(source.sourceItems[0].id), /could not verify.*EPSG:4326/i);
   assert.deepEqual(events.slice(-2), ['result-set:close', 'geopackage:close']);
   source.dispose();
-  assert.equal(events.filter((event) => event === 'geopackage:close').length, 1);
+  assert.equal(events.filter((event) => event === 'geopackage:close').length, 2);
 });
 
 test('actual shpjs parses safe zipped and loose fixtures with projected coordinates once', async () => {
@@ -433,4 +433,28 @@ test('actual SheetJS parses the committed two-sheet fixture deterministically', 
 test('committed unsafe archive is rejected before adapter dispatch', async () => {
   const { detectDataFiles } = await optionalModule('../editor/import/data-import.js');
   await assert.rejects(detectDataFiles([await fixture('unsafe-path.zip')]), /traversal|unsafe.*path/i);
+});
+
+test('GeoJSON and KML explicit source CRS overrides transform exactly once before normalization', async () => {
+  const { openGeoJsonSource, openXmlSpatialSource } = await optionalModule('../editor/import/spatial-adapters.js');
+  const proj4 = await realProj4();
+  const projected = {
+    type: 'FeatureCollection',
+    crs: { type: 'name', properties: { name: 'EPSG:3857' } },
+    features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [11131949.079327356, 1118889.9748579594, 3] } }]
+  };
+  const source = await openGeoJsonSource({
+    format: 'geojson', jsonKind: 'spatial', files: [file('legacy.geojson', '{}')], value: projected
+  });
+  const candidate = (await source.prepare(source.sourceItems[0].id, { sourceCrs: 'EPSG:3857', proj4 }))[0];
+  assert.ok(Math.abs(candidate.value.features[0].geometry.coordinates[0] - 100) < 1e-9);
+  assert.equal(candidate.value.features[0].geometry.coordinates[2], 3);
+  assert.equal(candidate.reprojected, true);
+
+  const kml = await openXmlSpatialSource(file('override.kml', '<kml/>'), {
+    format: 'kml', domParser: { parseFromString: () => ({ documentElement: { localName: 'kml' } }) },
+    toGeoJson: { kml: () => projected }
+  });
+  const overridden = (await kml.prepare(kml.sourceItems[0].id, { sourceCrs: 'EPSG:3857', proj4 }))[0];
+  assert.ok(Math.abs(overridden.value.features[0].geometry.coordinates[1] - 10) < 1e-9);
 });

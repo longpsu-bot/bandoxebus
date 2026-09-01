@@ -57,81 +57,82 @@ export async function openGeoPackageSource(bytes, {
     throw new TypeError('GeoPackage JS is required for GeoPackage import.');
   }
   resolveLocalCrs('EPSG:4326', proj4);
-  const geoPackage = await geoPackageApi.GeoPackageAPI.open(bytes);
-  let closed = false;
-  function close() {
-    if (closed) return;
-    closed = true;
-    geoPackage.close();
-  }
+  let inventory;
+  let tableNames;
   try {
-    const tableNames = geoPackage.getFeatureTables();
-    if (!Array.isArray(tableNames) || !tableNames.length) {
-      close();
-      throw new TypeError('GeoPackage contains no feature tables.');
-    }
-    const occupied = [...usedIds];
-    const sourceItems = tableNames.map((tableName) => {
-      const itemLabel = friendlyLabel(tableName);
-      const id = createImportId(itemLabel, occupied);
-      occupied.push(id);
-      return Object.freeze({ id, label: itemLabel, tableName });
-    });
-    return Object.freeze({
-      sourceItems: Object.freeze(sourceItems),
-      async prepare(itemId) {
-        if (closed) throw new TypeError('GeoPackage source is already closed.');
-        const item = sourceItems.find(({ id }) => id === itemId);
-        if (!item) throw new TypeError(`Unknown GeoPackage feature table: ${itemId}.`);
-        const features = [];
-        let iterator;
-        let sourceCrs;
-        let verified = false;
-        try {
-          const dao = geoPackage.getFeatureDao(item.tableName);
-          sourceCrs = sourceCrsFor(dao.srs);
-          resolveLocalCrs(sourceCrs, proj4);
-          const geometryColumn = dao.getGeometryColumnName();
-          iterator = dao.queryForEach()[Symbol.iterator]();
-          for (let next = iterator.next(); !next.done; next = iterator.next()) {
-            const row = dao.getRow(next.value);
-            if (!row?.geometry) continue;
-            const rawGeometry = row.geometry.toGeoJSON();
-            const outputGeometry = geoPackageApi.FeatureDao.reprojectFeature(row, dao.srs, dao.projection);
-            if (!verified) {
-              verifyProjection(rawGeometry, outputGeometry, { sourceCrs, proj4 });
-              verified = true;
-            }
-            const feature = {
-              type: 'Feature',
-              properties: scalarProperties(row.values, geometryColumn),
-              geometry: outputGeometry
-            };
-            if (row.id !== undefined && row.id !== null) feature.id = row.id;
-            features.push(feature);
-          }
-          if (!features.length) throw new TypeError(`GeoPackage feature table ${item.tableName} contains no usable geometry.`);
-          const collection = assertWgs84Coordinates({ type: 'FeatureCollection', features });
-          return normalizeSpatialSource(collection, {
-            label: item.label,
-            id: item.id,
-            sourceFormat: 'GeoPackage',
-            sourceCrs,
-            usedIds
-          }).map((candidate) => Object.freeze({
-            ...candidate,
-            coordinateState: 'wgs84',
-            reprojected: sourceCrs !== 'EPSG:4326'
-          }));
-        } finally {
-          iterator?.return?.();
-          close();
-        }
-      },
-      dispose: close
-    });
-  } catch (error) {
-    close();
-    throw error;
+    inventory = await geoPackageApi.GeoPackageAPI.open(bytes);
+    tableNames = inventory.getFeatureTables();
+  } finally {
+    inventory?.close?.();
   }
+  if (!Array.isArray(tableNames) || !tableNames.length) throw new TypeError('GeoPackage contains no feature tables.');
+  const occupied = [...usedIds];
+  const sourceItems = tableNames.map((tableName) => {
+    const itemLabel = friendlyLabel(tableName);
+    const id = createImportId(itemLabel, occupied);
+    occupied.push(id);
+    return Object.freeze({ id, label: itemLabel, tableName });
+  });
+  let disposed = false;
+  let activeConnection = null;
+  return Object.freeze({
+    sourceItems: Object.freeze(sourceItems),
+    async prepare(itemId, { sourceCrs: sourceCrsOverride } = {}) {
+      if (disposed) throw new TypeError('GeoPackage source is already closed.');
+      const item = sourceItems.find(({ id }) => id === itemId);
+      if (!item) throw new TypeError(`Unknown GeoPackage feature table: ${itemId}.`);
+      const features = [];
+      let iterator;
+      let sourceCrs;
+      let verified = false;
+      try {
+        activeConnection = await geoPackageApi.GeoPackageAPI.open(bytes);
+        const dao = activeConnection.getFeatureDao(item.tableName);
+        sourceCrs = sourceCrsOverride || sourceCrsFor(dao.srs);
+        resolveLocalCrs(sourceCrs, proj4);
+        const geometryColumn = dao.getGeometryColumnName();
+        iterator = dao.queryForEach()[Symbol.iterator]();
+        for (let next = iterator.next(); !next.done; next = iterator.next()) {
+          const row = dao.getRow(next.value);
+          if (!row?.geometry) continue;
+          const rawGeometry = row.geometry.toGeoJSON();
+          const outputGeometry = geoPackageApi.FeatureDao.reprojectFeature(row, dao.srs, dao.projection);
+          if (!verified) {
+            verifyProjection(rawGeometry, outputGeometry, { sourceCrs, proj4 });
+            verified = true;
+          }
+          const feature = {
+            type: 'Feature',
+            properties: scalarProperties(row.values, geometryColumn),
+            geometry: outputGeometry
+          };
+          if (row.id !== undefined && row.id !== null) feature.id = row.id;
+          features.push(feature);
+        }
+        if (!features.length) throw new TypeError(`GeoPackage feature table ${item.tableName} contains no usable geometry.`);
+        const collection = assertWgs84Coordinates({ type: 'FeatureCollection', features });
+        return normalizeSpatialSource(collection, {
+          label: item.label,
+          id: item.id,
+          sourceFormat: 'GeoPackage',
+          sourceCrs,
+          usedIds
+        }).map((candidate) => Object.freeze({
+          ...candidate,
+          coordinateState: 'wgs84',
+          reprojected: sourceCrs !== 'EPSG:4326'
+        }));
+      } finally {
+        iterator?.return?.();
+        activeConnection?.close?.();
+        activeConnection = null;
+      }
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      activeConnection?.close?.();
+      activeConnection = null;
+    }
+  });
 }

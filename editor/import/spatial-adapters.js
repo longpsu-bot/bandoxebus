@@ -54,12 +54,14 @@ export async function openXmlSpatialSource(file, {
   const sourceItems = [{ id, label }];
   return spatialSource({
     sourceItems,
-    async prepare(itemId) {
+    async prepare(itemId, { sourceCrs = 'EPSG:4326', proj4 } = {}) {
       checkedItem(sourceItems, itemId);
-      const value = parseXml(bytes, { format, domParser, toGeoJson });
+      const parsed = parseXml(bytes, { format, domParser, toGeoJson });
+      const value = sourceCrs === 'EPSG:4326' ? assertWgs84Coordinates(parsed)
+        : reprojectFeatureCollection(parsed, { sourceCrs, proj4 });
       return decorateSpatial(normalizeSpatialSource(value, {
-        label, id, sourceFormat: format.toUpperCase(), sourceCrs: 'EPSG:4326', usedIds
-      }), { coordinateState: 'wgs84', reprojected: false });
+        label, id, sourceFormat: format.toUpperCase(), sourceCrs, usedIds
+      }), { coordinateState: 'wgs84', reprojected: sourceCrs !== 'EPSG:4326' });
     }
   });
 }
@@ -79,16 +81,18 @@ export async function openKmzSource(detection, {
   });
   return spatialSource({
     sourceItems,
-    async prepare(itemId) {
+    async prepare(itemId, { sourceCrs = 'EPSG:4326', proj4 } = {}) {
       const item = checkedItem(sourceItems, itemId);
-      const value = parseXml(item.bytes, { format: 'kml', domParser, toGeoJson });
+      const parsed = parseXml(item.bytes, { format: 'kml', domParser, toGeoJson });
+      const value = sourceCrs === 'EPSG:4326' ? assertWgs84Coordinates(parsed)
+        : reprojectFeatureCollection(parsed, { sourceCrs, proj4 });
       return decorateSpatial(normalizeSpatialSource(value, {
         label: item.label,
         id: item.candidateId,
         sourceFormat: 'KMZ',
-        sourceCrs: 'EPSG:4326',
+        sourceCrs,
         usedIds
-      }), { coordinateState: 'wgs84', reprojected: false });
+      }), { coordinateState: 'wgs84', reprojected: sourceCrs !== 'EPSG:4326' });
     }
   });
 }
@@ -116,7 +120,7 @@ export async function openShapefileSource(detection, { shp, proj4, usedIds = [] 
     const label = friendlyLabel(group.basename);
     const id = createImportId(label, occupied);
     occupied.push(id);
-    return Object.freeze({ id, label, group });
+    return Object.freeze({ id, label, group, hasPrj: Boolean(group.files.prj), hasDbf: Boolean(group.files.dbf) });
   });
   return spatialSource({
     sourceItems,
@@ -158,14 +162,18 @@ export async function openGeoJsonSource(detection, { usedIds = [] } = {}) {
   if (detection?.format !== 'geojson' || detection.jsonKind !== 'spatial') throw new TypeError('GeoJSON detection is required.');
   const label = friendlyLabel(detection.files[0].name);
   const id = createImportId(label, usedIds);
-  const sourceItems = [{ id, label }];
+  const declaredCrs = detection.value?.crs?.properties?.name;
+  const defaultSourceCrs = typeof declaredCrs === 'string' && declaredCrs.trim() ? declaredCrs.trim().toUpperCase() : 'EPSG:4326';
+  const sourceItems = [{ id, label, defaultSourceCrs }];
   return spatialSource({
     sourceItems,
-    async prepare(itemId) {
+    async prepare(itemId, { sourceCrs = defaultSourceCrs, proj4 } = {}) {
       checkedItem(sourceItems, itemId);
-      return decorateSpatial(normalizeSpatialSource(detection.value, {
-        label, id, sourceFormat: 'GeoJSON', sourceCrs: 'EPSG:4326', usedIds
-      }), { coordinateState: 'wgs84', reprojected: false });
+      const value = sourceCrs === 'EPSG:4326' ? assertWgs84Coordinates(detection.value)
+        : reprojectFeatureCollection(detection.value, { sourceCrs, proj4 });
+      return decorateSpatial(normalizeSpatialSource(value, {
+        label, id, sourceFormat: 'GeoJSON', sourceCrs, usedIds
+      }), { coordinateState: 'wgs84', reprojected: sourceCrs !== 'EPSG:4326' });
     }
   });
 }

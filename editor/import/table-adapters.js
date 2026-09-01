@@ -80,7 +80,14 @@ export async function openCsvSource(file, { papa, usedIds = [] } = {}) {
   if (!grid.length) throw new TypeError('CSV contains no rows.');
   const label = friendlyLabel(file.name);
   const id = createImportId(label, usedIds);
-  const sourceItems = oneItem(label, id);
+  const sourceItems = Object.freeze([Object.freeze({
+    id,
+    label,
+    headings: [...(grid[0] ?? [])],
+    suggestedXColumn: (grid[0] ?? []).find((heading) => /^(?:x|lon|lng|longitude|easting)$/i.test(String(heading).trim())),
+    suggestedYColumn: (grid[0] ?? []).find((heading) => /^(?:y|lat|latitude|northing)$/i.test(String(heading).trim())),
+    defaultSourceCrs: (grid[0] ?? []).some((heading) => /^(?:lon|lng|longitude|lat|latitude)$/i.test(String(heading).trim())) ? 'EPSG:4326' : undefined
+  })]);
   return Object.freeze({
     sourceItems,
     async prepare(itemId, {

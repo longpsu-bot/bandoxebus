@@ -612,6 +612,8 @@ export function mountStudioShell({
   onSelectScene = () => {},
   onSelectOverlay = () => {},
   onRenderLayerProperties = () => {},
+  onAddData = () => {},
+  onReplaceData = () => {},
   onStoryCommand = () => {},
   onRequestInsert = (_kind, insert) => insert(),
   onPreviewCommand = () => {},
@@ -631,7 +633,8 @@ export function mountStudioShell({
   activeStudio = {
     documentRef, navigation, inspector, scenesHost, previewToolbar,
     manifest, story, catalogs, sceneIndex, workingCamera,
-    onSelectScene, onSelectOverlay, onRenderLayerProperties, onStoryCommand, onRequestInsert, onPreviewCommand, onOutputPreview
+    onSelectScene, onSelectOverlay, onRenderLayerProperties, onAddData, onReplaceData,
+    onStoryCommand, onRequestInsert, onPreviewCommand, onOutputPreview
   };
   normalizeSelection();
   ensureHistory(activeStudio);
@@ -660,10 +663,22 @@ export function mountStudioShell({
       'aria-pressed': String(selectedLayerId === datasetId), title: `Layer ID: ${datasetId}`
     });
     select.addEventListener('click', () => selectLayer(datasetId));
-    row.append(visibility, select);
+    const catalogItem = catalogs.datasets?.find(({ id }) => id === datasetId);
+    const family = readableId(catalogItem?.geometry ?? descriptor?.geometry ?? '');
+    const featureCount = catalogItem?.featureCount;
+    const summary = Number.isInteger(featureCount)
+      ? `${family} · ${featureCount} ${featureCount === 1 ? 'feature' : 'features'}`
+      : family;
+    const details = element(documentRef, 'div', undefined, { className: 'studio-layer-details' });
+    details.append(select);
+    if (summary) details.append(element(documentRef, 'span', summary, { className: 'studio-layer-summary' }));
+    row.append(visibility, details);
     layers.append(row);
   }
   if (!sceneLayerIds.length) layers.append(element(documentRef, 'p', 'No map layers yet.'));
+  const addData = element(documentRef, 'button', '+ Add data', { type: 'button', className: 'studio-add-data' });
+  addData.addEventListener('click', () => onAddData());
+  layers.append(addData);
 
   const insertHeading = element(documentRef, 'h2', 'Insert');
   const addMenu = element(documentRef, 'div', undefined, { className: 'studio-add-menu' });
@@ -713,6 +728,9 @@ export function mountStudioShell({
       element(documentRef, 'p', `Layer · ${manifest.datasets?.[selectedLayerId]?.label ?? readableId(selectedLayerId)}`, { className: 'studio-selection-label' })
     );
     onRenderLayerProperties(selectedLayerId, inspector);
+    const replaceData = element(documentRef, 'button', 'Replace data…', { type: 'button', className: 'studio-replace-data' });
+    replaceData.addEventListener('click', () => onReplaceData(selectedLayerId));
+    inspector.append(replaceData);
     inspector.append(renderCameraProperties({ documentRef, active, sceneIndex, workingCamera }));
   }
   else renderSceneProperties({ documentRef, inspector, active, sceneIndex, workingCamera });
