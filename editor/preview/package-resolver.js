@@ -132,6 +132,8 @@ function validCommand(data) {
   if (name === 'activate-scene') return exactKeys(payload, ['index', 'animate'])
     && Number.isInteger(payload.index) && payload.index >= 0 && payload.animate === false;
   if (name === 'authoring-mode') return exactKeys(payload, ['mode']) && ['select', 'map'].includes(payload.mode);
+  if (name === 'authoring-selection') return exactKeys(payload, ['id'])
+    && (payload.id === null || (typeof payload.id === 'string' && /^[a-z][a-z0-9-]*$/.test(payload.id)));
   if (name === 'restore-scene-camera') return exactKeys(payload, ['index'])
     && Number.isInteger(payload.index) && payload.index >= 0;
   if (name === 'locate-project-layer') return exactKeys(payload, ['datasetId'])
@@ -149,7 +151,8 @@ export function startEditorPreviewHost({
   windowRef = globalThis.window,
   startProductionApplication,
   expectedOrigin = windowRef.location.origin,
-  createResolver = createPreviewPackageResolver
+  createResolver = createPreviewPackageResolver,
+  createAuthoringAdapter = createSceneAuthoringAdapter
 }) {
   const owner = {};
   let activeRuntime = null;
@@ -160,6 +163,8 @@ export function startEditorPreviewHost({
   let replacement = Promise.resolve();
   let removeCameraListener = null;
   let activeAuthoringAdapter = null;
+  let selectedOverlayId = null;
+  let authoringMode = 'select';
 
   function post(type, revision = activeSnapshot?.revision ?? 0, payload = {}, requestId = null) {
     windowRef.parent?.postMessage({
@@ -209,12 +214,18 @@ export function startEditorPreviewHost({
       if (runtime?.project?.story?.schemaVersion === '1.2') {
         const root = windowRef.document?.getElementById?.('scene-compositor');
         if (root) {
-          activeAuthoringAdapter = createSceneAuthoringAdapter({
+          activeAuthoringAdapter = createAuthoringAdapter({
             root,
             documentRef: windowRef.document,
-            emit(type, payload) { post(type, snapshot.revision, payload); }
+            emit(type, payload) {
+              if (type === 'select-overlay') selectedOverlayId = payload.id;
+              post(type, snapshot.revision, payload);
+            }
           });
-          activeAuthoringAdapter.setMode('select');
+          activeAuthoringAdapter.setMode(authoringMode);
+          if (authoringMode === 'select' && selectedOverlayId) {
+            activeAuthoringAdapter.selectOverlay(selectedOverlayId, { emitSelection: false, focus: false });
+          }
         }
       }
       post('loaded', snapshot.revision, {}, requestId);
@@ -269,12 +280,23 @@ export function startEditorPreviewHost({
       post('state', activeSnapshot?.revision ?? 0, { viewport }, data.requestId);
     }
     else if (name === 'activate-scene') {
+      selectedOverlayId = null;
       activeRuntime?.shell?.activateScene?.(payload.index, { animate: payload.animate });
       activeAuthoringAdapter?.clearSelection?.();
     }
     else if (name === 'authoring-mode') {
+      authoringMode = payload.mode;
+      if (authoringMode !== 'select') selectedOverlayId = null;
       activeRuntime?.shell?.setAuthoringMode?.(payload.mode);
       activeAuthoringAdapter?.setMode?.(payload.mode);
+    }
+    else if (name === 'authoring-selection') {
+      selectedOverlayId = payload.id;
+      if (authoringMode === 'select' && selectedOverlayId) {
+        activeAuthoringAdapter?.selectOverlay?.(selectedOverlayId, { emitSelection: false, focus: false });
+      } else {
+        activeAuthoringAdapter?.clearSelection?.();
+      }
     }
     else if (name === 'restore-scene-camera') activeRuntime?.shell?.restoreSceneCamera?.(payload.index);
     else if (name === 'locate-project-layer') {
