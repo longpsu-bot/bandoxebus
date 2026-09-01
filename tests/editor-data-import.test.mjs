@@ -363,3 +363,68 @@ test('spatial coordinate validation rejects non-finite and out-of-range output',
   assert.throws(() => crs.assertWgs84Coordinates(featureCollection('Point', [181, 10])), /longitude/i);
   assert.throws(() => crs.assertWgs84Coordinates(featureCollection('Point', [100, -91])), /latitude/i);
 });
+
+test('transient import session prepares mixed candidates without exposing persistence APIs', async () => {
+  const { createDataImportSession } = await optionalModule('../editor/import/data-import.js');
+  assert.equal(typeof createDataImportSession, 'function');
+  const file = new File([JSON.stringify({
+    type: 'FeatureCollection',
+    features: [
+      { type: 'Feature', properties: { name: 'Stop' }, geometry: { type: 'Point', coordinates: [106, 11] } },
+      { type: 'Feature', properties: { name: 'Route' }, geometry: { type: 'LineString', coordinates: [[106, 11], [107, 12]] } }
+    ]
+  })], 'Transport.geojson');
+  const statuses = [];
+  const session = createDataImportSession({ files: [file], usedIds: ['transport-points'], onStatus: (status) => statuses.push(status) });
+  assert.equal('write' in session, false);
+  assert.equal('serialize' in session, false);
+  assert.equal('commit' in session, false);
+  const items = await session.read();
+  assert.equal(items.length, 1);
+  session.selectSourceItem(items[0].id);
+  session.configure({ sourceCrs: 'EPSG:4326' });
+  const candidates = await session.prepare();
+  assert.deepEqual(candidates.map(({ geometry, id }) => [geometry, id]), [
+    ['point', 'transport-points-2'], ['line', 'transport-lines']
+  ]);
+  assert.equal(session.candidate(candidates[1].id).geometry, 'line');
+  assert.deepEqual(statuses, ['reading', 'ready', 'preparing', 'prepared']);
+  assert.equal(session.state().disposed, false);
+  session.dispose();
+  assert.equal(session.state().disposed, true);
+  await assert.rejects(session.prepare(), /disposed/i);
+});
+
+test('transient session lazy-loads only the parser required by the selected format', async () => {
+  const { createDataImportSession } = await optionalModule('../editor/import/data-import.js');
+  const calls = [];
+  const loaders = {
+    loadPapaParse: async () => {
+      calls.push('papa');
+      return { parse: () => ({ data: [['Name', 'Code'], ['Stop', '001']], errors: [] }) };
+    },
+    loadToGeoJson: async () => { calls.push('togeojson'); },
+    loadShp: async () => { calls.push('shp'); },
+    loadProj4: async () => { calls.push('proj4'); },
+    loadSheetJs: async () => { calls.push('sheetjs'); },
+    loadGeoPackage: async () => { calls.push('geopackage'); }
+  };
+  const session = createDataImportSession({ files: [new File(['ignored'], 'stops.csv')], loaders });
+  const items = await session.read();
+  session.selectSourceItem(items[0].id);
+  const candidates = await session.prepare();
+  assert.equal(candidates[0].kind, 'table');
+  assert.deepEqual(calls, ['papa']);
+});
+
+test('transient session validates candidate selection and replacement family constraints locally', async () => {
+  const { createDataImportSession } = await optionalModule('../editor/import/data-import.js');
+  const point = new File([JSON.stringify(featureCollection('Point', [106, 11]))], 'stop.geojson');
+  const session = createDataImportSession({ files: [point], replacement: { id: 'route', kind: 'spatial', geometry: 'line' } });
+  await session.read();
+  await assert.rejects(session.prepare(), /select.*source/i);
+  session.selectSourceItem(session.state().sourceItems[0].id);
+  const candidates = await session.prepare();
+  assert.throws(() => session.candidate(candidates[0].id), /incompatible.*line|line.*incompatible/i);
+  session.dispose();
+});
