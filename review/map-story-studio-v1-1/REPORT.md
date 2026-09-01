@@ -4,9 +4,8 @@
 
 - Branch: `feat/map-story-studio-v1-1-outputs-certification`
 - PR-D base SHA: `9695c07b85dcf1e5e0d46e182edcfc0793695da2`
-- Evidence HEAD when this report was started: `d5f2abb3e6e193e508ec5d22381fb3145faf5d24`
-- D4 browser evidence commit: `0484c13516a018cde2b478bb8cf227c6dd502008`
-- Exact HEAD at D5 report finalization time, before the report/docs commit: `0484c13516a018cde2b478bb8cf227c6dd502008`
+- Final recertification start HEAD: `0b20aeee36d218793a8011713c5944a01cf0b0da`
+- Final settled-performance evidence: captured from the exact recertification worktree before its single certification commit
 - Final PR head: recorded in the Draft PR metadata/body after the documentation commit
 - Story 1.2 schema freeze: PASS — diff from the required base is empty
 - Canonical Route Story diff: EMPTY
@@ -57,7 +56,9 @@ The fixture is an ordinary production-valid Story 1.2 package with two Scenes, d
 
 ### D4 — final browser/performance certification
 
-Final composite gate exited `0` and emitted both the inherited PR-C marker and the PR-D marker.
+#### Browser correctness gate
+
+The final composite correctness/integration gate exited `0` and emitted both the inherited PR-C marker and the PR-D marker. It does not sample or certify FPS; its result records `scripts/performance-root-cause-v1.mjs story-shell-benchmark` as the exclusive performance authority.
 
 - Blank neutral root: PASS; `blankRouteModules: []`, capability controls empty/hidden, one map
 - 1920×1080 composition: PASS; map/stage `left=0`, `top=0`, `width=1920`, `height=1080`; all six representative overlay families had nonzero geometry
@@ -79,28 +80,62 @@ Final composite gate exited `0` and emitted both the inherited PR-C marker and t
 - one-map principle: PASS across every active output checked
 - browser console: CLEAN
 - certification-exposed fixes: cooperative MapLibre constructor policy now reaches the neutral generic map factory; Presentation writes CSS `inset` before centered offsets so the shorthand cannot erase letterbox/pillarbox positioning
+- recertification harness alignment: PR-C follows the accepted rich Insert labels and guided resource confirmations; no runtime/product code changed
 
-Raw performance evidence, sampled once per viewport by the final successful gate:
+#### Settled performance gate
 
-| Viewport | Requested sample | Observed duration | Frames | Raw approximate FPS | Maps | Mode | Environment |
-| --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| 1920×1080 | 1000 ms | 1070.40000000149 ms | 14 | 13.079222720460118 | 1 | explore | Headless Edge/Chrome 151, Windows Win32, DPR 1, WebKit WebGL |
-| 1366×768 | 1000 ms | 1004.5000000044702 ms | 59 | 58.73568939744892 | 1 | explore | Headless Edge/Chrome 151, Windows Win32, DPR 1, WebKit WebGL |
+Performance authority: `scripts/performance-root-cause-v1.mjs story-shell-benchmark` against the real Route 61-2 production root at `/?outputMode=scroll`.
+
+- browser: headed Microsoft Edge `151.0.4129.107`, dedicated temporary profile, CDP port `9339`, Windows 10/11 Win64 user agent, DPR `1`, WebKit WebGL
+- browser process: one dedicated Edge session; the production target was brought to the foreground before sampling
+- method: one `requestAnimationFrame` frame-interval sample per viewport; requested duration `15000 ms`; typical FPS is the reciprocal median, sustained-low FPS is the reciprocal p95, and average FPS is frames divided by observed duration
+- setup: the existing harness entered the current production Scroll output, enabled the real production Simulation control, navigated successively to state index `4`, and required a continuously stable settled state for at least `1500 ms`
+- settled requirements: active `service-area`; camera stopped; scroll stable; Overture provider active and data loaded with `1299` buildings; source mutation total stable; one MapLibre instance; two visible moving production bus markers
+- warm-up source mutation: `{}` at both viewports
+- console: `[]` at both viewports
+
+Raw authoritative measurements:
+
+| Evidence | 1920×1080 | 1366×768 |
+| --- | ---: | ---: |
+| Active state index / ID | `4` / `service-area` | `4` / `service-area` |
+| Camera moving | `false` | `false` |
+| Stable scrollY | `4320` | `3072` |
+| Urban provider / state | `overture` / `active` | `overture` / `active` |
+| Overture state / count | `loaded` / `1299` | `loaded` / `1299` |
+| MapLibre instances | `1` | `1` |
+| Visible bus markers | `2` | `2` |
+| Observed sample duration | `15005 ms` | `15012 ms` |
+| Frames | `901` | `902` |
+| Typical FPS | `59.9` | `59.9` |
+| Sustained-low FPS | `58.8` | `58.8` |
+| Average FPS | `60.0` | `60.1` |
+| p95 frame time | `17.00 ms` | `17.00 ms` |
+| Maximum frame time | `21.20 ms` | `20.10 ms` |
+| Frames >33 ms / >50 ms | `0` / `0` | `0` / `0` |
+| Map renders | `0` | `0` |
+| `triggerRepaint()` / stacks | `0` / `{}` | `0` / `{}` |
+| `sourceSetData` measured | `{}` | `{}` |
+| Bus RAF scheduled | `901` | `902` |
+| Bus `Marker.setLngLat` | `1802` | `1804` |
+
+Historical settled authority at both viewports was approximately `59.9` typical FPS, `59.5` sustained-low FPS, and `60.0` average FPS, with the existing certified hard floor `sustained-low >= 30 FPS`. Both final-head samples remain in that smooth ~60-FPS class, exceed the hard floor, retain moving production buses, and show no recurring GeoJSON mutation or MapLibre render/repaint loop.
+
+- base/head comparison required: NO
+- performance regression caused by PR D: NO
+- `D4_BROWSER_CORRECTNESS`: PASS
+- `D4_SETTLED_PERFORMANCE`: PASS
 
 ## Verification commands
 
 - Output/persistence-focused command: `node --test tests/story-1.2-persistence.test.mjs tests/scroll-story.test.mjs tests/presentation-mode.test.mjs tests/presentation.test.mjs tests/story-runtime.test.mjs tests/story-map-interactions.test.mjs tests/scene-state-controller.test.mjs tests/project-bootstrap.test.mjs tests/generic-runtime-shell.test.mjs tests/generic-shell-neutrality.test.mjs tests/special-capability-boundary.test.mjs tests/editor-shell-preview.test.mjs tests/editor-validation.test.mjs tests/editor-folder-storage.test.mjs tests/editor-zip-storage.test.mjs tests/editor-certification.test.mjs tests/route-61-2-project.test.mjs`
 - Output/persistence-focused result: 133 tests, 133 pass, 0 fail
-- Final directly affected focused command: `node --test tests/presentation-mode.test.mjs tests/editor-certification.test.mjs tests/generic-runtime-shell.test.mjs tests/project-bootstrap.test.mjs tests/story-map-interactions.test.mjs`
-- Final directly affected focused result: 46 tests, 46 pass, 0 fail
+- Final focused command: `node --test tests/editor-certification.test.mjs tests/generic-runtime-shell.test.mjs tests/project-bootstrap.test.mjs tests/route-61-2-project.test.mjs tests/scroll-story.test.mjs tests/presentation-mode.test.mjs tests/special-capability-boundary.test.mjs tests/generic-shell-neutrality.test.mjs`
+- Final focused result: 70 tests, 70 pass, 0 fail
 - Full suite command: `npm test`
-- Full suite result: 509 tests, 509 pass, 0 fail
+- Full suite result: 528 tests, 528 pass, 0 fail
 - Browser command: `node scripts/map-story-studio-browser-smoke.mjs --gate=pr-d --url=http://127.0.0.1:8080/editor/`
 - Browser result: exit `0`; `MAP_STORY_STUDIO_PR_C_RESULT: PASS`; `MAP_STORY_STUDIO_PR_D_RESULT: PASS`
-
-## Known non-blocking limitations
-
-The single 1920×1080 headless sample was about 13.08 FPS and was not consistent with smooth 60-FPS-class settled behavior in this environment; the single 1366×768 sample was about 58.74 FPS and was consistent with that class. Hardware/headless scheduling variance was not used as an unrelated correctness threshold. The raw durations, frame counts, map counts, modes, and environment are authoritative; no performance PASS threshold was fabricated.
 
 ## D5 architecture audit
 

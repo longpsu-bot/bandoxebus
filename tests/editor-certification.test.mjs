@@ -358,9 +358,14 @@ test('PR C browser gate covers rich objects, valid templates, neutral root, trus
     'presentation-metrics', 'content-table', 'content-chart',
     'maplibregl-canvas', 'routeModules', '/src/route-61-2/', '390', '844', 'consoleIssues'
   ]) assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(source, /\['Metric', 'Chart', 'Table', 'Image', 'Legend'\]/);
+  for (const id of ['studio-insert-chart-add', 'studio-insert-table-add', 'studio-insert-image-add']) {
+    assert.match(source, new RegExp(id));
+  }
+  assert.doesNotMatch(source, /\['Add Metric', 'Add Chart', 'Add Table', 'Add Image', 'Add Legend'\]/);
 });
 
-test('PR D browser gate locks outputs, persistence, desktop geometry, and raw performance evidence', async () => {
+test('PR D browser gate delegates settled performance authority without sampling FPS', async () => {
   const source = await readFile(
     path.join(repositoryRoot, 'scripts', 'map-story-studio-browser-smoke.mjs'),
     'utf8'
@@ -374,8 +379,28 @@ test('PR D browser gate locks outputs, persistence, desktop geometry, and raw pe
     'flyTo', 'easeTo', 'jumpTo', 'setLayoutProperty', 'setCooperativeGestures',
     'scroll-story__step', 'documentElement.clientWidth', 'presentation-stage', 'Escape',
     'content-chart__data', 'content-table', 'content-image', 'content-legend',
-    'requestAnimationFrame', 'rawApproximateFps', 'sampleDurationMs',
+    'performanceAuthority', 'scripts/performance-root-cause-v1.mjs story-shell-benchmark',
     'MAP_STORY_STUDIO_PR_C_RESULT: PASS', 'consoleIssues', 'maplibregl-canvas'
   ]) assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(source, /rawApproximateFps|sampleDurationMs|const performanceSample/);
   assert.doesNotMatch(source, /client\.close\(\);\s*const prC/);
+});
+
+test('settled performance authority enters the current Scroll output with production buses active', async () => {
+  const source = await readFile(
+    path.join(repositoryRoot, 'scripts', 'performance-root-cause-v1.mjs'),
+    'utf8'
+  );
+  const settle = source.match(/async function waitForStoryShellSettled[\s\S]+?(?=async function waitForStoryNavigation)/)?.[0] ?? '';
+  const entry = source.match(/async function enterStoryShellServiceArea[\s\S]+?(?=async function storyShellSetup)/)?.[0] ?? '';
+
+  for (const required of ['scroll-story__step', 'sceneIndex', 'sceneId', 'scroll-story-navigation']) {
+    assert.match(`${settle}\n${entry}`, new RegExp(required));
+  }
+  assert.match(entry, /scrollIntoView/);
+  assert.match(entry, /Simulation/);
+  assert.match(source, /callback\?\.name === 'tick' && stack\.includes\('\/src\/route-61-2\/runtime-adapter\.js'\)/);
+  assert.match(source, /!element\.hidden && getComputedStyle\(element\)\.display !== 'none'/);
+  assert.doesNotMatch(`${settle}\n${entry}`, /presentation-open|story-next|storyStateIndex|storyStateId|is-story-shell/);
+  assert.doesNotMatch(source, /callback\?\.name === 'animate' && stack\.includes\('\/src\/app\.js'\)/);
 });

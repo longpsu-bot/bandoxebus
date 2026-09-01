@@ -635,39 +635,6 @@ async function runPrDGate() {
         && child.getElementById('capability-controls')?.textContent.includes('Compare');
     })()`, 'Route 61-2 benchmark content');
 
-    const performanceSample = async (width, height) => {
-      await setViewport(width, height);
-      return evaluate(client, `(async () => {
-        const frame = document.getElementById('production-preview'); const child = frame.contentWindow;
-        const sampleDurationMs = 1000; let observedFrameCount = 0; const started = child.performance.now();
-        let ended = started;
-        await new Promise((resolve) => {
-          const tick = (now) => {
-            observedFrameCount += 1; ended = now;
-            if (now - started >= sampleDurationMs) resolve();
-            else child.requestAnimationFrame(tick);
-          };
-          child.requestAnimationFrame(tick);
-        });
-        const observedDurationMs = ended - started;
-        const rawApproximateFps = observedFrameCount * 1000 / observedDurationMs;
-        const canvas = child.document.querySelector('.maplibregl-canvas');
-        const gl = canvas?.getContext('webgl2') ?? canvas?.getContext('webgl');
-        return { viewport: { width: ${width}, height: ${height} }, sampleDurationMs, observedDurationMs,
-          observedFrameCount, rawApproximateFps, mapCanvasCount: child.document.querySelectorAll('.maplibregl-canvas').length,
-          outputMode: 'explore', environment: { userAgent: child.navigator.userAgent, platform: child.navigator.platform,
-            devicePixelRatio: child.devicePixelRatio, webglRenderer: gl?.getParameter(gl.RENDERER) ?? 'unavailable' } };
-      })()`);
-    };
-    const performance = {
-      '1920x1080': await performanceSample(1920, 1080),
-      '1366x768': await performanceSample(1366, 768)
-    };
-    for (const sample of Object.values(performance)) {
-      if (sample.mapCanvasCount !== 1 || sample.observedFrameCount <= 0 || sample.observedDurationMs < sample.sampleDurationMs) {
-        throw new Error(`Invalid raw performance sample: ${JSON.stringify(sample)}`);
-      }
-    }
     if (consoleIssues.length) throw new Error(`Unexpected browser console issues: ${JSON.stringify(consoleIssues)}`);
 
     const result = {
@@ -677,7 +644,8 @@ async function runPrDGate() {
       transitions: transitionEvidence, layerSequence: layerSequence.map(({ sceneId, layers }) => ({ sceneId, layers })),
       richAccessibility, scrollNavigation,
       presentation: { exactStage: presentation1920, navigation: presentationNavigation, letterbox: presentationLetterbox, escape: presentationEscape },
-      performance, oneMap: true, console: 'clean'
+      performanceAuthority: 'scripts/performance-root-cause-v1.mjs story-shell-benchmark',
+      oneMap: true, console: 'clean'
     };
 
     const prC = spawnSync(process.execPath, [
