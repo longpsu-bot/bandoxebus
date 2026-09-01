@@ -73,6 +73,15 @@ export function createOutputPreviewLaunch(validation, outputMode) {
   });
 }
 
+export function resolveProblemsPresentation({ status, diagnostics = [], lastValid = null } = {}) {
+  const count = diagnostics.length;
+  const validity = status === 'validating' ? 'Validating' : status === 'invalid' ? 'Invalid' : 'Valid';
+  const previewWarning = status === 'invalid' && lastValid
+    ? `Previewing previous valid version · Current edits contain ${count} ${count === 1 ? 'problem' : 'problems'}`
+    : '';
+  return Object.freeze({ count, open: status === 'invalid' && count > 0, validity, previewWarning });
+}
+
 export function createEditor({
   documentRef = globalThis.document,
   windowRef = globalThis.window
@@ -96,6 +105,10 @@ export function createEditor({
     presentStory: documentRef.getElementById('present-story'),
     previewStatus: documentRef.getElementById('preview-status'),
     dirtyStatus: documentRef.getElementById('dirty-status'),
+    validityStatus: documentRef.getElementById('validity-status'),
+    problemsPanel: documentRef.getElementById('problems-panel'),
+    problemsCount: documentRef.getElementById('problems-count'),
+    previewWarning: documentRef.getElementById('preview-warning'),
     validationStatus: documentRef.getElementById('validation-status'),
     validationErrors: documentRef.getElementById('validation-errors'),
     locale: documentRef.getElementById('project-locale'),
@@ -195,6 +208,11 @@ export function createEditor({
         stateSelection = index;
         bridge.command('activate-scene', { index, animate: false });
         renderStudioWorkspace();
+      },
+      onRenderLayerProperties(datasetId, inspector) {
+        const group = node('section', undefined, { className: 'studio-property-group studio-layer-properties' });
+        renderDatasetDescriptorControls(group, datasetId);
+        inspector.append(group);
       },
       onStoryCommand(name, payload) {
         const next = applyStudioStoryCommand(current.story, name, payload);
@@ -469,6 +487,31 @@ export function createEditor({
     };
   }
 
+  function renderDatasetDescriptorControls(container, datasetId, { manifest = draftStore.get('project.json'), ui = inspect('dataset') } = {}) {
+    const descriptor = manifest.datasets[datasetId];
+    const entity = ui.entity(datasetId);
+    container.append(node('h3', descriptor.label ?? datasetId));
+    scalarControl(container, 'Label', 'author-dataset-edit-label', entity.control('label').value, (value) => entity.control('label').set(value));
+    if (entity.hasControl('required')) scalarControl(container, 'Required', 'author-dataset-edit-required', entity.control('required').value, (value) => entity.control('required').set(value), { type: 'checkbox' });
+    const roles = entity.roleOptions();
+    if (roles.length) scalarControl(container, 'Compatible role', 'author-dataset-edit-role', entity.control('role').value, (value) => entity.control('role').set(value), { options: [{ value: '', label: 'No role' }, ...roles.map((value) => ({ value, label: value }))] });
+    if (descriptor.type === 'geojson') {
+      for (const field of ['type', 'color', 'width', 'opacity', 'radius', 'strokeColor', 'strokeWidth', 'outlineColor', 'outlineWidth', 'lineStyle']) {
+        if (!entity.hasControl(`render.${field}`)) continue;
+        const control = entity.control(`render.${field}`);
+        const label = field === 'type' ? 'Render as' : `Render ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`;
+        scalarControl(container, label, `author-dataset-render-${field}`, control.value, (value) => entity.control(`render.${field}`).set(value), { type: control.inputType });
+      }
+      const fields = entity.labelFields();
+      if (fields.length) {
+        const labelValue = descriptor.render?.label ?? {};
+        scalarControl(container, 'Feature label field', 'author-dataset-label-field', labelValue.field, (value) => entity.control('render.label').set({ ...labelValue, field: value }), { options: fields.map((value) => ({ value, label: value })) });
+        scalarControl(container, 'Feature label placement', 'author-dataset-label-placement', labelValue.placement ?? 'auto', (value) => entity.control('render.label').set({ ...labelValue, placement: value }), { options: entity.labelPlacements().map((value) => ({ value, label: value })) });
+      }
+    }
+    return { descriptor, entity };
+  }
+
   function renderDatasetPanel() {
     const { panel, status } = authoringPanel('Datasets');
     const manifest = draftStore.get('project.json');
@@ -482,26 +525,8 @@ export function createEditor({
     function renderExisting() {
       inspectorPanel.replaceChildren();
       if (!existing.value) return;
-      const descriptor = manifest.datasets[existing.value];
-      const entity = ui.entity(existing.value);
-      inspectorPanel.append(node('h4', descriptor.label ?? existing.value));
-      scalarControl(inspectorPanel, 'Label', 'author-dataset-edit-label', entity.control('label').value, (value) => entity.control('label').set(value));
-      if (entity.hasControl('required')) scalarControl(inspectorPanel, 'Required', 'author-dataset-edit-required', entity.control('required').value, (value) => entity.control('required').set(value), { type: 'checkbox' });
-      const roles = entity.roleOptions();
-      if (roles.length) scalarControl(inspectorPanel, 'Compatible role', 'author-dataset-edit-role', entity.control('role').value, (value) => entity.control('role').set(value), { options: [{ value: '', label: 'No role' }, ...roles.map((value) => ({ value, label: value }))] });
-      if (descriptor.type === 'geojson') {
-        for (const field of ['type', 'color', 'width', 'opacity', 'radius', 'strokeColor', 'strokeWidth', 'outlineColor', 'outlineWidth', 'lineStyle']) {
-          if (!entity.hasControl(`render.${field}`)) continue;
-          const control = entity.control(`render.${field}`);
-          scalarControl(inspectorPanel, `Renderer ${field}`, `author-dataset-render-${field}`, control.value, (value) => control.set(value), { type: control.inputType });
-        }
-        const fields = entity.labelFields();
-        if (fields.length) {
-          const labelValue = descriptor.render?.label ?? {};
-          scalarControl(inspectorPanel, 'Feature label field', 'author-dataset-label-field', labelValue.field, (value) => entity.control('render.label').set({ ...labelValue, field: value }), { options: fields.map((value) => ({ value, label: value })) });
-          scalarControl(inspectorPanel, 'Feature label placement', 'author-dataset-label-placement', labelValue.placement ?? 'auto', (value) => entity.control('render.label').set({ ...labelValue, placement: value }), { options: entity.labelPlacements().map((value) => ({ value, label: value })) });
-        }
-      } else {
+      const { descriptor, entity } = renderDatasetDescriptorControls(inspectorPanel, existing.value, { manifest, ui });
+      if (descriptor.type !== 'geojson') {
         const table = draftStore.get(descriptor.src.replace(/^\.\//, ''));
         const tableSection = node('section', undefined, { className: 'table-editor', id: 'author-table-editor' });
         tableSection.append(node('h4', 'Normalized table'));
@@ -1061,7 +1086,7 @@ export function createEditor({
         setViewport(viewportPreset);
       } else if (event.type === 'editor-preview:loaded') {
         elements.iframe.dataset.previewRevision = String(event.revision);
-        elements.previewStatus.textContent = outputPreviewStatus ?? `Preview revision ${event.revision}`;
+        elements.previewStatus.textContent = outputPreviewStatus ?? 'Explore preview ready';
         if (primaryStory().story?.schemaVersion === '1.2') {
           bridge.command('activate-scene', { index: stateSelection, animate: false });
           bridge.command('authoring-mode', { mode: getStudioAuthoringMode() });
@@ -1079,7 +1104,7 @@ export function createEditor({
   elements.iframe.src = elements.iframe.dataset.previewSrc;
 
   function renderDirty() {
-    elements.dirtyStatus.textContent = packageStore?.dirty ? 'Unsaved changes' : 'No unsaved changes';
+    elements.dirtyStatus.textContent = packageStore?.dirty ? 'Unsaved' : 'Saved';
   }
 
   function buildNavigationIndex() {
@@ -1209,6 +1234,14 @@ export function createEditor({
     navigationIndex = buildNavigationIndex();
     renderDirty();
     renderDiagnostics(state.diagnostics);
+    const presentation = resolveProblemsPresentation(state);
+    if (elements.validityStatus) elements.validityStatus.textContent = presentation.validity;
+    if (elements.problemsCount) elements.problemsCount.textContent = String(presentation.count);
+    if (elements.problemsPanel) elements.problemsPanel.open = presentation.open;
+    if (elements.previewWarning) {
+      elements.previewWarning.textContent = presentation.previewWarning;
+      elements.previewWarning.hidden = !presentation.previewWarning;
+    }
     elements.previewStory.disabled = !state.lastValid;
     elements.presentStory.disabled = !state.lastValid;
     if (state.status === 'validating') {
@@ -1242,7 +1275,7 @@ export function createEditor({
     elements.validate.disabled = false;
     elements.exportZip.disabled = !manifest;
     elements.save.disabled = !storageAdapter?.capabilities?.writeInPlace;
-    elements.save.textContent = storageAdapter?.capabilities?.writeInPlace ? 'Save' : 'Use Export Project ZIP';
+    elements.save.textContent = 'Save';
     if (!manifest) {
       primaryStoryPath = null;
       elements.heading.disabled = true;

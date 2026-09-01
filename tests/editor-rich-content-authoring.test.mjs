@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createScene12 } from '../editor/core/scene-commands.js';
-import { applyStudioStoryCommand, mountStudioShell, resetStudioAuthoringSession } from '../editor/ui/studio-shell.js';
+import * as studioShell from '../editor/ui/studio-shell.js';
 import { validateStoryDefinition } from '../src/story-schema.js';
+
+const { applyStudioStoryCommand, mountStudioShell, resetStudioAuthoringSession } = studioShell;
 
 const catalogs = {
   metrics: [{ id: 'ridership', label: 'Daily ridership', format: { type: 'integer' } }],
@@ -64,6 +66,8 @@ class Element {
   setAttribute(name, value) { this.attributes.set(name, String(value)); if (name === 'id') this.id = String(value); }
   addEventListener(type, listener) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
   click() { for (const listener of this.listeners.get('click') ?? []) listener({ shiftKey: false }); }
+  change() { for (const listener of this.listeners.get('change') ?? []) listener({}); }
+  keydown(key) { for (const listener of this.listeners.get('keydown') ?? []) listener({ key }); }
 }
 const walk = (node) => [node, ...node.children.flatMap(walk)];
 
@@ -88,9 +92,126 @@ test('Studio Add menu exposes every rich family and selected Metric Properties e
   });
   mount();
   const button = (label) => roots.flatMap(walk).find((node) => node.tagName === 'BUTTON' && node.textContent === label);
-  for (const label of ['Add Metric', 'Add Chart', 'Add Table', 'Add Image', 'Add Legend']) assert.ok(button(label), label);
-  button('Add Metric').click();
+  for (const label of ['Metric', 'Chart', 'Table', 'Image', 'Legend']) assert.ok(button(label), label);
+  button('Metric').click();
   assert.equal(story.states[0].content.blocks[0].block.type, 'stat-group');
   assert.ok(byId.get('studio-metric-label'), 'Metric semantic label control');
   assert.equal(byId.has('studio-frame-x'), false, 'normalized frame remains canvas-authored');
+});
+
+test('Studio derives semantic object and Scene labels without mutating stable production IDs', () => {
+  assert.equal(typeof studioShell.deriveStudioObjectLabel, 'function');
+  assert.equal(typeof studioShell.deriveStudioSceneLabel, 'function');
+  const story = baseStory();
+  story.states[0].id = 'existing-route-context';
+  story.states[0].content.blocks.push({
+    id: 'internal-heading-7',
+    block: { type: 'heading', text: 'Existing route context' },
+    frame: { x: 4, y: 4, width: 40, height: 16, z: 0 }
+  });
+  const before = structuredClone(story);
+
+  assert.equal(studioShell.deriveStudioObjectLabel(story.states[0].content.blocks[0]), 'Heading · Existing route context');
+  assert.equal(studioShell.deriveStudioSceneLabel(story.states[0], 0), 'Existing route context');
+  assert.deepEqual(story, before);
+  assert.equal(story.states[0].id, 'existing-route-context');
+  assert.equal(story.states[0].content.blocks[0].id, 'internal-heading-7');
+});
+
+test('Studio layer selection is UI-only, does not toggle Scene visibility, and reaches the existing properties adapter', () => {
+  resetStudioAuthoringSession();
+  const byId = new Map();
+  const documentRef = {
+    createElement(tag) {
+      const node = new Element(tag);
+      const set = node.setAttribute.bind(node);
+      node.setAttribute = (name, value) => { set(name, value); if (name === 'id') byId.set(String(value), node); };
+      return node;
+    },
+    getElementById(id) { return byId.get(id) ?? null; }
+  };
+  const roots = [new Element('nav'), new Element('aside'), new Element('section'), new Element('div')];
+  const story = baseStory();
+  story.states[0].map.layerVisibility.route = true;
+  const before = structuredClone(story);
+  const commands = [];
+  const renderedLayerProperties = [];
+  const mount = () => mountStudioShell({
+    documentRef, navigation: roots[0], inspector: roots[1], scenesHost: roots[2], previewToolbar: roots[3],
+    manifest: { id: 'layer-project', datasets: { route: { type: 'geojson', label: 'Existing route', render: { type: 'line', color: '#00AAFF', width: 4 } } }, assets: {} },
+    story,
+    onStoryCommand(name, payload) { commands.push([name, payload]); },
+    onRenderLayerProperties(datasetId, inspector) {
+      renderedLayerProperties.push(datasetId);
+      inspector.append(new Element('section'));
+    }
+  });
+  mount();
+  const nodes = () => roots.flatMap(walk);
+  const layerButton = nodes().find((node) => node.tagName === 'BUTTON' && node.textContent === 'Existing route');
+  assert.ok(layerButton, 'human-labeled layer selection control');
+  layerButton.click();
+
+  assert.deepEqual(story, before, 'selection does not serialize into Story data');
+  assert.deepEqual(commands, [], 'selection does not author visibility');
+  assert.deepEqual(renderedLayerProperties, ['route']);
+  const visibility = nodes().find((node) => node.tagName === 'INPUT' && node.attributes.get('type') === 'checkbox');
+  visibility.checked = false;
+  visibility.change();
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0][0], 'replace-story');
+  assert.equal(commands[0][1].story.states[0].map.layerVisibility.route, false);
+  const visibilityOnly = structuredClone(commands[0][1].story);
+  visibilityOnly.states[0].map.layerVisibility.route = true;
+  assert.deepEqual(visibilityOnly, before);
+});
+
+test('Studio hierarchy, local canvas modes, semantic cards, and keyboard Scene movement remain accessible', () => {
+  resetStudioAuthoringSession();
+  const documentRef = { createElement: (tag) => new Element(tag), getElementById: () => null };
+  const roots = [new Element('nav'), new Element('aside'), new Element('section'), new Element('div')];
+  const story = baseStory();
+  story.states[0].content.blocks.push({
+    id: 'opening-heading', block: { type: 'heading', text: 'Opening context' },
+    frame: { x: 4, y: 4, width: 40, height: 16, z: 0 }
+  });
+  story.states.push(createScene12({ id: 'future-network', camera: { center: [1, 1], zoom: 3, pitch: 0, bearing: 0 } }));
+  const selectedScenes = [];
+  mountStudioShell({
+    documentRef, navigation: roots[0], inspector: roots[1], scenesHost: roots[2], previewToolbar: roots[3],
+    manifest: { id: 'hierarchy-project', datasets: {}, assets: {} }, story,
+    onSelectScene(index) { selectedScenes.push(index); }
+  });
+  const nodes = roots.flatMap(walk);
+  assert.deepEqual(nodes.filter((node) => node.tagName === 'H2').map(({ textContent }) => textContent), [
+    'Layers', 'Insert', 'Objects', 'Properties', 'Scenes'
+  ]);
+  assert.deepEqual(nodes.filter((node) => node.tagName === 'BUTTON' && ['Select', 'Map'].includes(node.textContent)).map(({ textContent }) => textContent), ['Select', 'Map']);
+  assert.equal(nodes.some((node) => node.tagName === 'BUTTON' && ['Preview Story', 'Present'].includes(node.textContent)), false);
+  assert.ok(nodes.some((node) => node.tagName === 'BUTTON' && node.textContent === 'Heading · Opening context'));
+  const sceneCards = roots[2].children.flatMap(walk).filter((node) => node.tagName === 'BUTTON' && node.attributes.get('role') === 'listitem');
+  assert.equal(sceneCards[0].children.some((node) => node.textContent === 'Opening context'), true);
+  assert.equal(sceneCards[1].children.some((node) => node.textContent === 'Future network'), true);
+  sceneCards[0].keydown('ArrowRight');
+  assert.deepEqual(selectedScenes, [1]);
+  for (const label of ['Move previous', 'Move next']) assert.ok(nodes.some((node) => node.tagName === 'BUTTON' && node.textContent === label), label);
+});
+
+test('Scene and Text Properties expose meaningful groups with friendly enum labels', () => {
+  resetStudioAuthoringSession();
+  const documentRef = { createElement: (tag) => new Element(tag), getElementById: () => null };
+  const roots = [new Element('nav'), new Element('aside'), new Element('section'), new Element('div')];
+  const story = baseStory();
+  story.states[0].content.blocks.push({
+    id: 'opening-heading', block: { type: 'heading', text: 'Opening context' },
+    frame: { x: 4, y: 4, width: 40, height: 16, z: 0 }
+  });
+  const options = { documentRef, navigation: roots[0], inspector: roots[1], scenesHost: roots[2], previewToolbar: roots[3], manifest: { id: 'property-project', datasets: {}, assets: {} }, story };
+  mountStudioShell(options);
+  assert.deepEqual(walk(roots[1]).filter((node) => node.tagName === 'H3').map(({ textContent }) => textContent), ['Scene', 'Camera']);
+  const sceneOptions = walk(roots[1]).filter((node) => node.tagName === 'OPTION').map(({ textContent }) => textContent);
+  for (const label of ['Locked map', 'Zoom only', 'Free explore', 'Fly', 'Smooth', 'Instant']) assert.ok(sceneOptions.includes(label), label);
+
+  mountStudioShell({ ...options, selectedOverlayId: 'opening-heading' });
+  assert.deepEqual(walk(roots[1]).filter((node) => node.tagName === 'H3').map(({ textContent }) => textContent), ['Text', 'Appearance', 'Arrange']);
 });

@@ -430,7 +430,7 @@ test('Story 1.2 Studio source exposes Layers Canvas Properties Scenes and explic
   }
   assert.match(source, /addProjectLayerToStory12|setSceneLayerVisibility/);
   assert.match(source, /ArrowLeft|ArrowRight/);
-  assert.match(source, /Move Scene Up|Move Scene Down/);
+  assert.match(source, /Move previous|Move next/);
   assert.match(css, /aspect-ratio:\s*16\s*\/\s*9/);
   assert.match(editorSource, /schemaVersion\s*===\s*['"]1\.2['"]/);
 });
@@ -464,6 +464,17 @@ test('static editor shell and production preview mode expose only the PR A spine
   assert.doesNotMatch(appSource, /route-61-2|route-data|route-comparison/);
   assert.match(smokeSource, /project-locale/);
   assert.doesNotMatch(smokeSource, /project-title/);
+});
+
+test('static Studio shell exposes one global output action pair and a collapsed Problems affordance', async () => {
+  const html = await readFile(new URL('../editor/index.html', import.meta.url), 'utf8');
+  assert.equal((html.match(/>Preview Story</g) ?? []).length, 1);
+  assert.equal((html.match(/>Present</g) ?? []).length, 1);
+  assert.match(html, /<details[^>]+id="problems-panel"(?![^>]*\sopen)/);
+  assert.match(html, /id="problems-count"/);
+  assert.match(html, /id="validation-status"/);
+  assert.match(html, /id="validation-errors"/);
+  assert.doesNotMatch(html, /<h2[^>]*>Validation<\/h2>/);
 });
 
 test('empty title remains valid because the GUI uses production validation only', () => {

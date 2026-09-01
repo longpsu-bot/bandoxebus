@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import { createDraftStore } from '../editor/core/draft-store.js';
 import { createNewProjectEntries, createPackageStore } from '../editor/core/package-store.js';
 import { createValidationCoordinator, toProductionDiagnostic } from '../editor/core/validation.js';
-import { createOutputPreviewLaunch } from '../editor/editor.js';
+import * as editorModule from '../editor/editor.js';
 import { ProjectLoadError } from '../src/project/project-error.js';
+
+const { createOutputPreviewLaunch } = editorModule;
 
 function deferred() {
   let resolve;
@@ -170,4 +172,30 @@ test('invalid draft output preview uses the previous valid revision with explici
     () => createOutputPreviewLaunch({ status: 'invalid', lastValid: null }, 'scroll'),
     /no valid revision/i
   );
+});
+
+test('Problems presentation collapses valid diagnostics and exposes invalid diagnostics with previous-valid warning', () => {
+  assert.equal(typeof editorModule.resolveProblemsPresentation, 'function');
+  assert.deepEqual(editorModule.resolveProblemsPresentation({ status: 'valid', diagnostics: [], lastValid: { revision: 4 } }), {
+    count: 0,
+    open: false,
+    validity: 'Valid',
+    previewWarning: ''
+  });
+  assert.deepEqual(editorModule.resolveProblemsPresentation({
+    status: 'invalid',
+    diagnostics: [{ code: 'A' }, { code: 'B' }],
+    lastValid: { revision: 4 }
+  }), {
+    count: 2,
+    open: true,
+    validity: 'Invalid',
+    previewWarning: 'Previewing previous valid version · Current edits contain 2 problems'
+  });
+  assert.deepEqual(editorModule.resolveProblemsPresentation({ status: 'validating', diagnostics: [], lastValid: null }), {
+    count: 0,
+    open: false,
+    validity: 'Validating',
+    previewWarning: ''
+  });
 });

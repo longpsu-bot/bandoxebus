@@ -58,6 +58,7 @@ let activeHistory = null;
 let activeHistoryKey = null;
 let selectedOverlayId = null;
 let selectedOverlayIds = [];
+let selectedLayerId = null;
 let authoringMode = 'select';
 
 export function getStudioAuthoringMode() {
@@ -104,6 +105,44 @@ function selectedEnvelope(story, sceneIndex, id) {
   return story.states[sceneIndex]?.content?.blocks?.find((item) => item.id === id) ?? null;
 }
 
+function readableId(value) {
+  const label = String(value ?? '').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return label ? `${label[0].toUpperCase()}${label.slice(1)}` : '';
+}
+
+function concise(value, fallback = '') {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return fallback;
+  return text.length > 42 ? `${text.slice(0, 39).trimEnd()}…` : text;
+}
+
+function semanticEnvelopeText(envelope) {
+  const block = envelope?.block ?? {};
+  if (['heading', 'paragraph'].includes(block.type)) return concise(block.text);
+  if (block.type === 'stat-group') return concise(block.items?.[0]?.label ?? block.items?.[0]?.metric);
+  if (['chart', 'table'].includes(block.type)) return concise(block.title ?? block.caption);
+  if (block.type === 'image') return concise(block.alt || block.asset);
+  if (block.type === 'legend') return concise(block.title ?? block.items?.[0]?.label);
+  return '';
+}
+
+export function deriveStudioObjectLabel(envelope) {
+  const block = envelope?.block ?? {};
+  const type = block.type === 'stat-group' ? 'Metric'
+    : block.type === 'heading' ? 'Heading'
+      : block.type === 'paragraph' ? 'Body text'
+        : readableId(block.type || 'Object');
+  return `${type} · ${semanticEnvelopeText(envelope) || readableId(envelope?.id) || 'Untitled'}`;
+}
+
+export function deriveStudioSceneLabel(scene, index = 0) {
+  const blocks = scene?.content?.blocks ?? [];
+  const heading = blocks.find(({ block }) => block?.type === 'heading' && concise(block.text));
+  if (heading) return semanticEnvelopeText(heading);
+  const semantic = blocks.map(semanticEnvelopeText).find(Boolean);
+  return semantic || readableId(scene?.id) || `Scene ${index + 1}`;
+}
+
 export function applyStudioStoryCommand(story, name, payload = {}) {
   if (name === 'replace-story') return clone(payload.story);
   if (name === 'add-scene') return addScene12(story, { activeSceneIndex: payload.sceneIndex });
@@ -148,6 +187,9 @@ function normalizeSelection() {
   if (selectedOverlayId && !validIds.has(selectedOverlayId)) selectedOverlayId = null;
   if (selectedOverlayId && !selectedOverlayIds.includes(selectedOverlayId)) selectedOverlayIds.push(selectedOverlayId);
   if (!selectedOverlayId && selectedOverlayIds.length) selectedOverlayId = selectedOverlayIds.at(-1);
+  if (selectedLayerId && !Object.hasOwn(activeStudio.story.states[activeStudio.sceneIndex]?.map?.layerVisibility ?? {}, selectedLayerId)) {
+    selectedLayerId = null;
+  }
 }
 
 function rerenderActive() {
@@ -214,6 +256,7 @@ function executeStoryCommand(name, payload = {}) {
   if (nextSceneIndex !== null) {
     selectedOverlayId = null;
     selectedOverlayIds = [];
+    selectedLayerId = null;
     activeStudio.onSelectScene(nextSceneIndex);
   } else {
     rerenderActive();
@@ -222,6 +265,7 @@ function executeStoryCommand(name, payload = {}) {
 }
 
 function selectOverlay(id, { notify = true, additive = false } = {}) {
+  selectedLayerId = null;
   if (additive) {
     if (selectedOverlayIds.includes(id)) selectedOverlayIds = selectedOverlayIds.filter((selected) => selected !== id);
     else selectedOverlayIds = [...selectedOverlayIds, id];
@@ -231,6 +275,13 @@ function selectOverlay(id, { notify = true, additive = false } = {}) {
     selectedOverlayIds = id ? [id] : [];
   }
   if (notify) activeStudio?.onSelectOverlay?.(selectedOverlayId);
+  rerenderActive();
+}
+
+function selectLayer(id) {
+  selectedLayerId = id;
+  selectedOverlayId = null;
+  selectedOverlayIds = [];
   rerenderActive();
 }
 
@@ -270,8 +321,10 @@ function addControl(documentRef, parent, {
   let control;
   if (options) {
     control = element(documentRef, 'select', undefined, { id });
-    for (const optionValue of options) {
-      const option = element(documentRef, 'option', optionValue, { value: optionValue });
+    for (const item of options) {
+      const optionValue = typeof item === 'object' ? item.value : item;
+      const optionLabel = typeof item === 'object' ? item.label : item;
+      const option = element(documentRef, 'option', optionLabel, { value: optionValue });
       option.value = optionValue;
       option.selected = optionValue === value;
       control.append(option);
@@ -293,6 +346,14 @@ function addControl(documentRef, parent, {
   return control;
 }
 
+function propertyGroup(documentRef, title, className = '') {
+  const group = element(documentRef, 'section', undefined, {
+    className: `studio-property-group${className ? ` ${className}` : ''}`
+  });
+  group.append(element(documentRef, 'h3', title));
+  return group;
+}
+
 function actionButton(documentRef, parent, label, action, { disabled = false } = {}) {
   const button = element(documentRef, 'button', label, { type: 'button' });
   button.disabled = disabled;
@@ -302,11 +363,14 @@ function actionButton(documentRef, parent, label, action, { disabled = false } =
 }
 
 function renderObjectHelpers({ documentRef, inspector, sceneIndex, envelope }) {
-  const helpers = element(documentRef, 'section', undefined, { className: 'studio-object-helpers', 'aria-label': 'Object commands' });
-  actionButton(documentRef, helpers, 'Duplicate', () => executeStoryCommand('duplicate-object', { sceneIndex, id: envelope.id }));
-  actionButton(documentRef, helpers, 'Delete', () => executeStoryCommand('delete-object', { sceneIndex, id: envelope.id }));
-  actionButton(documentRef, helpers, 'Bring Forward', () => executeStoryCommand('bring-forward', { sceneIndex, id: envelope.id }));
-  actionButton(documentRef, helpers, 'Send Backward', () => executeStoryCommand('send-backward', { sceneIndex, id: envelope.id }));
+  const helpers = propertyGroup(documentRef, 'Arrange', 'studio-object-helpers');
+  helpers.setAttribute('aria-label', 'Object commands');
+  const commands = element(documentRef, 'div', undefined, { className: 'studio-object-commands' });
+  actionButton(documentRef, commands, 'Duplicate', () => executeStoryCommand('duplicate-object', { sceneIndex, id: envelope.id }));
+  const remove = actionButton(documentRef, commands, 'Delete', () => executeStoryCommand('delete-object', { sceneIndex, id: envelope.id }));
+  remove.className = 'is-destructive';
+  actionButton(documentRef, commands, 'Bring forward', () => executeStoryCommand('bring-forward', { sceneIndex, id: envelope.id }));
+  actionButton(documentRef, commands, 'Send backward', () => executeStoryCommand('send-backward', { sceneIndex, id: envelope.id }));
   const alignment = element(documentRef, 'div', undefined, { className: 'studio-align-commands' });
   const enough = selectedOverlayIds.length >= 2;
   for (const [label, value] of [
@@ -319,7 +383,7 @@ function renderObjectHelpers({ documentRef, inspector, sceneIndex, envelope }) {
       alignment: value
     }), { disabled: !enough });
   }
-  helpers.append(alignment);
+  helpers.append(commands, alignment);
   inspector.append(helpers);
 }
 
@@ -328,70 +392,75 @@ function renderTextProperties({ documentRef, inspector, sceneIndex, envelope }) 
   const propertiesHeading = element(documentRef, 'h2', 'Properties');
   const selectionLabel = selectedOverlayIds.length > 1
     ? `Text · ${selectedOverlayIds.length} objects selected`
-    : `Text · ${envelope.id}`;
+    : deriveStudioObjectLabel(envelope);
   const objectLabel = element(documentRef, 'p', selectionLabel, { className: 'studio-selection-label' });
   inspector.replaceChildren(propertiesHeading, objectLabel);
 
-  addControl(documentRef, inspector, {
-    label: 'Text', id: 'studio-text-content', value: envelope.block.text,
+  const textGroup = propertyGroup(documentRef, 'Text');
+  const content = addControl(documentRef, textGroup, {
+    label: 'Content', id: 'studio-text-content', value: envelope.block.text,
     onChange: (text) => executeStoryCommand('edit-text', { sceneIndex, id: envelope.id, text })
   });
-  addControl(documentRef, inspector, {
+  content.parentElement?.classList?.add?.('studio-property--wide');
+  addControl(documentRef, textGroup, {
     label: 'Font', id: 'studio-text-font', value: appearance.text.fontFamily,
     options: STORY_12_FONT_FAMILIES,
     onChange: (fontFamily) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, text: { fontFamily } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, textGroup, {
     label: 'Font size', id: 'studio-text-font-size', type: 'number', value: appearance.text.fontSize,
     onChange: (fontSize) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, text: { fontSize } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, textGroup, {
     label: 'Bold', id: 'studio-text-bold', type: 'checkbox', checked: appearance.text.bold,
     onChange: (bold) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, text: { bold } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, textGroup, {
     label: 'Italic', id: 'studio-text-italic', type: 'checkbox', checked: appearance.text.italic,
     onChange: (italic) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, text: { italic } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, textGroup, {
     label: 'Text color', id: 'studio-text-color', value: appearance.text.color,
     onChange: (color) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, text: { color } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, textGroup, {
     label: 'Alignment', id: 'studio-text-align', value: appearance.text.align,
-    options: ['left', 'center', 'right'],
+    options: [{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }],
     onChange: (align) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, text: { align } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, textGroup, {
     label: 'Line spacing', id: 'studio-text-line-height', type: 'number', value: appearance.text.lineHeight,
     onChange: (lineHeight) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, text: { lineHeight } })
   });
-  addControl(documentRef, inspector, {
+
+  const appearanceGroup = propertyGroup(documentRef, 'Appearance');
+  addControl(documentRef, appearanceGroup, {
     label: 'Fill', id: 'studio-box-fill', value: appearance.box.fill,
     onChange: (fill) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, box: { fill } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, appearanceGroup, {
     label: 'Opacity', id: 'studio-box-opacity', type: 'number', value: appearance.box.opacity,
     onChange: (opacity) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, box: { opacity } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, appearanceGroup, {
     label: 'Border color', id: 'studio-box-border-color', value: appearance.box.borderColor,
     onChange: (borderColor) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, box: { borderColor } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, appearanceGroup, {
     label: 'Border width', id: 'studio-box-border-width', type: 'number', value: appearance.box.borderWidth,
     onChange: (borderWidth) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, box: { borderWidth } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, appearanceGroup, {
     label: 'Corner radius', id: 'studio-box-radius', type: 'number', value: appearance.box.radius,
     onChange: (radius) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, box: { radius } })
   });
-  addControl(documentRef, inspector, {
+  addControl(documentRef, appearanceGroup, {
     label: 'Padding', id: 'studio-box-padding', type: 'number', value: appearance.box.padding,
     onChange: (padding) => executeStoryCommand('set-appearance', { sceneIndex, id: envelope.id, box: { padding } })
   });
   const z = element(documentRef, 'output', `Z order · ${envelope.frame.z}`, { id: 'studio-z-order' });
-  inspector.append(z);
+  appearanceGroup.append(z);
+  inspector.append(textGroup, appearanceGroup);
   renderObjectHelpers({ documentRef, inspector, sceneIndex, envelope });
 }
 
@@ -400,17 +469,18 @@ function renderRichProperties({ documentRef, inspector, sceneIndex, envelope, ca
   const label = block.type === 'stat-group' ? 'Metric' : `${block.type[0].toUpperCase()}${block.type.slice(1)}`;
   inspector.replaceChildren(
     element(documentRef, 'h2', 'Properties'),
-    element(documentRef, 'p', `${label} · ${envelope.id}`, { className: 'studio-selection-label' })
+    element(documentRef, 'p', deriveStudioObjectLabel(envelope), { className: 'studio-selection-label' })
   );
+  const group = propertyGroup(documentRef, label);
   const commit = (update) => executeStoryCommand('edit-rich-block', {
     sceneIndex, id: envelope.id, block: update(clone(block))
   });
   if (block.type === 'stat-group') {
-    addControl(documentRef, inspector, {
+    addControl(documentRef, group, {
       label: 'Label', id: 'studio-metric-label', value: block.items[0].label,
       onChange: (value) => commit((next) => { next.items[0].label = value; return next; })
     });
-    addControl(documentRef, inspector, {
+    addControl(documentRef, group, {
       label: 'Metric', id: 'studio-metric-id', value: block.items[0].metric,
       options: catalogs.metrics?.map(({ id }) => id) ?? [block.items[0].metric],
       onChange: (value) => commit((next) => {
@@ -421,39 +491,39 @@ function renderRichProperties({ documentRef, inspector, sceneIndex, envelope, ca
       })
     });
   } else if (block.type === 'chart') {
-    addControl(documentRef, inspector, {
+    addControl(documentRef, group, {
       label: 'Title', id: 'studio-chart-title', value: block.title,
       onChange: (value) => commit((next) => { next.title = value; return next; })
     });
-    addControl(documentRef, inspector, {
+    addControl(documentRef, group, {
       label: 'Chart type', id: 'studio-chart-type', value: block.chartType, options: ['bar', 'line', 'area'],
       onChange: (value) => commit((next) => { next.chartType = value; if (value !== 'bar') delete next.stacked; return next; })
     });
   } else if (block.type === 'table') {
-    addControl(documentRef, inspector, {
+    addControl(documentRef, group, {
       label: 'Title', id: 'studio-table-title', value: block.title ?? '',
       onChange: (value) => commit((next) => { if (value) next.title = value; else delete next.title; return next; })
     });
   } else if (block.type === 'image') {
-    addControl(documentRef, inspector, {
+    addControl(documentRef, group, {
       label: 'Image', id: 'studio-image-asset', value: block.asset,
       options: catalogs.assets?.map((asset) => typeof asset === 'string' ? asset : asset.id) ?? [block.asset],
       onChange: (value) => commit((next) => { next.asset = value; return next; })
     });
-    addControl(documentRef, inspector, {
+    addControl(documentRef, group, {
       label: 'Decorative', id: 'studio-image-decorative', type: 'checkbox', checked: block.decorative,
       onChange: (value) => commit((next) => { if (value) { next.decorative = true; next.alt = ''; } else delete next.decorative; return next; })
     });
-    addControl(documentRef, inspector, {
+    addControl(documentRef, group, {
       label: 'Alternative text', id: 'studio-image-alt', value: block.alt,
       onChange: (value) => commit((next) => { next.alt = value; if (value) delete next.decorative; return next; })
     });
   } else if (block.type === 'legend') {
-    addControl(documentRef, inspector, {
+    addControl(documentRef, group, {
       label: 'Item label', id: 'studio-legend-label', value: block.items[0].label,
       onChange: (value) => commit((next) => { next.items[0].label = value; return next; })
     });
-    addControl(documentRef, inspector, {
+    addControl(documentRef, group, {
       label: 'Sample', id: 'studio-legend-sample', value: block.items[0].sample, options: ['swatch', 'line', 'icon'],
       onChange: (value) => commit((next) => {
         next.items[0].sample = value;
@@ -463,15 +533,21 @@ function renderRichProperties({ documentRef, inspector, sceneIndex, envelope, ca
       })
     });
   }
+  inspector.append(group);
   renderObjectHelpers({ documentRef, inspector, sceneIndex, envelope });
 }
 
 function renderSceneProperties({ documentRef, inspector, active, sceneIndex, workingCamera }) {
   const propertiesHeading = element(documentRef, 'h2', 'Properties');
+  const sceneGroup = propertyGroup(documentRef, 'Scene');
   const interactionLabel = element(documentRef, 'label', 'Interaction');
   const interaction = element(documentRef, 'select', undefined, { id: 'studio-scene-interaction' });
-  for (const value of ['locked', 'zoom-only', 'explore']) {
-    const option = element(documentRef, 'option', value, { value });
+  for (const { value, label } of [
+    { value: 'locked', label: 'Locked map' },
+    { value: 'zoom-only', label: 'Zoom only' },
+    { value: 'explore', label: 'Free explore' }
+  ]) {
+    const option = element(documentRef, 'option', label, { value });
     option.value = value;
     option.selected = active.map.interaction === value;
     interaction.append(option);
@@ -482,8 +558,12 @@ function renderSceneProperties({ documentRef, inspector, active, sceneIndex, wor
 
   const transitionLabel = element(documentRef, 'label', 'Transition');
   const transition = element(documentRef, 'select', undefined, { id: 'studio-scene-transition' });
-  for (const value of ['fly', 'ease', 'instant']) {
-    const option = element(documentRef, 'option', value, { value });
+  for (const { value, label } of [
+    { value: 'fly', label: 'Fly' },
+    { value: 'ease', label: 'Smooth' },
+    { value: 'instant', label: 'Instant' }
+  ]) {
+    const option = element(documentRef, 'option', label, { value });
     option.value = value;
     option.selected = active.map.transition.type === value;
     transition.append(option);
@@ -494,7 +574,9 @@ function renderSceneProperties({ documentRef, inspector, active, sceneIndex, wor
     transition: { type: transition.value, durationMs: transition.value === 'instant' ? 0 : active.map.transition.durationMs }
   }));
   transitionLabel.append(transition);
+  sceneGroup.append(interactionLabel, transitionLabel);
 
+  const cameraGroup = propertyGroup(documentRef, 'Camera');
   const cameraChanged = workingCamera && !cameraEqual(workingCamera, active.map.camera);
   const cameraStatus = element(documentRef, 'p', cameraChanged ? 'Camera changed · not captured' : 'Camera matches saved Scene', {
     id: 'studio-camera-status', role: 'status', 'aria-live': 'polite'
@@ -505,7 +587,8 @@ function renderSceneProperties({ documentRef, inspector, active, sceneIndex, wor
   const restore = element(documentRef, 'button', 'Restore Saved Camera', { type: 'button', id: 'studio-camera-restore' });
   restore.disabled = !cameraChanged;
   restore.addEventListener('click', () => activeStudio.onPreviewCommand('restore-scene-camera', { index: sceneIndex }));
-  inspector.replaceChildren(propertiesHeading, interactionLabel, transitionLabel, cameraStatus, capture, restore);
+  cameraGroup.append(cameraStatus, capture, restore);
+  inspector.replaceChildren(propertiesHeading, sceneGroup, cameraGroup);
 }
 
 export function mountStudioShell({
@@ -522,6 +605,7 @@ export function mountStudioShell({
   selectedOverlayId: requestedSelection,
   onSelectScene = () => {},
   onSelectOverlay = () => {},
+  onRenderLayerProperties = () => {},
   onStoryCommand = () => {},
   onPreviewCommand = () => {},
   onOutputPreview = () => {}
@@ -534,12 +618,13 @@ export function mountStudioShell({
   if (requestedSelection !== undefined) {
     selectedOverlayId = requestedSelection;
     selectedOverlayIds = requestedSelection ? [requestedSelection] : [];
+    selectedLayerId = null;
   }
 
   activeStudio = {
     documentRef, navigation, inspector, scenesHost, previewToolbar,
     manifest, story, catalogs, sceneIndex, workingCamera,
-    onSelectScene, onSelectOverlay, onStoryCommand, onPreviewCommand, onOutputPreview
+    onSelectScene, onSelectOverlay, onRenderLayerProperties, onStoryCommand, onPreviewCommand, onOutputPreview
   };
   normalizeSelection();
   ensureHistory(activeStudio);
@@ -549,34 +634,51 @@ export function mountStudioShell({
   const layers = element(documentRef, 'div', undefined, { className: 'studio-layers' });
   const sceneLayerIds = Object.keys(active.map.layerVisibility);
   for (const datasetId of sceneLayerIds) {
-    const label = element(documentRef, 'label', undefined, { className: 'studio-layer' });
-    const input = element(documentRef, 'input', undefined, { type: 'checkbox', checked: active.map.layerVisibility[datasetId] });
+    const descriptor = manifest.datasets?.[datasetId];
+    const humanLabel = descriptor?.label ?? readableId(datasetId) ?? datasetId;
+    const row = element(documentRef, 'div', undefined, {
+      className: `studio-layer${selectedLayerId === datasetId ? ' is-current' : ''}`
+    });
+    const visibility = element(documentRef, 'label', undefined, { className: 'studio-layer-visibility' });
+    const input = element(documentRef, 'input', undefined, {
+      type: 'checkbox', checked: active.map.layerVisibility[datasetId],
+      'aria-label': `Show ${humanLabel}`
+    });
     input.addEventListener('change', () => executeStoryCommand('set-layer-visibility', {
       sceneIndex, datasetId, visible: input.checked
     }));
-    label.append(input, element(documentRef, 'span', manifest.datasets?.[datasetId]?.label ?? datasetId));
-    layers.append(label);
+    visibility.append(input, element(documentRef, 'span', 'Visible', { className: 'visually-hidden' }));
+    const select = element(documentRef, 'button', humanLabel, {
+      type: 'button', className: 'studio-layer-select',
+      'aria-pressed': String(selectedLayerId === datasetId), title: `Layer ID: ${datasetId}`
+    });
+    select.addEventListener('click', () => selectLayer(datasetId));
+    row.append(visibility, select);
+    layers.append(row);
   }
   if (!sceneLayerIds.length) layers.append(element(documentRef, 'p', 'No map layers yet.'));
 
-  const textHeading = element(documentRef, 'h2', 'Text');
+  const insertHeading = element(documentRef, 'h2', 'Insert');
   const addMenu = element(documentRef, 'div', undefined, { className: 'studio-add-menu' });
-  const addHeading = element(documentRef, 'button', 'Add Heading', { type: 'button' });
+  const addHeading = element(documentRef, 'button', 'Heading', { type: 'button', title: 'Add heading text' });
   addHeading.addEventListener('click', () => executeStoryCommand('add-text', { sceneIndex, kind: 'heading' }));
-  const addBody = element(documentRef, 'button', 'Add Body Text', { type: 'button' });
+  const addBody = element(documentRef, 'button', 'Body text', { type: 'button', title: 'Add body text' });
   addBody.addEventListener('click', () => executeStoryCommand('add-text', { sceneIndex, kind: 'body' }));
   addMenu.append(addHeading, addBody);
   for (const [label, kind] of [
-    ['Add Metric', 'metric'], ['Add Chart', 'chart'], ['Add Table', 'table'], ['Add Image', 'image'], ['Add Legend', 'legend']
+    ['Metric', 'metric'], ['Chart', 'chart'], ['Table', 'table'], ['Image', 'image'], ['Legend', 'legend']
   ]) {
-    const button = element(documentRef, 'button', label, { type: 'button' });
+    const button = element(documentRef, 'button', label, { type: 'button', title: `Add ${label.toLowerCase()}` });
     button.addEventListener('click', () => executeStoryCommand('add-rich-object', { sceneIndex, kind, catalogs }));
     addMenu.append(button);
   }
+  const objectsHeading = element(documentRef, 'h2', 'Objects');
   const objects = element(documentRef, 'div', undefined, { className: 'studio-object-list' });
   for (const envelope of active.content.blocks) {
-    const objectButton = element(documentRef, 'button', envelope.id, {
-      type: 'button', className: selectedOverlayIds.includes(envelope.id) ? 'is-current' : ''
+    const objectButton = element(documentRef, 'button', deriveStudioObjectLabel(envelope), {
+      type: 'button', className: selectedOverlayIds.includes(envelope.id) ? 'is-current' : '',
+      title: `Object ID: ${envelope.id}`,
+      'aria-pressed': String(selectedOverlayIds.includes(envelope.id))
     });
     objectButton.addEventListener('click', (event) => selectOverlay(envelope.id, {
       notify: true,
@@ -584,15 +686,24 @@ export function mountStudioShell({
     }));
     objects.append(objectButton);
   }
-  navigation.replaceChildren(layersHeading, layers, textHeading, addMenu, objects);
+  if (!active.content.blocks.length) objects.append(element(documentRef, 'p', 'No objects in this Scene.'));
+  navigation.replaceChildren(layersHeading, layers, insertHeading, addMenu, objectsHeading, objects);
 
   const selected = selectedEnvelope(story, sceneIndex, selectedOverlayId);
   if (['heading', 'paragraph'].includes(selected?.block?.type)) renderTextProperties({ documentRef, inspector, sceneIndex, envelope: selected });
   else if (selected) renderRichProperties({ documentRef, inspector, sceneIndex, envelope: selected, catalogs });
+  else if (selectedLayerId) {
+    inspector.replaceChildren(
+      element(documentRef, 'h2', 'Properties'),
+      element(documentRef, 'p', `Layer · ${manifest.datasets?.[selectedLayerId]?.label ?? readableId(selectedLayerId)}`, { className: 'studio-selection-label' })
+    );
+    onRenderLayerProperties(selectedLayerId, inspector);
+  }
   else renderSceneProperties({ documentRef, inspector, active, sceneIndex, workingCamera });
 
   if (previewToolbar?.replaceChildren) {
-    const canvasLabel = element(documentRef, 'strong', 'Canvas · 16:9 live map');
+    const canvasLabel = element(documentRef, 'strong', 'Live Scene · 16:9', { className: 'studio-canvas-label' });
+    const modes = element(documentRef, 'div', undefined, { className: 'studio-mode-switch', 'aria-label': 'Canvas authoring mode' });
     const select = element(documentRef, 'button', 'Select', { type: 'button', id: 'studio-mode-select', 'aria-pressed': String(authoringMode === 'select') });
     const map = element(documentRef, 'button', 'Map', { type: 'button', id: 'studio-mode-map', 'aria-pressed': String(authoringMode === 'map') });
     const chooseMode = (mode) => {
@@ -603,25 +714,32 @@ export function mountStudioShell({
     };
     select.addEventListener('click', () => chooseMode('select'));
     map.addEventListener('click', () => chooseMode('map'));
-    const outputControls = createStudioOutputPreviewControls({ documentRef, onOutputPreview });
-    previewToolbar.replaceChildren(canvasLabel, select, map, outputControls.previewStory, outputControls.present);
+    modes.append(select, map);
+    previewToolbar.replaceChildren(canvasLabel, modes);
   }
 
   const scenesHeading = element(documentRef, 'h2', 'Scenes');
   const sceneList = element(documentRef, 'div', undefined, { className: 'studio-scene-list', role: 'list' });
   story.states.forEach((scene, index) => {
-    const button = element(documentRef, 'button', `${String(index + 1).padStart(2, '0')} · ${scene.id}`, {
+    const sceneLabel = deriveStudioSceneLabel(scene, index);
+    const button = element(documentRef, 'button', undefined, {
       type: 'button', role: 'listitem', className: index === sceneIndex ? 'is-current' : '',
-      'aria-current': index === sceneIndex ? 'true' : 'false'
+      'aria-current': index === sceneIndex ? 'true' : 'false',
+      'aria-label': `Scene ${index + 1}: ${sceneLabel}`, title: `Scene ID: ${scene.id}`
     });
+    button.append(
+      element(documentRef, 'span', String(index + 1).padStart(2, '0'), { className: 'studio-scene-ordinal' }),
+      element(documentRef, 'span', sceneLabel, { className: 'studio-scene-label' })
+    );
     button.addEventListener('click', () => {
       selectedOverlayId = null;
       selectedOverlayIds = [];
+      selectedLayerId = null;
       onSelectScene(index);
     });
     button.addEventListener('keydown', (event) => {
-      if (event.key === 'ArrowLeft' && index > 0) { selectedOverlayId = null; selectedOverlayIds = []; onSelectScene(index - 1); }
-      if (event.key === 'ArrowRight' && index < story.states.length - 1) { selectedOverlayId = null; selectedOverlayIds = []; onSelectScene(index + 1); }
+      if (event.key === 'ArrowLeft' && index > 0) { selectedOverlayId = null; selectedOverlayIds = []; selectedLayerId = null; onSelectScene(index - 1); }
+      if (event.key === 'ArrowRight' && index < story.states.length - 1) { selectedOverlayId = null; selectedOverlayIds = []; selectedLayerId = null; onSelectScene(index + 1); }
     });
     sceneList.append(button);
   });
@@ -632,16 +750,16 @@ export function mountStudioShell({
     button.addEventListener('click', () => executeStoryCommand(name, payload));
     commands.append(button);
   };
-  command('Add Scene', 'add-scene', { sceneIndex });
-  command('Duplicate Scene', 'duplicate-scene', { sceneIndex });
-  command('Delete Scene', 'delete-scene', { sceneIndex }, story.states.length === 1);
-  command('Move Scene Up', 'move-scene', { from: sceneIndex, to: sceneIndex - 1 }, sceneIndex === 0);
-  command('Move Scene Down', 'move-scene', { from: sceneIndex, to: sceneIndex + 1 }, sceneIndex === story.states.length - 1);
+  command('+ Add Scene', 'add-scene', { sceneIndex });
+  command('Duplicate', 'duplicate-scene', { sceneIndex });
+  command('Delete', 'delete-scene', { sceneIndex }, story.states.length === 1);
+  command('Move previous', 'move-scene', { from: sceneIndex, to: sceneIndex - 1 }, sceneIndex === 0);
+  command('Move next', 'move-scene', { from: sceneIndex, to: sceneIndex + 1 }, sceneIndex === story.states.length - 1);
   scenesHost.hidden = false;
   scenesHost.replaceChildren(scenesHeading, sceneList, commands);
 
   updateHistoryButtons();
-  return Object.freeze({ sceneIndex, selectedOverlayId, selectedOverlayIds: Object.freeze([...selectedOverlayIds]), history: activeHistory?.status?.() });
+  return Object.freeze({ sceneIndex, selectedLayerId, selectedOverlayId, selectedOverlayIds: Object.freeze([...selectedOverlayIds]), history: activeHistory?.status?.() });
 }
 
 export function resetStudioAuthoringSession() {
@@ -650,5 +768,6 @@ export function resetStudioAuthoringSession() {
   activeHistoryKey = null;
   selectedOverlayId = null;
   selectedOverlayIds = [];
+  selectedLayerId = null;
   authoringMode = 'select';
 }
