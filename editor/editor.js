@@ -161,6 +161,7 @@ export function confirmDataWorkbenchCandidate(candidate, {
     datasetInspector.command('add-geojson', id, {
       geometry: candidate.geometry,
       label,
+      render: preflight.descriptor.render,
       value: preflight.value
     });
   } else {
@@ -345,7 +346,6 @@ export function createEditor({
         });
         if (!existingDescriptor && candidate.kind === 'spatial') {
           const entity = inspect('dataset').entity(id);
-          if (entity.hasControl('render.type')) entity.control('render.type').set(candidate.geometry === 'polygon' ? 'fill' : candidate.geometry);
           const fields = entity.labelFields();
           if (fields.length && entity.hasControl('render.label')) {
             entity.control('render.label').set({ field: fields[0], placement: 'auto' });

@@ -241,6 +241,12 @@ const RENDER_KEYS = Object.freeze({
   mixed: []
 });
 
+const DEFAULT_RENDER = Object.freeze({
+  line: Object.freeze({ type: 'line', color: '#2BB7FF', width: 4, opacity: 0.9, lineStyle: 'solid' }),
+  point: Object.freeze({ type: 'point', color: '#F59E0B', radius: 6, strokeColor: '#FFFFFF', strokeWidth: 1 }),
+  polygon: Object.freeze({ type: 'fill', color: '#2BB7FF33', opacity: 0.3, outlineColor: '#2BB7FF', outlineWidth: 2 })
+});
+
 function observedTopLevelProperties(collection) {
   const fields = new Set();
   for (const feature of collection.features) {
@@ -294,7 +300,10 @@ export function preflightDatasetCandidate(candidate, {
       throw new TypeError(`Replacement is incompatible; expected ${descriptor.geometry} geometry.`);
     }
   } else if (candidate.kind === 'spatial') {
-    descriptor = { type: 'geojson', geometry: candidate.geometry, src: `./data/${id}.geojson`, label };
+    descriptor = {
+      type: 'geojson', geometry: candidate.geometry, src: `./data/${id}.geojson`, label,
+      render: clone(DEFAULT_RENDER[candidate.geometry])
+    };
   } else {
     descriptor = { type: 'table-json', src: `./data/${id}.json`, label };
   }
@@ -419,7 +428,7 @@ function datasetInspector({ manifest, resources = {}, mutate, writeResource, rol
     if (manifest.datasets[id]) throw new TypeError(`Dataset ID already exists: ${id}`);
     const src = type === 'geojson' ? `./data/${id}.geojson` : `./data/${id}.json`;
     const descriptor = type === 'geojson'
-      ? { type, geometry: input.geometry, src, label: input.label }
+      ? { type, geometry: input.geometry, src, label: input.label, ...(input.render ? { render: clone(input.render) } : {}) }
       : { type, src, label: input.label };
     const imported = type === 'geojson'
       ? importGeoJson(input.value, { ...descriptor, path: `$.datasets.${id}` }).value

@@ -157,7 +157,10 @@ test('candidate preflight creates production descriptors and managed paths witho
   const spatial = preflightDatasetCandidate({
     kind: 'spatial', geometry: 'line', value: featureCollection('LineString', [[106, 11], [107, 12]])
   }, { id: 'route', label: 'Route', manifest });
-  assert.deepEqual(spatial.descriptor, { type: 'geojson', geometry: 'line', src: './data/route.geojson', label: 'Route' });
+  assert.deepEqual(spatial.descriptor, {
+    type: 'geojson', geometry: 'line', src: './data/route.geojson', label: 'Route',
+    render: { type: 'line', color: '#2BB7FF', width: 4, opacity: 0.9, lineStyle: 'solid' }
+  });
   assert.equal(spatial.path, 'data/route.geojson');
 
   const tabular = preflightDatasetCandidate({ kind: 'table', value: table() }, { id: 'demand', label: 'Demand', manifest });
@@ -231,6 +234,9 @@ test('Data Workbench spatial confirmation precomputes and commits one production
   assert.equal(state.writes.length, 1);
   assert.equal(state.writes[0].path, 'data/route.geojson');
   assert.equal(state.manifest.datasets.route.geometry, 'line');
+  assert.deepEqual(state.manifest.datasets.route.render, {
+    type: 'line', color: '#2BB7FF', width: 4, opacity: 0.9, lineStyle: 'solid'
+  });
   assert.deepEqual(nextStory.states.map(({ map }) => map.layerVisibility.route), [false, true]);
   assert.equal(result.story, nextStory);
   assert.equal('route' in story.states[0].map.layerVisibility, false);

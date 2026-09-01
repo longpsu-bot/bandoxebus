@@ -53,7 +53,7 @@ export async function openGeoPackageSource(bytes, {
   label = 'GeoPackage',
   usedIds = []
 } = {}) {
-  if (!geoPackageApi?.GeoPackageAPI?.open || !geoPackageApi?.FeatureDao?.reprojectFeature) {
+  if (!geoPackageApi?.GeoPackageAPI?.open) {
     throw new TypeError('GeoPackage JS is required for GeoPackage import.');
   }
   resolveLocalCrs('EPSG:4326', proj4);
@@ -88,6 +88,10 @@ export async function openGeoPackageSource(bytes, {
       try {
         activeConnection = await geoPackageApi.GeoPackageAPI.open(bytes);
         const dao = activeConnection.getFeatureDao(item.tableName);
+        const reprojectFeature = geoPackageApi.FeatureDao?.reprojectFeature ?? dao?.constructor?.reprojectFeature;
+        if (typeof reprojectFeature !== 'function') {
+          throw new TypeError('GeoPackage JS cannot reproject feature geometry.');
+        }
         sourceCrs = sourceCrsOverride || sourceCrsFor(dao.srs);
         resolveLocalCrs(sourceCrs, proj4);
         const geometryColumn = dao.getGeometryColumnName();
@@ -96,7 +100,7 @@ export async function openGeoPackageSource(bytes, {
           const row = dao.getRow(next.value);
           if (!row?.geometry) continue;
           const rawGeometry = row.geometry.toGeoJSON();
-          const outputGeometry = geoPackageApi.FeatureDao.reprojectFeature(row, dao.srs, dao.projection);
+          const outputGeometry = reprojectFeature(row, dao.srs, dao.projection);
           if (!verified) {
             verifyProjection(rawGeometry, outputGeometry, { sourceCrs, proj4 });
             verified = true;

@@ -326,12 +326,14 @@ test('Shapefile without PRJ requires an explicit geographic assumption or manual
   assert.match(candidates[0].warnings.join(' '), /assumed EPSG:4326/i);
 });
 
-function fakeGeoPackageApi(events, { mismatch = false } = {}) {
+function fakeGeoPackageApi(events, { mismatch = false, exportFeatureDao = true } = {}) {
   const raw = [686143.36, 1200320.45, 6];
   const output = mismatch ? [0, 0, 6] : [106.7028563810, 10.8536676064, 6];
   const rows = [{ id: 1, values: { id: 1, geom: 'binary', name: 'Projected stop' }, geometry: { toGeoJSON: () => ({ type: 'Point', coordinates: raw }) } }];
+  class FakeFeatureDao {}
+  FakeFeatureDao.reprojectFeature = () => ({ type: 'Point', coordinates: output });
   return {
-    FeatureDao: { reprojectFeature: () => ({ type: 'Point', coordinates: output }) },
+    ...(exportFeatureDao ? { FeatureDao: FakeFeatureDao } : {}),
     GeoPackageAPI: {
       async open(bytes) {
         events.push(['open', bytes.byteLength]);
@@ -339,7 +341,7 @@ function fakeGeoPackageApi(events, { mismatch = false } = {}) {
           getFeatureTables: () => ['projected_stops', 'routes'],
           getTileTables: () => { throw new Error('tile tables must not be queried'); },
           getFeatureDao(table) {
-            return {
+            return Object.assign(new FakeFeatureDao(), {
               srs: { organization: 'EPSG', organization_coordsys_id: table === 'projected_stops' ? 32648 : 4326 },
               projection: {},
               getGeometryColumnName: () => 'geom',
@@ -352,7 +354,7 @@ function fakeGeoPackageApi(events, { mismatch = false } = {}) {
                   return() { events.push('result-set:close'); return { done: true }; }
                 };
               }
-            };
+            });
           },
           close() { events.push('geopackage:close'); }
         };
@@ -360,6 +362,16 @@ function fakeGeoPackageApi(events, { mismatch = false } = {}) {
     }
   };
 }
+
+test('GeoPackage uses the FeatureDao instance constructor when the browser bundle does not export FeatureDao', async () => {
+  const { openGeoPackageSource } = await optionalModule('../editor/import/geopackage-adapter.js');
+  const events = [];
+  const source = await openGeoPackageSource(new Uint8Array([1, 2, 3]), {
+    geoPackageApi: fakeGeoPackageApi(events, { exportFeatureDao: false }), proj4: await realProj4(), label: 'Features'
+  });
+  const candidates = await source.prepare(source.sourceItems[0].id);
+  assert.ok(Math.abs(candidates[0].value.features[0].geometry.coordinates[0] - 106.7028563810) < 1e-7);
+});
 
 test('GeoPackage lists feature tables only and verifies projected output independently', async () => {
   const { openGeoPackageSource } = await optionalModule('../editor/import/geopackage-adapter.js');
