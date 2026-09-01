@@ -170,6 +170,8 @@ function validCommandPayload(payload) {
     && payload.payload.animate === false;
   if (payload.name === 'authoring-mode') return hasExactKeys(payload.payload, ['mode'])
     && ['select', 'map'].includes(payload.payload.mode);
+  if (payload.name === 'authoring-selection') return hasExactKeys(payload.payload, ['id'])
+    && (payload.payload.id === null || validOverlayId(payload.payload.id));
   if (payload.name === 'restore-scene-camera') return hasExactKeys(payload.payload, ['index'])
     && Number.isInteger(payload.payload.index) && payload.payload.index >= 0;
   if (payload.name === 'locate-project-layer') return hasExactKeys(payload.payload, ['datasetId'])

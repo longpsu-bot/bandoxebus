@@ -91,6 +91,7 @@ function renderHarness() {
   let current = baseStory();
   let selected = null;
   let activeSceneIndex = 0;
+  const previewCommands = [];
 
   function render() {
     mountStudioShell({
@@ -111,7 +112,7 @@ function renderHarness() {
         current = applyStudioStoryCommand(current, name, payload);
         render();
       },
-      onPreviewCommand() {}
+      onPreviewCommand(name, payload) { previewCommands.push({ name, payload: structuredClone(payload) }); }
     });
   }
   render();
@@ -121,9 +122,21 @@ function renderHarness() {
     get story() { return current; },
     get selected() { return selected; },
     get sceneIndex() { return activeSceneIndex; },
+    previewCommands,
     render
   };
 }
+
+test('Studio rerenders send only single-object selection as transient preview chrome state', () => {
+  const h = renderHarness();
+  findButton(h.roots, 'Heading').click();
+  assert.deepEqual(h.previewCommands.at(-1), { name: 'authoring-selection', payload: { id: 'heading' } });
+  findButton(h.roots, 'Body text').click();
+  findButton(h.roots, 'Heading · Heading').click();
+  findButton(h.roots, 'Body text · Body text').dispatch('click', { shiftKey: true });
+  assert.deepEqual(h.previewCommands.at(-1), { name: 'authoring-selection', payload: { id: null } },
+    'multi-selection keeps alignment state but has no transform chrome');
+});
 
 test('Studio Add Heading/Body creates valid Text envelopes and selection is UI-only', () => {
   const h = renderHarness();

@@ -4,7 +4,57 @@ body { position: relative; }
 #scene-compositor { position: absolute; inset: 0; aspect-ratio: 16 / 9; width: min(100vw, calc(100vh * 16 / 9)); height: min(100vh, calc(100vw * 9 / 16)); margin: auto; pointer-events: none; container-type: inline-size; }
 .scene-overlay { overflow: hidden; pointer-events: auto; }
 .scene-overlay img, .scene-overlay canvas, .scene-overlay table { max-width: 100%; }
-.scene-resize-handle { position: absolute; right: 0; bottom: 0; inline-size: 14px; block-size: 14px; border: 1px solid #fff; background: #2bb7ff; padding: 0; cursor: nwse-resize; z-index: 10001; }
+.scene-selection-chrome {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid #2bb7ff;
+  box-shadow: 0 0 0 1px rgb(7 16 28 / 42%);
+  pointer-events: none;
+}
+.scene-resize-handle {
+  position: absolute;
+  inline-size: 22px;
+  block-size: 22px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  pointer-events: auto;
+}
+.scene-resize-handle::after {
+  position: absolute;
+  inset: 6px;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  background: #2bb7ff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 48%);
+  content: "";
+}
+.scene-resize-handle[data-scene-resize-handle="nw"] { left: -11px; top: -11px; }
+.scene-resize-handle[data-scene-resize-handle="n"] { left: calc(50% - 11px); top: -11px; }
+.scene-resize-handle[data-scene-resize-handle="ne"] { right: -11px; top: -11px; }
+.scene-resize-handle[data-scene-resize-handle="e"] { right: -11px; top: calc(50% - 11px); }
+.scene-resize-handle[data-scene-resize-handle="se"] { right: -11px; bottom: -11px; }
+.scene-resize-handle[data-scene-resize-handle="s"] { left: calc(50% - 11px); bottom: -11px; }
+.scene-resize-handle[data-scene-resize-handle="sw"] { left: -11px; bottom: -11px; }
+.scene-resize-handle[data-scene-resize-handle="w"] { left: -11px; top: calc(50% - 11px); }
+.scene-resize-feedback {
+  position: absolute;
+  left: 0;
+  bottom: -32px;
+  min-inline-size: max-content;
+  padding: 4px 7px;
+  border: 1px solid rgb(148 163 184 / 34%);
+  border-radius: 5px;
+  background: rgb(7 16 28 / 92%);
+  box-shadow: 0 5px 14px rgb(0 0 0 / 32%);
+  color: #f6f8fc;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.scene-resize-feedback[hidden] { display: none; }
 .scene-snap-guide { background: rgb(43 183 255 / 88%); z-index: 10000; }
 .scene-snap-guide[data-scene-snap-guide="x"] { inline-size: 1px; }
 .scene-snap-guide[data-scene-snap-guide="y"] { block-size: 1px; }

@@ -215,16 +215,20 @@ test('Studio layer selection is UI-only, does not toggle Scene visibility, and r
   assert.deepEqual(story, before, 'selection does not serialize into Story data');
   assert.deepEqual(commands, [], 'selection does not author visibility');
   assert.deepEqual(renderedLayerProperties, ['route']);
-  assert.deepEqual(previewCommands, [['locate-project-layer', { datasetId: 'route' }]]);
+  const locateCommands = () => previewCommands.filter(([name]) => name === 'locate-project-layer');
+  const selectionCommands = () => previewCommands.filter(([name]) => name === 'authoring-selection');
+  assert.deepEqual(locateCommands(), [['locate-project-layer', { datasetId: 'route' }]]);
+  assert.ok(selectionCommands().every(([, payload]) => payload.id === null),
+    'layer selection never becomes canvas object selection');
   layerButton.click();
-  assert.deepEqual(previewCommands, [
+  assert.deepEqual(locateCommands(), [
     ['locate-project-layer', { datasetId: 'route' }],
     ['locate-project-layer', { datasetId: 'route' }]
   ], 'clicking the selected layer again re-locates it');
   const visibility = nodes().find((node) => node.tagName === 'INPUT' && node.attributes.get('type') === 'checkbox');
   visibility.checked = false;
   visibility.change();
-  assert.equal(previewCommands.length, 2, 'visibility checkbox never sends locate');
+  assert.equal(locateCommands().length, 2, 'visibility checkbox never sends locate');
   assert.equal(commands.length, 1);
   assert.equal(commands[0][0], 'replace-story');
   assert.equal(commands[0][1].story.states[0].map.layerVisibility.route, false);

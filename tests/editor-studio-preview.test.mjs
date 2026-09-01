@@ -74,16 +74,21 @@ test('parent bridge sends only exact bounded Scene authoring commands', () => {
 
   bridge.command('activate-scene', { index: 2, animate: false });
   bridge.command('authoring-mode', { mode: 'map' });
+  bridge.command('authoring-selection', { id: 'image' });
+  bridge.command('authoring-selection', { id: null });
   bridge.command('restore-scene-camera', { index: 2 });
 
   const commands = posted.filter(({ message }) => message.type === 'editor-preview:command').map(({ message }) => message.payload);
   assert.deepEqual(commands, [
     { name: 'activate-scene', payload: { index: 2, animate: false } },
     { name: 'authoring-mode', payload: { mode: 'map' } },
+    { name: 'authoring-selection', payload: { id: 'image' } },
+    { name: 'authoring-selection', payload: { id: null } },
     { name: 'restore-scene-camera', payload: { index: 2 } }
   ]);
   assert.throws(() => bridge.command('activate-scene', { index: 2, animate: false, method: 'evil' }), /invalid preview command/i);
   assert.throws(() => bridge.command('authoring-mode', { mode: 'pan-only' }), /invalid preview command/i);
+  assert.throws(() => bridge.command('authoring-selection', { id: 'Bad ID' }), /invalid preview command/i);
   bridge.dispose();
 });
 
@@ -151,6 +156,50 @@ test('preview host dispatches bounded Scene commands to the active generic shell
     ['restore', 1]
   ]);
   assert.equal(posted.some(({ type }) => type === 'editor-preview:runtime-error'), false);
+  await host.dispose();
+});
+
+test('preview host restores transient selection silently when a Story refresh recreates the adapter', async () => {
+  const windowRef = fakeWindow();
+  const posted = [];
+  const adapters = [];
+  windowRef.parent = { postMessage(message) { posted.push(message); } };
+  windowRef.document.getElementById = (id) => id === 'scene-compositor' ? {} : null;
+  const host = startEditorPreviewHost({
+    windowRef,
+    expectedOrigin: windowRef.location.origin,
+    createResolver() { return { manifestUrl: new URL('https://editor.example/project.json'), fetchImpl() {}, resolveAssetUrl() {}, revoke() {} }; },
+    createAuthoringAdapter(options) {
+      const calls = [];
+      const adapter = {
+        calls,
+        setMode(mode) { calls.push(['mode', mode]); },
+        selectOverlay(id, selectionOptions) { calls.push(['select', id, selectionOptions]); },
+        destroy() { calls.push(['destroy']); }
+      };
+      adapters.push({ adapter, emit: options.emit });
+      return adapter;
+    },
+    async startProductionApplication() { return { map: { loaded: () => true }, project: { story: { schemaVersion: '1.2' } }, destroy() {} }; }
+  });
+  await host.start({ revision: 1, entries: [] });
+  windowRef.emit('message', {
+    source: windowRef.parent,
+    origin: windowRef.location.origin,
+    data: envelope('command', 1, { name: 'authoring-selection', payload: { id: 'image' } })
+  });
+  await host.start({ revision: 2, entries: [] });
+  assert.deepEqual(adapters[0].adapter.calls, [
+    ['mode', 'select'],
+    ['select', 'image', { emitSelection: false, focus: false }],
+    ['destroy']
+  ]);
+  assert.deepEqual(adapters[1].adapter.calls, [
+    ['mode', 'select'],
+    ['select', 'image', { emitSelection: false, focus: false }]
+  ]);
+  assert.equal(posted.filter(({ type }) => type === 'editor-preview:select-overlay').length, 0,
+    'parent-driven selection and chrome restoration do not echo selection events');
   await host.dispose();
 });
 

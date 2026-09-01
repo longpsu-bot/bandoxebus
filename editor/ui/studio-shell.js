@@ -774,6 +774,9 @@ export function mountStudioShell({
   scenesHost.hidden = false;
   scenesHost.replaceChildren(scenesHeading, sceneList, commands);
 
+  onPreviewCommand('authoring-selection', {
+    id: authoringMode === 'select' && selectedOverlayIds.length === 1 ? selectedOverlayId : null
+  });
   updateHistoryButtons();
   return Object.freeze({ sceneIndex, selectedLayerId, selectedOverlayId, selectedOverlayIds: Object.freeze([...selectedOverlayIds]), history: activeHistory?.status?.() });
 }
