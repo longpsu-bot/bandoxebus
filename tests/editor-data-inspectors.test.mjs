@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { confirmDataWorkbenchCandidate } from '../editor/editor.js';
+import { createScene12 } from '../editor/core/scene-commands.js';
+
 import {
   importGeoJson,
   importNormalizedTable,
+  preflightDatasetCandidate,
   renderEntityInspector
 } from '../editor/ui/inspectors.js';
 
@@ -146,4 +150,137 @@ test('data imports and row edits surface production validator errors unchanged',
     () => state.ui.entity('demand').command('edit-cell', { row: 0, column: 'count', value: 'not-an-integer' }),
     (error) => error.code === 'TABLE_DATA_INVALID' && error.path === '$.datasets.demand.rows[0].count'
   );
+});
+
+test('candidate preflight creates production descriptors and managed paths without mutation', () => {
+  const manifest = { datasets: {} };
+  const spatial = preflightDatasetCandidate({
+    kind: 'spatial', geometry: 'line', value: featureCollection('LineString', [[106, 11], [107, 12]])
+  }, { id: 'route', label: 'Route', manifest });
+  assert.deepEqual(spatial.descriptor, { type: 'geojson', geometry: 'line', src: './data/route.geojson', label: 'Route' });
+  assert.equal(spatial.path, 'data/route.geojson');
+
+  const tabular = preflightDatasetCandidate({ kind: 'table', value: table() }, { id: 'demand', label: 'Demand', manifest });
+  assert.deepEqual(tabular.descriptor, { type: 'table-json', src: './data/demand.json', label: 'Demand' });
+  assert.equal(tabular.path, 'data/demand.json');
+  assert.deepEqual(manifest, { datasets: {} });
+});
+
+test('candidate preflight blocks collisions and production validation failures without side effects', () => {
+  const manifest = { datasets: { route: { type: 'geojson', geometry: 'line', src: './data/route.geojson', label: 'Route' } } };
+  assert.throws(
+    () => preflightDatasetCandidate({ kind: 'spatial', geometry: 'line', value: featureCollection('LineString', [[0, 0], [1, 1]]) }, {
+      id: 'route', label: 'Duplicate', manifest
+    }),
+    /already exists/i
+  );
+  assert.throws(
+    () => preflightDatasetCandidate({ kind: 'spatial', geometry: 'line', value: featureCollection('Point', [0, 0]) }, {
+      id: 'bad-route', label: 'Bad route', manifest
+    }),
+    (error) => error.code === 'GEOJSON_RESOURCE_INVALID'
+  );
+  assert.equal(Object.keys(manifest.datasets).length, 1);
+});
+
+test('candidate replacement preserves exact descriptor ID/path and enforces family compatibility', () => {
+  const lineDescriptor = { type: 'geojson', geometry: 'line', src: './data/custom-route.geojson', label: 'Existing route', required: true };
+  const replacement = preflightDatasetCandidate({
+    kind: 'spatial', geometry: 'line', value: featureCollection('LineString', [[107, 12], [108, 13]])
+  }, { id: 'route', label: 'Ignored replacement label', existingDescriptor: lineDescriptor });
+  assert.deepEqual(replacement.descriptor, lineDescriptor);
+  assert.equal(replacement.path, 'data/custom-route.geojson');
+
+  assert.throws(() => preflightDatasetCandidate({
+    kind: 'spatial', geometry: 'point', value: featureCollection('Point', [106, 11])
+  }, { id: 'route', existingDescriptor: lineDescriptor }), /incompatible.*line|line.*incompatible/i);
+
+  const tableDescriptor = { type: 'table-json', src: './data/custom-table.json', label: 'Existing table' };
+  const tableReplacement = preflightDatasetCandidate({ kind: 'table', value: table() }, {
+    id: 'demand', existingDescriptor: tableDescriptor
+  });
+  assert.deepEqual(tableReplacement.descriptor, tableDescriptor);
+  assert.equal(tableReplacement.path, 'data/custom-table.json');
+});
+
+function story12() {
+  return {
+    schemaVersion: '1.2', id: 'main', title: 'Main',
+    states: [
+      createScene12({ id: 'one', camera: { center: [0, 0], zoom: 2, pitch: 0, bearing: 0 } }),
+      createScene12({ id: 'two', camera: { center: [1, 1], zoom: 3, pitch: 0, bearing: 0 } })
+    ]
+  };
+}
+
+test('Data Workbench spatial confirmation precomputes and commits one production resource and Scene layer', () => {
+  const state = harness();
+  const story = story12();
+  let nextStory;
+  const candidate = {
+    kind: 'spatial', id: 'route', label: 'Route', geometry: 'line',
+    value: featureCollection('LineString', [[106, 11], [107, 12]])
+  };
+  const result = confirmDataWorkbenchCandidate(candidate, {
+    manifest: state.manifest,
+    datasetInspector: state.ui,
+    story,
+    sceneIndex: 1,
+    mutateStory(value) { nextStory = value; }
+  });
+  assert.equal(state.writes.length, 1);
+  assert.equal(state.writes[0].path, 'data/route.geojson');
+  assert.equal(state.manifest.datasets.route.geometry, 'line');
+  assert.deepEqual(nextStory.states.map(({ map }) => map.layerVisibility.route), [false, true]);
+  assert.equal(result.story, nextStory);
+  assert.equal('route' in story.states[0].map.layerVisibility, false);
+});
+
+test('Data Workbench table confirmation updates catalogs without authoring a Scene layer', () => {
+  const state = harness();
+  const story = story12();
+  let storyMutations = 0;
+  confirmDataWorkbenchCandidate({ kind: 'table', id: 'demand', label: 'Demand', value: table() }, {
+    manifest: state.manifest,
+    datasetInspector: state.ui,
+    story,
+    mutateStory() { storyMutations += 1; }
+  });
+  assert.equal(state.manifest.datasets.demand.type, 'table-json');
+  assert.equal(state.writes[0].path, 'data/demand.json');
+  assert.equal(storyMutations, 0);
+});
+
+test('Data Workbench failed preflight performs zero writes, manifest edits, or Story edits', () => {
+  const state = harness();
+  const story = story12();
+  let storyMutations = 0;
+  assert.throws(() => confirmDataWorkbenchCandidate({
+    kind: 'spatial', id: 'bad-route', label: 'Bad route', geometry: 'line', value: featureCollection('Point', [0, 0])
+  }, {
+    manifest: state.manifest,
+    datasetInspector: state.ui,
+    story,
+    mutateStory() { storyMutations += 1; }
+  }), (error) => error.code === 'GEOJSON_RESOURCE_INVALID');
+  assert.deepEqual(state.writes, []);
+  assert.deepEqual(state.manifest.datasets, {});
+  assert.equal(storyMutations, 0);
+});
+
+test('Data Workbench replacement keeps the existing ID and managed path', () => {
+  const state = harness();
+  state.ui.command('add-geojson', 'route', {
+    geometry: 'line', label: 'Route', value: featureCollection('LineString', [[0, 0], [1, 1]])
+  });
+  state.writes.length = 0;
+  const existingDescriptor = structuredClone(state.manifest.datasets.route);
+  confirmDataWorkbenchCandidate({
+    kind: 'spatial', id: 'ignored', label: 'Ignored', geometry: 'line', value: featureCollection('LineString', [[2, 2], [3, 3]])
+  }, {
+    id: 'route', label: 'Route', manifest: state.manifest, datasetInspector: state.ui, existingDescriptor
+  });
+  assert.equal(state.writes.length, 1);
+  assert.equal(state.writes[0].path, 'data/route.geojson');
+  assert.deepEqual(state.manifest.datasets.route, existingDescriptor);
 });

@@ -6,7 +6,7 @@ import {
   createValidationNavigationIndex
 } from './core/validation.js';
 import { createPreviewBridge } from './preview/bridge.js';
-import { renderEntityInspector } from './ui/inspectors.js';
+import { preflightDatasetCandidate, renderEntityInspector } from './ui/inspectors.js';
 import { createStoryEditor } from './ui/story-editor.js';
 import {
   applyStudioStoryCommand,
@@ -130,6 +130,45 @@ export function resolveProblemsPresentation({ status, diagnostics = [], lastVali
     ? `Previewing previous valid version · Current edits contain ${count} ${count === 1 ? 'problem' : 'problems'}`
     : '';
   return Object.freeze({ count, open: status === 'invalid' && count > 0, validity, previewWarning });
+}
+
+export function confirmDataWorkbenchCandidate(candidate, {
+  id = candidate?.id,
+  label = candidate?.label,
+  manifest,
+  datasetInspector,
+  existingDescriptor,
+  story,
+  sceneIndex = 0,
+  mutateStory
+} = {}) {
+  if (!datasetInspector?.command || !datasetInspector?.entity) {
+    throw new TypeError('Data Workbench confirmation requires the production dataset inspector.');
+  }
+  const preflight = preflightDatasetCandidate(candidate, {
+    id, label, manifest, existingDescriptor
+  });
+  const nextStory = !existingDescriptor && candidate.kind === 'spatial' && story
+    ? applyStudioStoryCommand(story, 'add-project-layer', { sceneIndex, datasetId: id })
+    : null;
+  if (nextStory && typeof mutateStory !== 'function') {
+    throw new TypeError('Spatial confirmation requires a Story mutation callback.');
+  }
+
+  if (existingDescriptor) datasetInspector.entity(id).command('replace', preflight.value);
+  else if (candidate.kind === 'spatial') {
+    datasetInspector.command('add-geojson', id, {
+      geometry: candidate.geometry,
+      label,
+      value: preflight.value
+    });
+  } else {
+    datasetInspector.command('add-table', id, { label, value: preflight.value });
+  }
+  if (nextStory) {
+    mutateStory(nextStory);
+  }
+  return Object.freeze({ ...preflight, story: nextStory });
 }
 
 export function createEditor({

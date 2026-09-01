@@ -270,6 +270,45 @@ function assertStableId(id, label) {
   if (!/^[a-z][a-z0-9-]*$/.test(id)) throw new TypeError(`${label} ID must be a stable lowercase ID.`);
 }
 
+export function preflightDatasetCandidate(candidate, {
+  id = candidate?.id,
+  label = candidate?.label,
+  manifest,
+  existingDescriptor
+} = {}) {
+  if (!candidate || !['spatial', 'table'].includes(candidate.kind)) {
+    throw new TypeError('Dataset candidate must be spatial or table data.');
+  }
+  assertStableId(id, 'Dataset');
+  if (!existingDescriptor && manifest?.datasets?.[id]) throw new TypeError(`Dataset ID already exists: ${id}`);
+
+  let descriptor;
+  if (existingDescriptor) {
+    descriptor = clone(existingDescriptor);
+    const expectedKind = descriptor.type === 'geojson' ? 'spatial'
+      : descriptor.type === 'table-json' ? 'table' : undefined;
+    if (candidate.kind !== expectedKind) {
+      throw new TypeError(`Replacement is incompatible with existing ${descriptor.type} data.`);
+    }
+    if (candidate.kind === 'spatial' && candidate.geometry !== descriptor.geometry) {
+      throw new TypeError(`Replacement is incompatible; expected ${descriptor.geometry} geometry.`);
+    }
+  } else if (candidate.kind === 'spatial') {
+    descriptor = { type: 'geojson', geometry: candidate.geometry, src: `./data/${id}.geojson`, label };
+  } else {
+    descriptor = { type: 'table-json', src: `./data/${id}.json`, label };
+  }
+
+  const value = candidate.kind === 'spatial'
+    ? importGeoJson(candidate.value, { ...descriptor, path: `$.datasets.${id}` }).value
+    : importNormalizedTable(candidate.value, { path: `$.datasets.${id}` }).value;
+  return Object.freeze({
+    descriptor: Object.freeze(descriptor),
+    value: Object.freeze(value),
+    path: descriptor.src.replace(/^\.\//, '')
+  });
+}
+
 function compatibleRoles(roleCatalog, descriptor) {
   return roleCatalog
     .filter((role) => role.types?.includes(descriptor.type))
