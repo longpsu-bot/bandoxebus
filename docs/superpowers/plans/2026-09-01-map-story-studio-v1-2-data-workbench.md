@@ -747,7 +747,7 @@ git commit -m "feat: signal production-valid workbench completion"
 **Interfaces:**
 - Produces the final evidence report with base SHA, executable SHA, module-worker/default and PapaParse-fallback evidence, dependency files/licenses/hashes, formats, normalized contracts, CRS evidence, mixed partitioning, complete post-worker timing, limits, browser flows, test counts, exclusions, and known issues.
 
-- [ ] **Step 1: Run the focused development suites once at the assembled feature head**
+- [x] **Step 1: Run the focused development suites once at the assembled feature head**
 
 Run:
 
@@ -766,7 +766,7 @@ node --test `
 
 Expected: PASS; record exact test count.
 
-- [ ] **Step 2: Run bounded regression set**
+- [x] **Step 2: Run bounded regression set**
 
 ```powershell
 node --test `
@@ -787,7 +787,7 @@ node --test `
 
 Expected: PASS; record exact test count.
 
-- [ ] **Step 3: Run static security and freeze checks before browser QA**
+- [x] **Step 3: Run static security and freeze checks before browser QA**
 
 ```powershell
 rg -n "eval\(|new Function|innerHTML" editor
@@ -799,19 +799,19 @@ git diff --check origin/main...HEAD
 
 Expected: no prohibited application use; schema/story diff empty; SHA-256 exactly `29597ee58773b13ff9db6eaf3c328240f6bfa85f9bf7161cdca7b20ad55b373a`; diff check PASS.
 
-- [ ] **Step 4: Start an isolated headed Edge/Chromium profile and execute browser flows A–K**
+- [x] **Step 4: Start an isolated headed Edge/Chromium profile and execute browser flows A–K**
 
 Serve the repository locally, create a new temporary browser user-data directory outside the user's normal profile, and test at 1440x900 and 1366x768. Cover blank Cancel, GeoJSON line, KML, mixed KML partition, CSV table immediate Table/Chart use, critical CSV EPSG:32648 points, projected Shapefile ZIP, XLSX sheets, GeoPackage layers, replacement, compact layout, initial network lazy loading, and application-origin console.
 
 KML/KMZ/GPX remain on the bounded main-thread XML path. If representative browser evidence shows a material freeze, stop at the XML worker/dependency design gate; do not add an XML dependency or broaden the worker design silently.
 
-- [ ] **Step 5: Run the corrected 20.43 MiB responsiveness/cancellation benchmark**
+- [x] **Step 5: Run the corrected 20.43 MiB responsiveness/cancellation benchmark**
 
 Generate the exact temporary 21,420,020-byte / 21,000-row CSV and register the matching `data-workbench:review-ready` listener before beginning each import. Record cold and three warm throughput runs, worker phases, frame gaps, Long Tasks, progress, cancellation latency, teardown, and memory diagnostics. Completion must come only from the explicit event.
 
 The complete interval from accepted worker-result handler entry through production validation, Workbench state installation, preview DOM commit, and the subsequent paint opportunity must be below 250 ms. A result-delivery-only measurement does not pass. Cancel must terminate and recover within 250 ms with no late result or project/history/package mutation. Any failure is a stop gate for implementation investigation, not a report-only caveat.
 
-- [ ] **Step 6: Capture bounded evidence and write report**
+- [x] **Step 6: Capture bounded evidence and write report**
 
 Capture only the six approved PNGs. Write `DATA-WORKBENCH.md` with exact evidence, real limitations, inherited warnings, and no unsupported PASS claims.
 
