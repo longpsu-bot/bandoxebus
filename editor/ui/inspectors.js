@@ -280,7 +280,8 @@ export function preflightDatasetCandidate(candidate, {
   id = candidate?.id,
   label = candidate?.label,
   manifest,
-  existingDescriptor
+  existingDescriptor,
+  copyValue = true
 } = {}) {
   if (!candidate || !['spatial', 'table'].includes(candidate.kind)) {
     throw new TypeError('Dataset candidate must be spatial or table data.');
@@ -308,9 +309,19 @@ export function preflightDatasetCandidate(candidate, {
     descriptor = { type: 'table-json', src: `./data/${id}.json`, label };
   }
 
-  const value = candidate.kind === 'spatial'
-    ? importGeoJson(candidate.value, { ...descriptor, path: `$.datasets.${id}` }).value
-    : importNormalizedTable(candidate.value, { path: `$.datasets.${id}` }).value;
+  let value;
+  if (candidate.kind === 'spatial') {
+    const validationDescriptor = { ...descriptor, path: `$.datasets.${id}` };
+    if (copyValue) value = importGeoJson(candidate.value, validationDescriptor).value;
+    else {
+      validateGeoJsonResource(candidate.value, validationDescriptor, { path: validationDescriptor.path });
+      value = candidate.value;
+    }
+  } else if (copyValue) value = importNormalizedTable(candidate.value, { path: `$.datasets.${id}` }).value;
+  else {
+    validateTableData(candidate.value, { path: `$.datasets.${id}` });
+    value = candidate.value;
+  }
   return Object.freeze({
     descriptor: Object.freeze(descriptor),
     value: Object.freeze(value),

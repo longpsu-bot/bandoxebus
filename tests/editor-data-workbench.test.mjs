@@ -245,3 +245,68 @@ test('missing-PRJ Shapefile pauses for an explicit CRS decision and XLSX exposes
   assert.equal(header.value, '3');
   assert.equal(header.getAttribute('max'), '50');
 });
+
+test('worker results are production-validated before install and signal review-ready only after paint', async () => {
+  const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
+  const documentRef = documentHarness();
+  const order = [];
+  const frames = [];
+  const completions = [];
+  const candidate = tableCandidate(2);
+  let selected;
+  const session = {
+    async read() { return [{ id: 'source', label: 'Source' }]; },
+    selectSourceItem(id) { selected = id; },
+    configure() {},
+    async prepare() { order.push('worker-result'); return [candidate]; },
+    candidate() { return candidate; },
+    state() {
+      return {
+        format: 'csv', sourceItems: [{ id: 'source', label: 'Source' }], selectedItemId: selected,
+        config: { mode: 'table' }, timing: { sessionId: 41, lastResultRequestId: 9, lastResultReceivedAt: 100 }
+      };
+    },
+    dispose() {}
+  };
+  const workbench = createDataWorkbench({
+    documentRef,
+    createSession: () => session,
+    validateCandidate(value) { order.push('production-validation'); return { ...value, value: structuredClone(value.value) }; },
+    requestFrame(callback) { frames.push(callback); },
+    now: () => 180,
+    onCandidateInstalled() { order.push('state-install'); },
+    onPreviewCommitted() { order.push('preview-commit'); },
+    emitReviewReady(detail) { order.push('review-ready'); completions.push(detail); }
+  });
+  const opening = workbench.open({ mode: 'add', files: [new File(['x'], 'table.csv')] });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ['worker-result', 'production-validation', 'state-install', 'preview-commit']);
+  assert.equal(workbench.state().phase, 'awaiting-paint');
+  frames.shift()(150);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completions.length, 0);
+  frames.shift()(166);
+  await opening;
+  assert.deepEqual(order, ['worker-result', 'production-validation', 'state-install', 'preview-commit', 'review-ready']);
+  assert.equal(workbench.state().phase, 'review-ready');
+  assert.deepEqual(completions, [{
+    sessionId: 41, requestId: 9, receivedAt: 100, completedAt: 180, postWorkerDurationMs: 80
+  }]);
+});
+
+test('production validation failure installs no candidate or preview', async () => {
+  const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
+  const documentRef = documentHarness();
+  const harness = sessionHarness();
+  const workbench = createDataWorkbench({
+    documentRef,
+    createSession: () => harness.session,
+    validateCandidate() { throw new TypeError('Production candidate rejected'); },
+    requestFrame() { throw new Error('paint must not be scheduled after failed validation'); }
+  });
+  await workbench.open({ mode: 'add', files: [new File(['x'], 'table.csv')] });
+  assert.equal(workbench.state().selectedCandidateId, null);
+  assert.equal(workbench.state().phase, 'error');
+  assert.match(text(documentRef.body), /Production candidate rejected/);
+  assert.equal(find(documentRef.body, (node) => node.tagName === 'BUTTON' && node.textContent === 'Add data'), undefined);
+});

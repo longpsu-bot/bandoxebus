@@ -173,6 +173,18 @@ export function confirmDataWorkbenchCandidate(candidate, {
   return Object.freeze({ ...preflight, story: nextStory });
 }
 
+export function validateDataWorkbenchPreviewCandidate(candidate, {
+  id = candidate?.id,
+  label = candidate?.label,
+  manifest,
+  existingDescriptor
+} = {}) {
+  const preflight = preflightDatasetCandidate(candidate, {
+    id, label, manifest, existingDescriptor, copyValue: false
+  });
+  return Object.freeze({ ...candidate, value: preflight.value });
+}
+
 export function createEditor({
   documentRef = globalThis.document,
   windowRef = globalThis.window
@@ -329,6 +341,17 @@ export function createEditor({
     dataWorkbench = createDataWorkbench({
       documentRef,
       windowRef,
+      validateCandidate(candidate, { mode, existingDataset } = {}) {
+        const current = primaryStory();
+        const manifest = current.manifest;
+        const id = mode === 'replace' ? existingDataset.id : candidate.id;
+        return validateDataWorkbenchPreviewCandidate(candidate, {
+          id,
+          label: candidate.label,
+          manifest,
+          existingDescriptor: mode === 'replace' ? manifest.datasets[id] : undefined
+        });
+      },
       async onConfirm(candidate, { mode, existingDataset } = {}) {
         const current = primaryStory();
         const manifest = current.manifest;

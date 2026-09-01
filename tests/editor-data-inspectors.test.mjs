@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { confirmDataWorkbenchCandidate } from '../editor/editor.js';
+import { confirmDataWorkbenchCandidate, validateDataWorkbenchPreviewCandidate } from '../editor/editor.js';
 import { createScene12 } from '../editor/core/scene-commands.js';
 
 import {
@@ -167,6 +167,19 @@ test('candidate preflight creates production descriptors and managed paths witho
   assert.deepEqual(tabular.descriptor, { type: 'table-json', src: './data/demand.json', label: 'Demand' });
   assert.equal(tabular.path, 'data/demand.json');
   assert.deepEqual(manifest, { datasets: {} });
+});
+
+test('Workbench preview validation reuses the worker ownership copy without mutation', () => {
+  assert.equal(typeof validateDataWorkbenchPreviewCandidate, 'function');
+  const manifest = { datasets: {} };
+  const candidate = { kind: 'table', id: 'demand', label: 'Demand', value: table(), warnings: [] };
+  const validated = validateDataWorkbenchPreviewCandidate(candidate, { manifest });
+  assert.equal(validated.value, candidate.value);
+  assert.deepEqual(validated.value, candidate.value);
+  assert.deepEqual(manifest, { datasets: {} });
+  const invalid = structuredClone(candidate);
+  invalid.value.rows[0].count = '2';
+  assert.throws(() => validateDataWorkbenchPreviewCandidate(invalid, { manifest }), (error) => error.code === 'TABLE_DATA_INVALID');
 });
 
 test('candidate preflight blocks collisions and production validation failures without side effects', () => {

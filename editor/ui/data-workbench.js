@@ -104,7 +104,15 @@ export function createDataWorkbench({
   documentRef = globalThis.document,
   windowRef = globalThis.window,
   createSession = createResponsiveDataImportSession,
-  onConfirm = () => {}
+  onConfirm = () => {},
+  validateCandidate = (candidate) => candidate,
+  requestFrame = (callback) => windowRef?.requestAnimationFrame
+    ? windowRef.requestAnimationFrame(callback)
+    : globalThis.setTimeout(() => callback(globalThis.performance?.now?.() ?? Date.now()), 0),
+  now = () => globalThis.performance?.now?.() ?? Date.now(),
+  emitReviewReady,
+  onCandidateInstalled = () => {},
+  onPreviewCommitted = () => {}
 } = {}) {
   if (!documentRef?.createElement || !documentRef.body?.append) throw new TypeError('Data Workbench requires a document body.');
   const dialog = element(documentRef, 'dialog', undefined, {
@@ -118,12 +126,17 @@ export function createDataWorkbench({
   let selectedCandidateId = null;
   let returnFocus = null;
   let busy = false;
+  let phase = 'idle';
+  let completion = null;
+  let generation = 0;
 
   function disposeSession() {
+    generation += 1;
     session?.dispose?.();
     session = null;
     candidates = [];
     selectedCandidateId = null;
+    completion = null;
   }
 
   function close() {
@@ -168,6 +181,68 @@ export function createDataWorkbench({
     if (!node) return;
     node.textContent = message;
     node.className = `data-workbench-status${isError ? ' is-error' : ''}`;
+    if (isError) phase = 'error';
+  }
+
+  function nextFrame() {
+    return new Promise((resolve) => requestFrame(resolve));
+  }
+
+  function dispatchReviewReady(detail) {
+    if (emitReviewReady) {
+      emitReviewReady(detail);
+      return;
+    }
+    const EventCtor = windowRef?.CustomEvent ?? globalThis.CustomEvent;
+    if (typeof EventCtor === 'function' && typeof dialog.dispatchEvent === 'function') {
+      dialog.dispatchEvent(new EventCtor('data-workbench:review-ready', { detail, bubbles: true }));
+    }
+  }
+
+  async function installPrepared(prepared, {
+    successMessage = 'Review the preview. Nothing is written until you confirm.',
+    preferredCandidateId
+  } = {}) {
+    if (!Array.isArray(prepared) || !prepared.length) throw new TypeError('This source produced no importable dataset.');
+    const activeSession = session;
+    const activeGeneration = generation;
+    const timing = activeSession.state().timing ?? {};
+    phase = 'validating';
+    const validated = [];
+    for (const candidate of prepared) {
+      const result = await validateCandidate(candidate, {
+        mode: options.mode,
+        existingDataset: options.existingDataset
+      });
+      validated.push(result?.kind ? result
+        : result?.value ? { ...candidate, value: result.value }
+          : candidate);
+    }
+    if (session !== activeSession || generation !== activeGeneration) return;
+    candidates = validated;
+    selectedCandidateId = candidates.some(({ id }) => id === preferredCandidateId)
+      ? preferredCandidateId
+      : candidates[0].id;
+    completion = null;
+    onCandidateInstalled({ candidates, selectedCandidateId });
+    renderPrepared();
+    onPreviewCommitted({ selectedCandidateId });
+    phase = 'awaiting-paint';
+    await nextFrame();
+    await nextFrame();
+    if (session !== activeSession || generation !== activeGeneration || !dialog.open) return;
+    const completedAt = now();
+    const receivedAt = timing.lastResultReceivedAt ?? completedAt;
+    completion = Object.freeze({
+      sessionId: timing.sessionId,
+      requestId: timing.lastResultRequestId,
+      receivedAt,
+      completedAt,
+      postWorkerDurationMs: completedAt - receivedAt
+    });
+    phase = 'review-ready';
+    setStatus(successMessage);
+    dispatchReviewReady(completion);
   }
 
   function defaultConfig(state, item) {
@@ -193,11 +268,8 @@ export function createDataWorkbench({
       return;
     }
     setStatus('Preparing a local preview…');
-    candidates = await session.prepare();
-    selectedCandidateId = candidates[0]?.id ?? null;
-    if (!selectedCandidateId) throw new TypeError('This source produced no importable dataset.');
-    renderPrepared();
-    setStatus('Review the preview. Nothing is written until you confirm.');
+    phase = 'preparing';
+    await installPrepared(await session.prepare());
   }
 
   function renderConfiguration(container, state) {
@@ -215,10 +287,7 @@ export function createDataWorkbench({
       apply.addEventListener('click', async () => {
         try {
           session.configure({ headerRow: Number(header.value) - 1 });
-          candidates = await session.prepare();
-          selectedCandidateId = candidates[0]?.id;
-          renderPrepared();
-          setStatus('Review the selected worksheet preview.');
+          await installPrepared(await session.prepare(), { successMessage: 'Review the selected worksheet preview.' });
         } catch (error) { setStatus(error.message, true); }
       });
       group.append(headerLabel, apply);
@@ -238,10 +307,7 @@ export function createDataWorkbench({
         try {
           session.configure(patch);
           setStatus('Parsing and validating Shapefile geometry…');
-          candidates = await session.prepare();
-          selectedCandidateId = candidates[0]?.id;
-          renderPrepared();
-          setStatus(success);
+          await installPrepared(await session.prepare(), { successMessage: success });
         } catch (error) { setStatus(error.message, true); }
       };
       const assume = element(documentRef, 'button', 'Assume EPSG:4326', { type: 'button' });
@@ -267,7 +333,7 @@ export function createDataWorkbench({
         setStatus('Choose X and Y columns, then prepare the preview.');
         return;
       }
-      try { candidates = await session.prepare(); selectedCandidateId = candidates[0]?.id; renderPrepared(); } catch (error) { setStatus(error.message, true); }
+      try { await installPrepared(await session.prepare()); } catch (error) { setStatus(error.message, true); }
     });
     group.append(mode);
     if (state.config?.mode === 'points') {
@@ -306,10 +372,7 @@ export function createDataWorkbench({
             sourceCrs: crs.value.trim()
           });
           setStatus('Reprojecting and validating local coordinates…');
-          candidates = await session.prepare();
-          selectedCandidateId = candidates[0]?.id;
-          renderPrepared();
-          setStatus('Review the preview. Stored output will be EPSG:4326.');
+          await installPrepared(await session.prepare(), { successMessage: 'Review the preview. Stored output will be EPSG:4326.' });
         } catch (error) { setStatus(error.message, true); }
       });
       group.append(xLabel, yLabel, zLabel, crsLabel, prepare);
@@ -369,10 +432,12 @@ export function createDataWorkbench({
             : { sourceCrs: sourceCrs.value.trim() };
           session.configure(patch);
           setStatus('Reprojecting and validating local coordinates…');
-          candidates = await session.prepare();
-          selectedCandidateId = candidates.find(({ geometry }) => geometry === candidate.geometry)?.id ?? candidates[0]?.id;
-          renderPrepared();
-          setStatus('Review the preview. Stored output will be EPSG:4326.');
+          const prepared = await session.prepare();
+          const preferredCandidateId = prepared.find(({ geometry }) => geometry === candidate.geometry)?.id;
+          await installPrepared(prepared, {
+            preferredCandidateId,
+            successMessage: 'Review the preview. Stored output will be EPSG:4326.'
+          });
         } catch (error) { setStatus(error.message, true); }
       });
       crs.children[1].append(applyCrs);
@@ -428,7 +493,12 @@ export function createDataWorkbench({
 
   async function beginFiles(files) {
     disposeSession();
-    session = createSession({ files, replacement: options.existingDataset });
+    phase = 'reading';
+    session = createSession({
+      files,
+      replacement: options.existingDataset,
+      onStatus: (value) => setStatus(String(value))
+    });
     setStatus('Reading local files…');
     bodyNode().replaceChildren();
     try {
@@ -459,6 +529,8 @@ export function createDataWorkbench({
         open: Boolean(dialog.open),
         mode: options?.mode,
         busy,
+        phase,
+        completion,
         selectedCandidateId,
         session: session?.state?.()
       });
