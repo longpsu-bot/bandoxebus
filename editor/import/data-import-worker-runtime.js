@@ -69,7 +69,12 @@ export function createDataImportWorkerRuntime({
       loaders,
       usedIds: Array.from(message.usedIds ?? []),
       replacement: message.replacement,
-      onStatus: (status) => progress(message, status)
+      onStatus: (status) => progress(message, status),
+      onProgress: ({ completed, total, unit, message: progressMessage }) => post({
+        type: 'progress', sessionId: message.sessionId, requestId: message.requestId,
+        phase: 'Parsing', completed, ...(total === undefined ? {} : { total }), unit,
+        ...(progressMessage ? { message: progressMessage } : {})
+      })
     });
     const sourceItems = await session.read();
     post({

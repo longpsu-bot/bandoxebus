@@ -16,7 +16,7 @@ function tableCandidate(value, { label, id, sourceFormat, warnings = [] }) {
     kind: 'table',
     label,
     id,
-    value: clone(value),
+    value,
     rowCount: value.rows.length,
     columns: value.columns.map(({ id: columnId, label: columnLabel, type }) => ({ id: columnId, label: columnLabel, type })),
     warnings: [...warnings],
@@ -35,9 +35,8 @@ function checkedItem(sourceItems, itemId) {
 }
 
 function trimPapaTrailingBlankRows(grid) {
-  const result = grid.map((row) => [...row]);
-  while (result.length > 1 && result.at(-1).every((value) => value === '')) result.pop();
-  return result;
+  while (grid.length > 1 && grid.at(-1).every((value) => value === '')) grid.pop();
+  return grid;
 }
 
 function papaErrors(errors) {
@@ -58,19 +57,38 @@ function numericCoordinate(value, rowNumber, axis) {
   return result;
 }
 
-export async function openCsvSource(file, { papa, usedIds = [] } = {}) {
+async function parseCsv(file, papa, onProgress) {
+  const canStreamFile = typeof globalThis.FileReaderSync === 'function' || typeof globalThis.FileReader === 'function';
+  const input = canStreamFile
+    ? file
+    : decoder.decode(new Uint8Array(await file.arrayBuffer())).replace(/^\uFEFF/, '');
+  return new Promise((resolve, reject) => {
+    const grid = [];
+    const errors = [];
+    let delimiter;
+    try {
+      papa.parse(input, {
+        dynamicTyping: false,
+        skipEmptyLines: 'greedy',
+        delimitersToGuess: [',', '\t', '|', ';'],
+        chunk(results) {
+          if (Array.isArray(results?.data)) grid.push(...results.data);
+          if (Array.isArray(results?.errors)) errors.push(...results.errors);
+          delimiter = results?.meta?.delimiter ?? delimiter;
+          onProgress({ completed: grid.length, unit: 'rows' });
+        },
+        complete() { resolve({ data: grid, errors, meta: { delimiter } }); },
+        error(error) { reject(new TypeError(`CSV parse failed: ${error?.message || error}`)); }
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+export async function openCsvSource(file, { papa, usedIds = [], onProgress = () => {} } = {}) {
   if (!papa || typeof papa.parse !== 'function') throw new TypeError('PapaParse is required for CSV import.');
-  const text = decoder.decode(new Uint8Array(await file.arrayBuffer())).replace(/^\uFEFF/, '');
-  const detection = papa.parse(text, {
-    dynamicTyping: false,
-    skipEmptyLines: 'greedy',
-    delimitersToGuess: [',', '\t', '|', ';']
-  });
-  const parsed = papa.parse(text, {
-    dynamicTyping: false,
-    skipEmptyLines: false,
-    delimiter: detection.meta?.delimiter || ','
-  });
+  const parsed = await parseCsv(file, papa, onProgress);
   const errors = papaErrors(parsed.errors);
   if (errors.length) {
     const detail = errors.map(({ row, message }) => `row ${Number(row) + 1}: ${message}`).join('; ');
@@ -105,8 +123,9 @@ export async function openCsvSource(file, { papa, usedIds = [] } = {}) {
       const zIndex = zColumn ? exactColumnIndex(headings, zColumn, 'Z') : -1;
       const features = [];
       let blankCoordinateRows = 0;
-      for (const [offset, row] of grid.slice(headerRow + 1).entries()) {
-        const rowNumber = headerRow + offset + 2;
+      for (let rowIndex = headerRow + 1; rowIndex < grid.length; rowIndex += 1) {
+        const row = grid[rowIndex];
+        const rowNumber = rowIndex + 1;
         const x = numericCoordinate(row[xIndex], rowNumber, 'X');
         const y = numericCoordinate(row[yIndex], rowNumber, 'Y');
         if (x === undefined || y === undefined) {

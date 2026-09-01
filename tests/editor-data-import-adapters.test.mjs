@@ -174,6 +174,38 @@ test('CSV adapter handles quoted commas, BOM, delimiter detection, and CRLF with
   assert.equal(table.value.rows[0].name, 'Bến Thành');
 });
 
+test('CSV adapter parses once, reports real chunk progress, and does not clone its candidate', async () => {
+  const { openCsvSource } = await import('../editor/import/table-adapters.js');
+  const calls = [];
+  const progress = [];
+  const papa = {
+    parse(input, options) {
+      calls.push({ input, options });
+      options.chunk({
+        data: [['Name', 'Count'], ['Central', '7']], errors: [],
+        meta: { delimiter: ',', cursor: 28 }
+      });
+      options.complete();
+    }
+  };
+  const originalClone = globalThis.structuredClone;
+  globalThis.structuredClone = () => { throw new Error('redundant candidate clone'); };
+  try {
+    const source = await openCsvSource(file('single-pass.csv', 'Name,Count\nCentral,7\n'), {
+      papa,
+      onProgress: (value) => progress.push(value)
+    });
+    const candidate = await source.prepare(source.sourceItems[0].id, { mode: 'table' });
+    assert.equal(candidate.value.rows[0].count, 7);
+  } finally {
+    globalThis.structuredClone = originalClone;
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.dynamicTyping, false);
+  assert.equal(typeof calls[0].options.chunk, 'function');
+  assert.deepEqual(progress, [{ completed: 2, unit: 'rows' }]);
+});
+
 test('CSV point mode requires explicit axes and reprojects EPSG:32648 into stored WGS84', async () => {
   const { openCsvSource } = await optionalModule('../editor/import/table-adapters.js');
   const source = await openCsvSource(await fixture('points-32648.csv'), { papa: await realPapa() });

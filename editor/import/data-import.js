@@ -179,7 +179,8 @@ export function createDataImportSession({
   usedIds = [],
   replacement,
   domParser = globalThis.DOMParser ? new globalThis.DOMParser() : undefined,
-  onStatus = () => {}
+  onStatus = () => {},
+  onProgress = () => {}
 } = {}) {
   let disposed = false;
   let status = 'idle';
@@ -204,7 +205,7 @@ export function createDataImportSession({
       case 'json':
         return openJsonTableSource(detection, { usedIds });
       case 'csv':
-        return openCsvSource(detection.files[0], { papa: await loaders.loadPapaParse(), usedIds });
+        return openCsvSource(detection.files[0], { papa: await loaders.loadPapaParse(), usedIds, onProgress });
       case 'xlsx':
         return openXlsxSource(new Uint8Array(await detection.files[0].arrayBuffer()), { sheetJs: await loaders.loadSheetJs(), usedIds });
       case 'kml':

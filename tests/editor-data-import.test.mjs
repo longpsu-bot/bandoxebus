@@ -230,6 +230,14 @@ test('record-array normalization rejects nested cells instead of flattening them
   );
 });
 
+test('table normalization handles tall inputs without spread argument overflow', async () => {
+  const { normalizeTableGrid } = await optionalModule('../editor/import/table-normalizer.js');
+  const grid = [['Value'], ...Array.from({ length: 150_000 }, (_, index) => [String(index)])];
+  const result = normalizeTableGrid(grid);
+  assert.equal(result.rows.length, 150_000);
+  assert.equal(result.rows[149_999].value, 149_999);
+});
+
 test('EPSG:4326 is stable and EPSG:3857 converts to bounded longitude/latitude', async () => {
   const crs = await optionalModule('../editor/import/crs.js');
   assert.equal(typeof crs.reprojectFeatureCollection, 'function');
@@ -401,7 +409,10 @@ test('transient session lazy-loads only the parser required by the selected form
   const loaders = {
     loadPapaParse: async () => {
       calls.push('papa');
-      return { parse: () => ({ data: [['Name', 'Code'], ['Stop', '001']], errors: [] }) };
+      return { parse: (_input, options) => {
+        options.chunk({ data: [['Name', 'Code'], ['Stop', '001']], errors: [], meta: { delimiter: ',' } });
+        options.complete();
+      } };
     },
     loadToGeoJson: async () => { calls.push('togeojson'); },
     loadShp: async () => { calls.push('shp'); },
