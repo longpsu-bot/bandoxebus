@@ -474,6 +474,7 @@ test('static Studio shell exposes one global output action pair and a collapsed 
   assert.match(html, /id="problems-count"/);
   assert.match(html, /id="validation-status"/);
   assert.match(html, /id="validation-errors"/);
+  assert.match(html, /<details[^>]+id="project-menu"/);
   assert.doesNotMatch(html, /<h2[^>]*>Validation<\/h2>/);
 });
 
