@@ -832,7 +832,7 @@ Expected: PASS; record the new real count. Re-run affected focused tests only if
 
 Review base-to-HEAD requirements, security, tests, file scope, browser evidence, vendor notices, and freeze paths. Fix only evidenced findings, then rerun proportionate verification.
 
-- [ ] **Step 10: Push and open a Draft PR**
+- [x] **Step 10: Push and open a Draft PR**
 
 ```powershell
 git push -u origin feat/map-story-studio-v1-2-data-workbench
@@ -841,7 +841,7 @@ gh pr create --draft --base main --head feat/map-story-studio-v1-2-data-workbenc
 
 Do not mark Ready and do not merge.
 
-- [ ] **Step 11: Invoke `superpowers:finishing-a-development-branch` and perform final exact-head checks**
+- [x] **Step 11: Invoke `superpowers:finishing-a-development-branch` and perform final exact-head checks**
 
 ```powershell
 git status --short --branch

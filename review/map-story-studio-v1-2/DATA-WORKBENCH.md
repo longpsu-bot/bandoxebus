@@ -1,11 +1,11 @@
 # Data Workbench V2 certification checkpoint
 
-Status: **CERTIFIED — Draft PR handoff pending**
+Status: **CERTIFIED — Draft PR #33 open for exact-head review**
 
 - Base SHA: `045a8b4b4ea0680273c1e9b676fa1677d749de3e`
 - Current executable HEAD: `6968965d40b416b147a23d6c5c3c117af4684cd1`
 - Branch: `feat/map-story-studio-v1-2-data-workbench`
-- Draft PR: not opened; it remains a final post-certification Draft handoff
+- Draft PR: `https://github.com/longpsu-bot/bandoxebus/pull/33` (open, Draft)
 - Final full suite: **630/630 tests passed** at the current executable HEAD in **11.87 s**
 
 ## Passing checkpoint
@@ -92,4 +92,4 @@ Exact vendored artifacts, provenance, licenses, and SHA-256 values are recorded 
 - `data-workbench/05-xlsx-sheet-table-preview.png`
 - `data-workbench/06-geopackage-layer-preview.png`
 
-These six files remain the bounded visual evidence set. The final full suite and independent exact-diff review are complete; push and Draft PR creation are the remaining handoff steps. The branch must not be merged in this task.
+These six files remain the bounded visual evidence set. The final full suite, independent exact-diff review, push, and Draft PR creation are complete. The branch remains unmerged for independent exact-head code and browser review.
