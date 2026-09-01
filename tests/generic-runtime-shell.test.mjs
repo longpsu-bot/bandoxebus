@@ -55,6 +55,61 @@ test('generic application resolves one bounded output mode before bootstrap', ()
   );
 });
 
+test('generic production map requests native compact attribution and preserves source credits', async () => {
+  const originalFetch = globalThis.fetch;
+  let mapOptions;
+  let loadListener;
+  let nativeToggleClicks = 0;
+  globalThis.fetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        version: 8,
+        sources: {
+          openmaptiles: {
+            type: 'vector',
+            url: 'https://tiles.openfreemap.org/planet',
+            attribution: 'OpenFreeMap © OpenMapTiles Data from OpenStreetMap'
+          }
+        },
+        layers: []
+      };
+    }
+  });
+  try {
+    class MapLibreMap {
+      constructor(options) { mapOptions = options; }
+      loaded() { return false; }
+      once(type, listener) { if (type === 'load') loadListener = listener; }
+      getContainer() {
+        return {
+          querySelector(selector) {
+            if (selector !== '.maplibregl-ctrl-attrib.maplibregl-compact.maplibregl-compact-show') return null;
+            return { querySelector: () => ({ click() { nativeToggleClicks += 1; } }) };
+          }
+        };
+      }
+    }
+    const options = createGenericApplicationOptions({
+      documentRef: { getElementById: () => null },
+      windowRef: { location: { search: '' }, matchMedia: () => ({ matches: false }) }
+    });
+    await options.createMap({
+      project: { map: { initialView: { center: [0, 0], zoom: 2, pitch: 0, bearing: 0 } } },
+      maplibregl: { Map: MapLibreMap }
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(mapOptions.attributionControl, { compact: true });
+  assert.notEqual(mapOptions.attributionControl, false);
+  assert.equal(mapOptions.style.sources.openmaptiles.attribution, 'OpenFreeMap © OpenMapTiles Data from OpenStreetMap');
+  assert.equal(typeof loadListener, 'function');
+  loadListener();
+  assert.equal(nativeToggleClicks, 1, 'the native compact control starts collapsed after its first load');
+});
+
 test('generic Story experience activates one existing runtime and supports direct Scene selection', () => {
   const events = [];
   const runtime = {

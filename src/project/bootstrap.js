@@ -8,6 +8,7 @@ import { createSceneCompositor } from '../scene/scene-compositor.js';
 import { createSceneInteractionPolicy } from '../scene/scene-interaction-policy.js';
 import { createSceneLayerRegistry } from '../scene/scene-layer-registry.js';
 import { createSceneStateController } from '../scene/scene-state-controller.js';
+import { COMPACT_ATTRIBUTION_OPTIONS, startCompactAttributionCollapsed } from '../map/compact-attribution.js';
 
 export function createProjectContentRenderer(project, {
   documentRef = document,
@@ -44,11 +45,12 @@ export function createRuntimeMetricRegistry(project, instances) {
 }
 
 function defaultCreateMap({ project, maplibregl, cooperativeScroll = false }) {
-  return new maplibregl.Map({
+  return startCompactAttributionCollapsed(new maplibregl.Map({
     container: 'map',
+    attributionControl: COMPACT_ATTRIBUTION_OPTIONS,
     cooperativeGestures: cooperativeScroll,
     ...project.map.initialView
-  });
+  }));
 }
 
 function capabilityContext(context, entry, map) {

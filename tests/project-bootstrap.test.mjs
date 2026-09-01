@@ -125,6 +125,8 @@ test('default MapLibre construction receives the output cooperative-gesture poli
     });
 
     assert.equal(mapOptions.cooperativeGestures, cooperativeScroll);
+    assert.deepEqual(mapOptions.attributionControl, { compact: true });
+    assert.notEqual(mapOptions.attributionControl, false);
     app.destroy();
   }
 });
