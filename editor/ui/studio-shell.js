@@ -538,6 +538,22 @@ function renderRichProperties({ documentRef, inspector, sceneIndex, envelope, ca
   renderObjectHelpers({ documentRef, inspector, sceneIndex, envelope });
 }
 
+function renderCameraProperties({ documentRef, active, sceneIndex, workingCamera }) {
+  const cameraGroup = propertyGroup(documentRef, 'Camera');
+  const cameraChanged = workingCamera && !cameraEqual(workingCamera, active.map.camera);
+  const cameraStatus = element(documentRef, 'p', cameraChanged ? 'Camera changed · not captured' : 'Camera matches saved Scene', {
+    id: 'studio-camera-status', role: 'status', 'aria-live': 'polite'
+  });
+  const capture = element(documentRef, 'button', 'Capture Camera', { type: 'button', id: 'studio-camera-capture' });
+  capture.disabled = !workingCamera || !cameraChanged;
+  capture.addEventListener('click', () => executeStoryCommand('capture-camera', { sceneIndex, camera: workingCamera }));
+  const restore = element(documentRef, 'button', 'Restore Saved Camera', { type: 'button', id: 'studio-camera-restore' });
+  restore.disabled = !cameraChanged;
+  restore.addEventListener('click', () => activeStudio.onPreviewCommand('restore-scene-camera', { index: sceneIndex }));
+  cameraGroup.append(cameraStatus, capture, restore);
+  return cameraGroup;
+}
+
 function renderSceneProperties({ documentRef, inspector, active, sceneIndex, workingCamera }) {
   const propertiesHeading = element(documentRef, 'h2', 'Properties');
   const sceneGroup = propertyGroup(documentRef, 'Scene');
@@ -577,18 +593,7 @@ function renderSceneProperties({ documentRef, inspector, active, sceneIndex, wor
   transitionLabel.append(transition);
   sceneGroup.append(interactionLabel, transitionLabel);
 
-  const cameraGroup = propertyGroup(documentRef, 'Camera');
-  const cameraChanged = workingCamera && !cameraEqual(workingCamera, active.map.camera);
-  const cameraStatus = element(documentRef, 'p', cameraChanged ? 'Camera changed · not captured' : 'Camera matches saved Scene', {
-    id: 'studio-camera-status', role: 'status', 'aria-live': 'polite'
-  });
-  const capture = element(documentRef, 'button', 'Capture Camera', { type: 'button', id: 'studio-camera-capture' });
-  capture.disabled = !workingCamera || !cameraChanged;
-  capture.addEventListener('click', () => executeStoryCommand('capture-camera', { sceneIndex, camera: workingCamera }));
-  const restore = element(documentRef, 'button', 'Restore Saved Camera', { type: 'button', id: 'studio-camera-restore' });
-  restore.disabled = !cameraChanged;
-  restore.addEventListener('click', () => activeStudio.onPreviewCommand('restore-scene-camera', { index: sceneIndex }));
-  cameraGroup.append(cameraStatus, capture, restore);
+  const cameraGroup = renderCameraProperties({ documentRef, active, sceneIndex, workingCamera });
   inspector.replaceChildren(propertiesHeading, sceneGroup, cameraGroup);
 }
 
@@ -708,6 +713,7 @@ export function mountStudioShell({
       element(documentRef, 'p', `Layer · ${manifest.datasets?.[selectedLayerId]?.label ?? readableId(selectedLayerId)}`, { className: 'studio-selection-label' })
     );
     onRenderLayerProperties(selectedLayerId, inspector);
+    inspector.append(renderCameraProperties({ documentRef, active, sceneIndex, workingCamera }));
   }
   else renderSceneProperties({ documentRef, inspector, active, sceneIndex, workingCamera });
 

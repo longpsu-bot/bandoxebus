@@ -233,6 +233,35 @@ test('Studio layer selection is UI-only, does not toggle Scene visibility, and r
   assert.deepEqual(visibilityOnly, before);
 });
 
+test('located layer Properties keep working-camera status and explicit Capture Camera available', () => {
+  resetStudioAuthoringSession();
+  const documentRef = { createElement: (tag) => new Element(tag), getElementById: () => null };
+  const roots = [new Element('nav'), new Element('aside'), new Element('section'), new Element('div')];
+  const story = baseStory();
+  story.states[0].map.layerVisibility.route = true;
+  const before = structuredClone(story);
+  const workingCamera = { center: [106.65, 11.05], zoom: 13, pitch: 0, bearing: 0 };
+  const storyCommands = [];
+  mountStudioShell({
+    documentRef, navigation: roots[0], inspector: roots[1], scenesHost: roots[2], previewToolbar: roots[3],
+    manifest: { id: 'locate-project', datasets: { route: { type: 'geojson', label: 'Existing route' } }, assets: {} },
+    story, workingCamera,
+    onStoryCommand(name, payload) { storyCommands.push([name, payload]); },
+    onRenderLayerProperties(_datasetId, inspector) { inspector.append(new Element('section')); }
+  });
+  const nodes = () => roots.flatMap(walk);
+  nodes().find((node) => node.tagName === 'BUTTON' && node.textContent === 'Existing route').click();
+
+  assert.deepEqual(story, before, 'Locate and camera divergence remain UI-only');
+  assert.equal(nodes().some((node) => node.textContent === 'Camera changed · not captured'), true);
+  const capture = nodes().find((node) => node.tagName === 'BUTTON' && node.textContent === 'Capture Camera');
+  assert.ok(capture);
+  assert.equal(capture.disabled, false);
+  assert.deepEqual(storyCommands, []);
+  capture.click();
+  assert.deepEqual(storyCommands[0][1].story.states[0].map.camera, workingCamera);
+});
+
 test('Studio hierarchy, local canvas modes, semantic cards, and keyboard Scene movement remain accessible', () => {
   resetStudioAuthoringSession();
   const documentRef = { createElement: (tag) => new Element(tag), getElementById: () => null };
