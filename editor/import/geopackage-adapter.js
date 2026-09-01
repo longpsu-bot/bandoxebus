@@ -1,4 +1,4 @@
-import { assertWgs84Coordinates, resolveLocalCrs } from './crs.js';
+import { assertWgs84Coordinates, reprojectFeatureCollection, resolveLocalCrs } from './crs.js';
 import { createImportId, friendlyLabel } from './import-identifiers.js';
 import { normalizeSpatialSource } from './spatial-normalizer.js';
 
@@ -89,7 +89,7 @@ export async function openGeoPackageSource(bytes, {
         activeConnection = await geoPackageApi.GeoPackageAPI.open(bytes);
         const dao = activeConnection.getFeatureDao(item.tableName);
         const reprojectFeature = geoPackageApi.FeatureDao?.reprojectFeature ?? dao?.constructor?.reprojectFeature;
-        if (typeof reprojectFeature !== 'function') {
+        if (!sourceCrsOverride && typeof reprojectFeature !== 'function') {
           throw new TypeError('GeoPackage JS cannot reproject feature geometry.');
         }
         sourceCrs = sourceCrsOverride || sourceCrsFor(dao.srs);
@@ -100,8 +100,10 @@ export async function openGeoPackageSource(bytes, {
           const row = dao.getRow(next.value);
           if (!row?.geometry) continue;
           const rawGeometry = row.geometry.toGeoJSON();
-          const outputGeometry = reprojectFeature(row, dao.srs, dao.projection);
-          if (!verified) {
+          const outputGeometry = sourceCrsOverride
+            ? rawGeometry
+            : reprojectFeature(row, dao.srs, dao.projection);
+          if (!sourceCrsOverride && !verified) {
             verifyProjection(rawGeometry, outputGeometry, { sourceCrs, proj4 });
             verified = true;
           }
@@ -114,7 +116,10 @@ export async function openGeoPackageSource(bytes, {
           features.push(feature);
         }
         if (!features.length) throw new TypeError(`GeoPackage feature table ${item.tableName} contains no usable geometry.`);
-        const collection = assertWgs84Coordinates({ type: 'FeatureCollection', features });
+        const rawCollection = { type: 'FeatureCollection', features };
+        const collection = sourceCrsOverride
+          ? reprojectFeatureCollection(rawCollection, { sourceCrs, proj4 })
+          : assertWgs84Coordinates(rawCollection);
         return normalizeSpatialSource(collection, {
           label: item.label,
           id: item.id,

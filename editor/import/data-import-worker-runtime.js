@@ -88,10 +88,14 @@ export function createDataImportWorkerRuntime({
     session.selectSourceItem(message.itemId);
     session.configure(message.config ?? {});
     const candidates = await session.prepare();
-    post({
-      type: 'result', sessionId: message.sessionId, requestId: message.requestId,
-      operation: 'prepare', candidates
-    });
+    try {
+      post({
+        type: 'result', sessionId: message.sessionId, requestId: message.requestId,
+        operation: 'prepare', candidates
+      });
+    } finally {
+      session.releasePrepared?.();
+    }
   }
 
   async function start(message) {

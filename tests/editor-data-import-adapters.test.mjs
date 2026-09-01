@@ -197,13 +197,36 @@ test('CSV adapter parses once, reports real chunk progress, and does not clone i
     });
     const candidate = await source.prepare(source.sourceItems[0].id, { mode: 'table' });
     assert.equal(candidate.value.rows[0].count, 7);
+    source.releasePrepared();
+    const reparsed = await source.prepare(source.sourceItems[0].id, { mode: 'table' });
+    assert.equal(reparsed.value.rows[0].count, 7);
   } finally {
     globalThis.structuredClone = originalClone;
   }
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2, 'CSV reparses only after the worker releases the prior prepared result');
   assert.equal(calls[0].options.dynamicTyping, false);
   assert.equal(typeof calls[0].options.chunk, 'function');
-  assert.deepEqual(progress, [{ completed: 2, unit: 'rows' }]);
+  assert.deepEqual(progress, [{ completed: 2, unit: 'rows' }, { completed: 2, unit: 'rows' }]);
+});
+
+test('CSV chunk ingestion avoids spread overflow and bounds parser diagnostics while receiving chunks', async () => {
+  const { openCsvSource } = await import('../editor/import/table-adapters.js');
+  const rows = Array.from({ length: 200_000 }, (_, index) => [`Row ${index}`]);
+  rows.unshift(['Name']);
+  const papa = {
+    parse(input, options) {
+      options.chunk({
+        data: rows,
+        errors: Array.from({ length: 20 }, (_, index) => ({ code: 'TooManyFields', row: index, message: `error ${index}` })),
+        meta: { delimiter: ',' }
+      });
+      options.complete();
+    }
+  };
+  await assert.rejects(
+    openCsvSource(file('tall.csv', 'ignored'), { papa }),
+    (error) => /CSV parse failed/.test(error.message) && (error.message.match(/row /g) ?? []).length === 5
+  );
 });
 
 test('CSV point mode requires explicit axes and reprojects EPSG:32648 into stored WGS84', async () => {
@@ -260,6 +283,37 @@ test('XLSX adapter exposes sheets, bounded header choices, typed dates, and cach
   assert.deepEqual(candidate.value.columns.map(({ type }) => type), ['date', 'integer', 'text', 'integer']);
   assert.deepEqual(candidate.value.rows[0], { date: '2026-09-01', count: 7, code: '001', cached: 5 });
   await assert.rejects(source.prepare(source.sourceItems[0].id, { headerRow: 50 }), /first 50|header row/i);
+});
+
+test('XLSX inventory bounds header sampling and materializes only the selected full worksheet grid', async () => {
+  const { openXlsxSource } = await import('../editor/import/table-adapters.js');
+  const calls = [];
+  const workbook = {
+    SheetNames: ['First', 'Second'],
+    Sheets: {
+      First: { '!ref': 'A1:A1000' },
+      Second: { '!ref': 'A1:A2000' }
+    }
+  };
+  const sheetJs = {
+    read: () => workbook,
+    utils: {
+      decode_range(ref) { return { s: { r: 0, c: 0 }, e: { r: Number(ref.match(/\d+$/)[0]) - 1, c: 0 } }; },
+      sheet_to_json(sheet, options) {
+        calls.push({ sheet, range: structuredClone(options.range) });
+        const count = options.range.e.r - options.range.s.r + 1;
+        return Array.from({ length: count }, (_, index) => [index === 0 ? 'Name' : `Row ${index}`]);
+      }
+    }
+  };
+  const source = await openXlsxSource(new Uint8Array([1]), { sheetJs });
+  assert.equal(source.sourceItems.every((item) => !('grid' in item)), true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls.every(({ range }) => range.e.r <= 49), true);
+  await source.prepare(source.sourceItems[1].id, { headerRow: 0 });
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].sheet, workbook.Sheets.Second);
+  assert.equal(calls[2].range.e.r, 1999);
 });
 
 test('KML and GPX adapters partition parser output and never follow network links', async () => {
@@ -370,9 +424,9 @@ test('Shapefile without PRJ requires an explicit geographic assumption or manual
   assert.match(candidates[0].warnings.join(' '), /assumed EPSG:4326/i);
 });
 
-function fakeGeoPackageApi(events, { mismatch = false, exportFeatureDao = true } = {}) {
-  const raw = [686143.36, 1200320.45, 6];
-  const output = mismatch ? [0, 0, 6] : [106.7028563810, 10.8536676064, 6];
+function fakeGeoPackageApi(events, { mismatch = false, exportFeatureDao = true, raw: rawOverride, output: outputOverride } = {}) {
+  const raw = rawOverride ?? [686143.36, 1200320.45, 6];
+  const output = outputOverride ?? (mismatch ? [0, 0, 6] : [106.7028563810, 10.8536676064, 6]);
   const rows = [{ id: 1, values: { id: 1, geom: 'binary', name: 'Projected stop' }, geometry: { toGeoJSON: () => ({ type: 'Point', coordinates: raw }) } }];
   class FakeFeatureDao {}
   FakeFeatureDao.reprojectFeature = () => ({ type: 'Point', coordinates: output });
@@ -444,6 +498,24 @@ test('GeoPackage cleanup runs when projected verification fails and dispose is i
   assert.deepEqual(events.slice(-2), ['result-set:close', 'geopackage:close']);
   source.dispose();
   assert.equal(events.filter((event) => event === 'geopackage:close').length, 2);
+});
+
+test('GeoPackage Source CRS override reprojects raw geometry instead of trusting incorrect metadata', async () => {
+  const { openGeoPackageSource } = await optionalModule('../editor/import/geopackage-adapter.js');
+  const events = [];
+  const source = await openGeoPackageSource(new Uint8Array([1, 2, 3]), {
+    geoPackageApi: fakeGeoPackageApi(events, {
+      raw: [11131949.079327356, 1118889.9748579594, 6],
+      output: [0, 0, 6]
+    }),
+    proj4: await realProj4(),
+    label: 'Override'
+  });
+  const candidate = (await source.prepare(source.sourceItems[0].id, { sourceCrs: 'EPSG:3857' }))[0];
+  const point = candidate.value.features[0].geometry.coordinates;
+  assert.ok(Math.abs(point[0] - 100) < 1e-9);
+  assert.ok(Math.abs(point[1] - 10) < 1e-9);
+  assert.equal(candidate.sourceCrs, 'EPSG:3857');
 });
 
 test('actual shpjs parses safe zipped and loose fixtures with projected coordinates once', async () => {

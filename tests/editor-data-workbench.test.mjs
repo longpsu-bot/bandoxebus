@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 class ClassList {
@@ -135,6 +136,21 @@ test('Add Data begins with friendly supported formats, accessible drop/picker co
   assert.equal(returnFocus.focused, true);
 });
 
+test('Workbench passes existing dataset IDs into each transient import session', async () => {
+  const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
+  const documentRef = documentHarness();
+  const harness = sessionHarness();
+  let createdWith;
+  const workbench = createDataWorkbench({
+    documentRef,
+    createSession(options) { createdWith = options; return harness.session; }
+  });
+  await workbench.open({ mode: 'add', usedIds: ['demand', 'stops'], files: [new File(['x'], 'demand.csv')] });
+  assert.deepEqual(createdWith.usedIds, ['demand', 'stops']);
+  const editorSource = await readFile(new URL('../editor/editor.js', import.meta.url), 'utf8');
+  assert.match(editorSource, /usedIds:\s*Object\.keys\(manifest\.datasets\)/);
+});
+
 test('workbench reads dropped files, exposes candidate choice and CRS, and renders SVG without MapLibre', async () => {
   const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
   const documentRef = documentHarness();
@@ -159,6 +175,55 @@ test('workbench reads dropped files, exposes candidate choice and CRS, and rende
   await find(dialog, (node) => node.tagName === 'BUTTON' && node.textContent === 'Add data').click();
   assert.equal(confirmed.candidate.geometry, 'line');
   assert.equal(confirmed.context.mode, 'add');
+});
+
+test('spatial preview shares one global 4,000-vertex render budget across all features', async () => {
+  const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
+  const documentRef = documentHarness();
+  const features = Array.from({ length: 3 }, (_, featureIndex) => ({
+    type: 'Feature', properties: {}, geometry: {
+      type: 'MultiPoint',
+      coordinates: Array.from({ length: 2500 }, (_, pointIndex) => [106 + featureIndex * 0.01, 10 + pointIndex * 0.000001])
+    }
+  }));
+  const candidate = {
+    kind: 'spatial', geometry: 'point', id: 'dense-points', label: 'Dense points',
+    sourceFormat: 'GeoJSON', sourceCrs: 'EPSG:4326', outputCrs: 'EPSG:4326', warnings: [],
+    value: { type: 'FeatureCollection', features }
+  };
+  const harness = sessionHarness({ candidates: [candidate], format: 'geojson' });
+  const workbench = createDataWorkbench({
+    documentRef,
+    createSession: () => harness.session,
+    requestFrame: (callback) => callback(0)
+  });
+  await workbench.open({ mode: 'add', files: [new File(['x'], 'dense.geojson')] });
+  assert.equal(walk(documentRef.body).filter((node) => node.tagName === 'CIRCLE').length, 4000);
+});
+
+test('replacement validates and installs only candidates compatible with the existing dataset', async () => {
+  const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
+  const documentRef = documentHarness();
+  const harness = sessionHarness({ candidates: spatialCandidates(), format: 'kml' });
+  const validated = [];
+  const workbench = createDataWorkbench({
+    documentRef,
+    createSession: () => harness.session,
+    validateCandidate(candidate) {
+      validated.push(candidate.geometry);
+      if (candidate.geometry !== 'line') throw new TypeError('incompatible geometry');
+      return candidate;
+    },
+    requestFrame: (callback) => callback(0)
+  });
+  await workbench.open({
+    mode: 'replace',
+    existingDataset: { id: 'route', label: 'Route', type: 'geojson', geometry: 'line', src: './data/route.geojson' },
+    files: [new File(['x'], 'mixed.kml')]
+  });
+  assert.deepEqual(validated, ['line']);
+  assert.equal(workbench.state().selectedCandidateId, 'transport-lines');
+  assert.equal(workbench.state().phase, 'review-ready');
 });
 
 test('table preview is bounded to the first 20 rows and Confirm is the only mutation boundary', async () => {
@@ -195,6 +260,63 @@ test('Escape/cancel disposes transient state and a failed read stays visible wit
   await dialog.dispatch('cancel');
   assert.equal(events.length, 1);
   assert.equal(confirmed, false);
+});
+
+test('superseded asynchronous reads cannot overwrite the current Workbench status', async () => {
+  const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
+  const documentRef = documentHarness();
+  let rejectFirst;
+  const firstRead = new Promise((resolve, reject) => { rejectFirst = reject; });
+  const first = {
+    read: () => firstRead,
+    state: () => ({ format: 'json' }),
+    dispose() {}
+  };
+  const secondHarness = sessionHarness();
+  let count = 0;
+  const workbench = createDataWorkbench({
+    documentRef,
+    createSession: () => (++count === 1 ? first : secondHarness.session),
+    requestFrame: (callback) => callback(0)
+  });
+  const staleOpening = workbench.open({ mode: 'add', files: [new File(['x'], 'slow.json')] });
+  await new Promise((resolve) => setImmediate(resolve));
+  await workbench.open({ mode: 'add', files: [new File(['x'], 'current.csv')] });
+  rejectFirst(new TypeError('late stale failure'));
+  await staleOpening;
+  assert.doesNotMatch(text(documentRef.body), /late stale failure/);
+  assert.equal(workbench.state().phase, 'review-ready');
+});
+
+test('superseded preparation cannot install candidates into a newer Workbench session', async () => {
+  const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
+  const documentRef = documentHarness();
+  let resolveFirstPrepare;
+  const delayedPrepare = new Promise((resolve) => { resolveFirstPrepare = resolve; });
+  const firstCandidate = tableCandidate(1);
+  const first = {
+    async read() { return [{ id: 'first', label: 'First' }]; },
+    selectSourceItem() {}, configure() {},
+    prepare: () => delayedPrepare,
+    state: () => ({ format: 'csv', sourceItems: [{ id: 'first', label: 'First' }], config: { mode: 'table' } }),
+    dispose() {}
+  };
+  const currentCandidate = { ...tableCandidate(1), id: 'current', label: 'Current' };
+  const secondHarness = sessionHarness({ candidates: [currentCandidate] });
+  let count = 0;
+  const workbench = createDataWorkbench({
+    documentRef,
+    createSession: () => (++count === 1 ? first : secondHarness.session),
+    requestFrame: (callback) => callback(0)
+  });
+  const staleOpening = workbench.open({ mode: 'add', files: [new File(['x'], 'first.csv')] });
+  await new Promise((resolve) => setImmediate(resolve));
+  await workbench.open({ mode: 'add', files: [new File(['x'], 'current.csv')] });
+  resolveFirstPrepare([firstCandidate]);
+  await staleOpening;
+  assert.equal(workbench.state().selectedCandidateId, 'current');
+  assert.match(text(documentRef.body), /Current/);
+  assert.doesNotMatch(text(documentRef.body), /late stale failure|Demand/);
 });
 
 test('CSV point configuration exposes explicit axes and source CRS before reprojection', async () => {

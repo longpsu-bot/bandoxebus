@@ -106,6 +106,22 @@ test('worker client transfers binary inputs and accepts only the matching result
   assert.equal(session.state().timing.lastResultRequestId, posted.message.requestId);
 });
 
+test('worker client rejects unsafe selections before reading or posting transferable bytes', async () => {
+  const { createDataImportWorkerClient } = await workerModule();
+  const { DATA_FILE_LIMITS } = await import('../editor/import/data-import.js');
+  const workers = fakeWorkers();
+  let reads = 0;
+  const files = Array.from({ length: DATA_FILE_LIMITS.maxFiles + 1 }, (_, index) => ({
+    name: `part-${index}.shp`, size: 1, type: 'application/octet-stream', lastModified: 0,
+    async arrayBuffer() { reads += 1; return new ArrayBuffer(1); }
+  }));
+  const session = createDataImportWorkerClient({ files, WorkerCtor: workers.Ctor });
+
+  await assert.rejects(session.read(), /no more than 256/i);
+  assert.equal(reads, 0);
+  assert.equal(workers.instances[0].messages.length, 0);
+});
+
 test('worker client preserves transient candidate controls and result receipt timing', async () => {
   const { createDataImportWorkerClient } = await workerModule();
   const workers = fakeWorkers();
@@ -214,6 +230,7 @@ test('worker runtime executes bounded read and prepare operations through the ex
       selectSourceItem(id) { selected = id; },
       configure(value) { config = value; },
       async prepare() { onStatus('preparing'); events.push(['prepare', selected, config]); return [candidate]; },
+      releasePrepared() { events.push('release'); },
       state() { return { format: 'json' }; },
       dispose() { events.push('dispose'); }
     };
@@ -244,6 +261,7 @@ test('worker runtime executes bounded read and prepare operations through the ex
   assert.deepEqual(scope.posted.at(-1), {
     type: 'result', sessionId: 7, requestId: 2, operation: 'prepare', candidates: [candidate]
   });
+  assert.equal(events.at(-1), 'release', 'worker must release its candidate and parser intermediates after posting');
 });
 
 test('worker runtime bounds errors and cooperatively disposes on cancellation', async () => {
@@ -314,6 +332,8 @@ test('worker entry points share one ESM runtime and isolate the PapaParse fallba
   assert.ok(classicEntry.indexOf("addEventListener('message'") >= 0, 'classic bootstrap must install a buffer listener');
   assert.ok(classicEntry.indexOf("addEventListener('message'") < classicEntry.indexOf('Promise.all('), 'classic bootstrap must buffer messages before asynchronous ESM loading');
   assert.match(classicEntry, /runtime\.handleMessage\(message\)/);
+  assert.match(classicEntry, /\.catch\(/, 'classic bootstrap must convert dynamic-import failure into a worker response');
+  assert.match(classicEntry, /type:\s*['"]error['"]/, 'classic bootstrap failure must post a bounded error');
   assert.doesNotMatch(classicEntry, /shpjs|sheetjs|geopackage|proj4/i);
   assert.doesNotMatch(runtime, /package-store|draft-store|scene-commands|writeValidatedResource|editor\.js/i);
 });

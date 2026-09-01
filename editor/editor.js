@@ -388,6 +388,7 @@ export function createEditor({
     return ensureDataWorkbench().open({
       mode,
       files,
+      usedIds: Object.keys(manifest.datasets),
       returnFocus: documentRef.activeElement,
       existingDataset: descriptor ? { id: datasetId, ...structuredClone(descriptor) } : undefined
     });

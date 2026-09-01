@@ -6,37 +6,17 @@ import { createDataImportWorkerClient, selectDataImportExecution } from './data-
 import { friendlyLabel } from './import-identifiers.js';
 import { openGeoJsonSource, openKmzSource, openShapefileSource, openXmlSpatialSource } from './spatial-adapters.js';
 import { openCsvSource, openJsonTableSource, openXlsxSource } from './table-adapters.js';
+import { assertDataFileSelection, DATA_FILE_LIMITS } from './data-import-limits.js';
 
-const MIB = 1024 * 1024;
 const SUPPORTED_MESSAGE = 'Supported formats: GeoJSON/JSON, KML/KMZ, Shapefile, GeoPackage, CSV, Excel XLSX, and GPX.';
 const XML_ROOT = /<\s*(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)\b/i;
 const SQLITE_HEADER = new TextEncoder().encode('SQLite format 3\0');
 
-export const DATA_FILE_LIMITS = Object.freeze({
-  maxFileBytes: 512 * MIB,
-  maxAggregateBytes: 768 * MIB,
-  maxFiles: 256,
-  maxXmlBytes: 128 * MIB
-});
+export { DATA_FILE_LIMITS };
 
 function extension(name) {
   const match = /(?:^|\/)([^/]+?)(\.[^.\/]+)$/.exec(String(name ?? '').replaceAll('\\', '/'));
   return match ? match[2].toLowerCase() : '';
-}
-
-function assertSelectionLimits(files) {
-  if (!Array.isArray(files) || !files.length) throw new TypeError('Choose at least one data file.');
-  if (files.length > DATA_FILE_LIMITS.maxFiles) throw new TypeError(`Select no more than ${DATA_FILE_LIMITS.maxFiles} loose files.`);
-  let total = 0;
-  for (const input of files) {
-    const size = Number(input?.size);
-    if (!input?.name || !Number.isFinite(size) || size < 0 || typeof input.arrayBuffer !== 'function') {
-      throw new TypeError('Selected data includes an invalid local file.');
-    }
-    if (size > DATA_FILE_LIMITS.maxFileBytes) throw new TypeError(`${input.name} is too large; the direct file limit is 512 MiB.`);
-    total += size;
-  }
-  if (total > DATA_FILE_LIMITS.maxAggregateBytes) throw new TypeError('The selected loose files exceed the 768 MiB aggregate limit.');
 }
 
 async function bytesOf(input) {
@@ -128,7 +108,7 @@ async function detectArchive(input, ext) {
 
 export async function detectDataFiles(selectedFiles) {
   const files = Array.from(selectedFiles ?? []);
-  assertSelectionLimits(files);
+  assertDataFileSelection(files);
   const extensions = files.map(({ name }) => extension(name));
   const looseShapeExtensions = new Set(['.shp', '.dbf', '.prj', '.cpg']);
   if (files.length > 1 || looseShapeExtensions.has(extensions[0])) {
@@ -290,6 +270,11 @@ export function createDataImportSession({
       const incompatible = replacementError(candidate, replacement);
       if (incompatible) throw new TypeError(incompatible);
       return candidate;
+    },
+    releasePrepared() {
+      assertActive();
+      candidates = [];
+      source?.releasePrepared?.();
     },
     state() {
       return Object.freeze({

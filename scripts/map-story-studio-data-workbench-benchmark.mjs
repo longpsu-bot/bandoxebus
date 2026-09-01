@@ -22,6 +22,9 @@ export function waitForDataWorkbenchReviewReady(eventTarget, {
   if (!eventTarget?.addEventListener || !eventTarget?.removeEventListener) {
     throw new TypeError('Benchmark requires a Workbench completion event target.');
   }
+  if (!Number.isInteger(sessionId) || !Number.isInteger(requestId)) {
+    throw new TypeError('Benchmark requires matching integer sessionId and requestId values.');
+  }
   return new Promise((resolve, reject) => {
     let timer;
     const cleanup = () => {
@@ -31,8 +34,7 @@ export function waitForDataWorkbenchReviewReady(eventTarget, {
     const onReady = (event) => {
       const detail = event?.detail;
       if (!validCompletion(detail)) return;
-      if (sessionId !== undefined && detail.sessionId !== sessionId) return;
-      if (requestId !== undefined && detail.requestId !== requestId) return;
+      if (detail.sessionId !== sessionId || detail.requestId !== requestId) return;
       cleanup();
       resolve(Object.freeze({ ...detail }));
     };

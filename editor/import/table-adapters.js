@@ -72,8 +72,15 @@ async function parseCsv(file, papa, onProgress) {
         skipEmptyLines: 'greedy',
         delimitersToGuess: [',', '\t', '|', ';'],
         chunk(results) {
-          if (Array.isArray(results?.data)) grid.push(...results.data);
-          if (Array.isArray(results?.errors)) errors.push(...results.errors);
+          if (Array.isArray(results?.data)) {
+            for (const row of results.data) grid.push(row);
+          }
+          if (Array.isArray(results?.errors) && errors.length < 5) {
+            for (const error of results.errors) {
+              if (error?.code !== 'UndetectableDelimiter') errors.push(error);
+              if (errors.length >= 5) break;
+            }
+          }
           delimiter = results?.meta?.delimiter ?? delimiter;
           onProgress({ completed: grid.length, unit: 'rows' });
         },
@@ -88,13 +95,16 @@ async function parseCsv(file, papa, onProgress) {
 
 export async function openCsvSource(file, { papa, usedIds = [], onProgress = () => {} } = {}) {
   if (!papa || typeof papa.parse !== 'function') throw new TypeError('PapaParse is required for CSV import.');
-  const parsed = await parseCsv(file, papa, onProgress);
-  const errors = papaErrors(parsed.errors);
-  if (errors.length) {
-    const detail = errors.map(({ row, message }) => `row ${Number(row) + 1}: ${message}`).join('; ');
-    throw new TypeError(`CSV parse failed: ${detail}`);
+  async function readGrid() {
+    const parsed = await parseCsv(file, papa, onProgress);
+    const errors = papaErrors(parsed.errors);
+    if (errors.length) {
+      const detail = errors.map(({ row, message }) => `row ${Number(row) + 1}: ${message}`).join('; ');
+      throw new TypeError(`CSV parse failed: ${detail}`);
+    }
+    return trimPapaTrailingBlankRows(parsed.data);
   }
-  const grid = trimPapaTrailingBlankRows(parsed.data);
+  let grid = await readGrid();
   if (!grid.length) throw new TypeError('CSV contains no rows.');
   const label = friendlyLabel(file.name);
   const id = createImportId(label, usedIds);
@@ -112,6 +122,7 @@ export async function openCsvSource(file, { papa, usedIds = [], onProgress = () 
       mode = 'table', headerRow = 0, xColumn, yColumn, zColumn, sourceCrs = 'EPSG:4326', proj4
     } = {}) {
       checkedItem(sourceItems, itemId);
+      if (!grid) grid = await readGrid();
       if (mode === 'table') {
         return tableCandidate(normalizeTableGrid(grid, { headerRow }), { label, id, sourceFormat: 'CSV' });
       }
@@ -149,7 +160,8 @@ export async function openCsvSource(file, { papa, usedIds = [], onProgress = () 
         warnings: [...candidate.warnings, `${blankCoordinateRows} CSV ${blankCoordinateRows === 1 ? 'row had' : 'rows had'} blank coordinates and will not be imported.`]
       }));
     },
-    dispose() {}
+    releasePrepared() { grid = undefined; },
+    dispose() { grid = undefined; }
   });
 }
 
@@ -172,11 +184,12 @@ export async function openJsonTableSource(detection, { usedIds = [] } = {}) {
   });
 }
 
-function sheetGrid(sheet, sheetJs) {
+function sheetGrid(sheet, sheetJs, { maxRows } = {}) {
   if (!sheet?.['!ref']) return [];
   const range = sheetJs.utils.decode_range(sheet['!ref']);
   range.s.r = 0;
   range.s.c = 0;
+  if (Number.isInteger(maxRows) && maxRows > 0) range.e.r = Math.min(range.e.r, maxRows - 1);
   return sheetJs.utils.sheet_to_json(sheet, {
     header: 1,
     raw: true,
@@ -209,24 +222,26 @@ export async function openXlsxSource(bytes, { sheetJs, usedIds = [] } = {}) {
   const sourceItems = workbook.SheetNames.map((label, index) => {
     const id = createImportId(label, occupied, { prefix: 'sheet' });
     occupied.push(id);
-    const grid = sheetGrid(workbook.Sheets[label], sheetJs);
-    return Object.freeze({ id, label, sheetName: label, sheetIndex: index, suggestedHeaderRow: suggestedHeader(grid), grid });
+    const headerSample = sheetGrid(workbook.Sheets[label], sheetJs, { maxRows: 50 });
+    return Object.freeze({ id, label, sheetName: label, sheetIndex: index, suggestedHeaderRow: suggestedHeader(headerSample) });
   });
   if (!sourceItems.length) throw new TypeError('XLSX workbook contains no sheets.');
   return Object.freeze({
     sourceItems,
     async prepare(itemId, { headerRow } = {}) {
       const item = checkedItem(sourceItems, itemId);
+      const grid = sheetGrid(workbook.Sheets[item.sheetName], sheetJs);
       const chosen = headerRow ?? item.suggestedHeaderRow;
-      if (!Number.isInteger(chosen) || chosen < 0 || chosen >= Math.min(50, item.grid.length)) {
+      if (!Number.isInteger(chosen) || chosen < 0 || chosen >= Math.min(50, grid.length)) {
         throw new TypeError('Choose a header row from the first 50 rows of the selected sheet.');
       }
-      return tableCandidate(normalizeTableGrid(item.grid, { headerRow: chosen }), {
+      return tableCandidate(normalizeTableGrid(grid, { headerRow: chosen }), {
         label: item.label,
         id: item.id,
         sourceFormat: 'XLSX'
       });
     },
+    releasePrepared() {},
     dispose() {}
   });
 }

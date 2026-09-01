@@ -17,7 +17,7 @@ The browser found and drove two fixes before the stop gate:
 1. New spatial descriptors now receive complete production-valid geometry-specific render defaults before the first manifest write.
 2. The GeoPackage adapter supports the actual 4.2.9 browser export shape, where `GeoPackageAPI` is exported but the reprojection helper is reached through the feature DAO instance constructor.
 
-The final focused implementation set passes **104/104** tests. The bounded import, authoring, persistence, loader, ZIP, and runtime regression set passes **126/126** tests.
+The post-review focused implementation set passes **112/112** tests. The bounded import, authoring, persistence, loader, ZIP, and runtime regression set passes **135/135** tests.
 
 The clean executable head was reloaded after all temporary benchmark instrumentation had been removed. A quoted-comma CSV reached the explicit review state, rendered the expected quoted comma and multiline cells, confirmed through production validation, and left the project at **Valid / Problems 0**.
 
@@ -27,16 +27,31 @@ A generated 21,420,020-byte (20.43 MiB) UTF-8 CSV containing 21,000 records was 
 
 | Run | Review-ready wall time | Worst frame gap | Complete post-worker interval |
 | --- | ---: | ---: | ---: |
-| Cold | 484.4 ms | 199.8 ms | 75.8 ms |
-| Warm 1 | 384.9 ms | 50.0 ms | 40.3 ms |
-| Warm 2 | 369.4 ms | 50.0 ms | 36.3 ms |
-| Warm 3 | 408.8 ms | 33.3 ms | 31.7 ms |
+| Cold | 841.1 ms | 149.9 ms | 94.8 ms |
+| Warm 1 | 757.2 ms | 202.0 ms | 45.5 ms |
+| Warm 2 | 557.7 ms | 116.6 ms | 65.2 ms |
+| Warm 3 | 695.2 ms | 116.3 ms | 47.8 ms |
 
-All four complete post-worker intervals pass the locked **250 ms** gate. Each interval begins in the accepted worker-result handler, includes production validation plus Workbench state and preview installation, and ends only after two animation frames provide a paint opportunity. The observed in-window long tasks were 100 / 55 / 51 / 50 ms. The cold frame-gap result remains below the approved ceiling and no XML worker stop gate was triggered.
+All four post-review complete post-worker intervals pass the locked **250 ms** gate. Each interval begins in the accepted worker-result handler, includes production validation plus Workbench state and preview installation, and ends only after two animation frames provide a paint opportunity. The observed in-window long tasks were 79 / 71 / 82 / none. The worst frame gap remains below the approved ceiling and no XML worker stop gate was triggered.
 
 Cancellation was activated while the CSV worker reported **Parsing**. The modal painted closed in **10.7 ms**, emitted no late `data-workbench:review-ready` event during the teardown window, and canonical per-entry hashes of the exported project package were identical before and after cancellation. The temporary 20.43 MiB fixture and instrumentation were removed after certification.
 
 Chromium did not expose a trustworthy combined main-thread-plus-worker heap figure through the controlled browser surface, so this report does not invent one. Memory evidence is instead the executable copy audit: CSV is parsed once, binary inputs use transferable buffers, the former decoded-string/grid/row/column/candidate copies are removed, and cancellation terminates the worker realm. Peak-memory behavior beyond the certified fixture remains a stated scaling limit.
+
+## Independent review remediation
+
+The exact base-to-head review found no critical issue and identified eight important edge cases. Each was reproduced before modification and now has a focused regression:
+
+- file-count/size/aggregate limits run before any transferable-buffer read;
+- production sessions receive existing dataset IDs for collision-safe suggestions;
+- spatial SVG preview rendering shares one global 4,000-vertex budget;
+- worker results release candidate/parser intermediates after posting, with CSV reparsing only on later configuration;
+- XLSX inventory samples at most 50 header rows and materializes only the selected worksheet grid;
+- replacement filters mixed sources to the compatible geometry before production validation;
+- CSV chunk ingestion avoids spread overflow and caps diagnostics while parsing;
+- GeoPackage Source CRS override reprojects raw geometry instead of trusting incorrect metadata.
+
+Minor review findings were also closed: stale read/prepare completions cannot affect a newer dialog, the benchmark requires an exact session/request identity, and classic-worker bootstrap rejection returns a bounded error. A dense 7,500-point browser fixture rendered exactly 4,000 preview circles and completed its full post-worker interval in **56.8 ms**. Four repeated 20.43 MiB success cycles passed after worker result-release was added.
 
 The phase profile, diagnosed copies/passes, worker protocol, format split, memory strategy, and revised acceptance gate are recorded in `docs/superpowers/specs/2026-09-01-map-story-studio-v1-2-data-workbench-design.md`. No smaller main-thread file limit is proposed as the primary solution, and no generic worker framework has been implemented.
 

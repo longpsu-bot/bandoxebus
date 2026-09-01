@@ -1,3 +1,5 @@
+import { assertDataFileSelection } from './data-import-limits.js';
+
 let nextSessionId = 1;
 
 function extension(name) {
@@ -185,6 +187,7 @@ export function createDataImportWorkerClient({
       if (sourceItems.length) return [...sourceItems];
       setStatus('reading');
       try {
+        assertDataFileSelection(files);
         const encoded = await encodeInputs(files, execution);
         return await request('read', { inputs: encoded.inputs, usedIds: [...usedIds], replacement }, encoded.transfer);
       } catch (error) {

@@ -40,11 +40,15 @@ function positions(geometry) {
 function spatialPreview(documentRef, candidate) {
   const features = candidate.value.features.slice(0, 200);
   const sampled = [];
+  const rendered = [];
+  let remaining = 4000;
   for (const feature of features) {
-    const points = positions(feature.geometry);
-    if (sampled.length + points.length > 4000) sampled.push(...points.slice(0, 4000 - sampled.length));
-    else sampled.push(...points);
-    if (sampled.length >= 4000) break;
+    if (!remaining) break;
+    const points = positions(feature.geometry).slice(0, remaining);
+    if (!points.length) continue;
+    sampled.push(...points);
+    rendered.push({ feature, points });
+    remaining -= points.length;
   }
   const svg = documentRef.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 640 300');
@@ -60,9 +64,7 @@ function spatialPreview(documentRef, candidate) {
     20 + ((x - minX) / (maxX - minX || 1)) * 600,
     280 - ((y - minY) / (maxY - minY || 1)) * 260
   ];
-  for (const feature of features) {
-    const points = positions(feature.geometry).slice(0, 4000);
-    if (!points.length) continue;
+  for (const { feature, points } of rendered) {
     if (feature.geometry.type === 'Point' || feature.geometry.type === 'MultiPoint') {
       for (const point of points) {
         const [cx, cy] = project(point);
@@ -98,6 +100,14 @@ function tablePreview(documentRef, candidate) {
   table.append(head, body);
   wrapper.append(table, element(documentRef, 'p', `Showing ${Math.min(20, candidate.value.rows.length)} of ${candidate.value.rows.length} rows.`));
   return wrapper;
+}
+
+function replacementCompatible(candidate, existingDataset) {
+  if (!existingDataset) return true;
+  const kind = existingDataset.kind ?? (existingDataset.type === 'geojson' ? 'spatial'
+    : existingDataset.type === 'table-json' ? 'table' : undefined);
+  return candidate.kind === kind
+    && (kind !== 'spatial' || candidate.geometry === existingDataset.geometry);
 }
 
 export function createDataWorkbench({
@@ -207,9 +217,16 @@ export function createDataWorkbench({
     const activeSession = session;
     const activeGeneration = generation;
     const timing = activeSession.state().timing ?? {};
+    const installable = options.mode === 'replace'
+      ? prepared.filter((candidate) => replacementCompatible(candidate, options.existingDataset))
+      : prepared;
+    if (!installable.length) {
+      const expected = options.existingDataset?.geometry ?? options.existingDataset?.type ?? 'existing dataset';
+      throw new TypeError(`Replacement is incompatible; expected ${expected} data.`);
+    }
     phase = 'validating';
     const validated = [];
-    for (const candidate of prepared) {
+    for (const candidate of installable) {
       const result = await validateCandidate(candidate, {
         mode: options.mode,
         existingDataset: options.existingDataset
@@ -245,6 +262,20 @@ export function createDataWorkbench({
     dispatchReviewReady(completion);
   }
 
+  async function prepareCurrentAndInstall(installOptions) {
+    const activeSession = session;
+    const activeGeneration = generation;
+    let prepared;
+    try {
+      prepared = await activeSession.prepare();
+    } catch (error) {
+      if (session !== activeSession || generation !== activeGeneration) return;
+      throw error;
+    }
+    if (session !== activeSession || generation !== activeGeneration) return;
+    return installPrepared(prepared, installOptions);
+  }
+
   function defaultConfig(state, item) {
     if (state.format === 'csv') return { mode: 'table', headerRow: 0 };
     if (state.format === 'xlsx') return { headerRow: item.suggestedHeaderRow ?? 0 };
@@ -256,10 +287,12 @@ export function createDataWorkbench({
   }
 
   async function prepareSelected(itemId) {
-    session.selectSourceItem(itemId);
-    const state = session.state();
+    const activeSession = session;
+    const activeGeneration = generation;
+    activeSession.selectSourceItem(itemId);
+    const state = activeSession.state();
     const item = state.sourceItems.find(({ id }) => id === itemId) ?? {};
-    session.configure(defaultConfig(state, item));
+    activeSession.configure(defaultConfig(state, item));
     if (state.format === 'shapefile' && item.hasPrj === false) {
       candidates = [];
       selectedCandidateId = null;
@@ -269,7 +302,8 @@ export function createDataWorkbench({
     }
     setStatus('Preparing a local preview…');
     phase = 'preparing';
-    await installPrepared(await session.prepare());
+    await prepareCurrentAndInstall();
+    if (session !== activeSession || generation !== activeGeneration) return;
   }
 
   function renderConfiguration(container, state) {
@@ -287,7 +321,7 @@ export function createDataWorkbench({
       apply.addEventListener('click', async () => {
         try {
           session.configure({ headerRow: Number(header.value) - 1 });
-          await installPrepared(await session.prepare(), { successMessage: 'Review the selected worksheet preview.' });
+          await prepareCurrentAndInstall({ successMessage: 'Review the selected worksheet preview.' });
         } catch (error) { setStatus(error.message, true); }
       });
       group.append(headerLabel, apply);
@@ -307,7 +341,7 @@ export function createDataWorkbench({
         try {
           session.configure(patch);
           setStatus('Parsing and validating Shapefile geometry…');
-          await installPrepared(await session.prepare(), { successMessage: success });
+          await prepareCurrentAndInstall({ successMessage: success });
         } catch (error) { setStatus(error.message, true); }
       };
       const assume = element(documentRef, 'button', 'Assume EPSG:4326', { type: 'button' });
@@ -333,7 +367,7 @@ export function createDataWorkbench({
         setStatus('Choose X and Y columns, then prepare the preview.');
         return;
       }
-      try { await installPrepared(await session.prepare()); } catch (error) { setStatus(error.message, true); }
+      try { await prepareCurrentAndInstall(); } catch (error) { setStatus(error.message, true); }
     });
     group.append(mode);
     if (state.config?.mode === 'points') {
@@ -372,7 +406,7 @@ export function createDataWorkbench({
             sourceCrs: crs.value.trim()
           });
           setStatus('Reprojecting and validating local coordinates…');
-          await installPrepared(await session.prepare(), { successMessage: 'Review the preview. Stored output will be EPSG:4326.' });
+          await prepareCurrentAndInstall({ successMessage: 'Review the preview. Stored output will be EPSG:4326.' });
         } catch (error) { setStatus(error.message, true); }
       });
       group.append(xLabel, yLabel, zLabel, crsLabel, prepare);
@@ -432,7 +466,16 @@ export function createDataWorkbench({
             : { sourceCrs: sourceCrs.value.trim() };
           session.configure(patch);
           setStatus('Reprojecting and validating local coordinates…');
-          const prepared = await session.prepare();
+          const activeSession = session;
+          const activeGeneration = generation;
+          let prepared;
+          try {
+            prepared = await activeSession.prepare();
+          } catch (error) {
+            if (session !== activeSession || generation !== activeGeneration) return;
+            throw error;
+          }
+          if (session !== activeSession || generation !== activeGeneration) return;
           const preferredCandidateId = prepared.find(({ geometry }) => geometry === candidate.geometry)?.id;
           await installPrepared(prepared, {
             preferredCandidateId,
@@ -493,19 +536,27 @@ export function createDataWorkbench({
 
   async function beginFiles(files) {
     disposeSession();
+    const activeGeneration = generation;
     phase = 'reading';
-    session = createSession({
+    let activeSession;
+    activeSession = createSession({
       files,
+      usedIds: Array.from(options.usedIds ?? []),
       replacement: options.existingDataset,
-      onStatus: (value) => setStatus(String(value))
+      onStatus: (value) => {
+        if (generation === activeGeneration && session === activeSession) setStatus(String(value));
+      }
     });
+    session = activeSession;
     setStatus('Reading local files…');
     bodyNode().replaceChildren();
     try {
-      const sourceItems = await session.read();
+      const sourceItems = await activeSession.read();
+      if (generation !== activeGeneration || session !== activeSession) return;
       if (!sourceItems.length) throw new TypeError('This source has no importable items.');
       await prepareSelected(sourceItems[0].id);
     } catch (error) {
+      if (generation !== activeGeneration || session !== activeSession) return;
       setStatus(error.message, true);
     }
   }

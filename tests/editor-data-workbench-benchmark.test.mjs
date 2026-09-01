@@ -53,6 +53,10 @@ test('benchmark listener is installed before import starts and enforces the comp
 test('benchmark fails closed on missing explicit completion and contains no DOM polling fallback', async () => {
   const { waitForDataWorkbenchReviewReady } = await benchmarkModule();
   const target = new EventTarget();
+  assert.throws(
+    () => waitForDataWorkbenchReviewReady(target, { timeoutMs: 5 }),
+    /sessionId.*requestId|matching.*identity/i
+  );
   await assert.rejects(
     waitForDataWorkbenchReviewReady(target, { sessionId: 1, requestId: 2, timeoutMs: 5 }),
     /explicit Workbench.*completion/i
