@@ -1,5 +1,6 @@
 export const PREVIEW_PROTOCOL_VERSION = 1;
 export const PREVIEW_PACKAGE_MAX_BYTES = 256 * 1024 * 1024;
+export const PREVIEW_OUTPUT_MODES = Object.freeze(['explore', 'scroll', 'presentation']);
 
 const decoder = new TextDecoder();
 const AUTHORING_EVENT_TYPES = new Set([
@@ -14,6 +15,7 @@ const EVENT_TYPES = new Set([
   'editor-preview:runtime-error',
   'editor-preview:state',
   'editor-preview:camera',
+  'editor-preview:locate-result',
   ...AUTHORING_EVENT_TYPES
 ]);
 const START_RESPONSE_TYPES = new Set([
@@ -85,6 +87,12 @@ function validEventPayload(data) {
   if (data.type === 'editor-preview:state') return hasExactKeys(data.payload, ['viewport']);
   if (data.type === 'editor-preview:camera') {
     return hasExactKeys(data.payload, ['center', 'zoom', 'pitch', 'bearing', 'bounds']);
+  }
+  if (data.type === 'editor-preview:locate-result') {
+    return hasExactKeys(data.payload, ['datasetId', 'status', 'message'])
+      && validOverlayId(data.payload.datasetId)
+      && ['located', 'empty', 'error'].includes(data.payload.status)
+      && typeof data.payload.message === 'string' && data.payload.message.length <= 4096;
   }
   if (data.type === 'editor-preview:select-overlay') {
     return hasExactKeys(data.payload, ['id']) && validOverlayId(data.payload.id);
@@ -164,11 +172,40 @@ function validCommandPayload(payload) {
     && ['select', 'map'].includes(payload.payload.mode);
   if (payload.name === 'restore-scene-camera') return hasExactKeys(payload.payload, ['index'])
     && Number.isInteger(payload.payload.index) && payload.payload.index >= 0;
+  if (payload.name === 'locate-project-layer') return hasExactKeys(payload.payload, ['datasetId'])
+    && validOverlayId(payload.payload.datasetId);
   return false;
 }
 
 function envelope(type, revision, requestId, payload = {}) {
   return { protocol: PREVIEW_PROTOCOL_VERSION, type, revision, requestId, payload };
+}
+
+function resolveStartOutputMode(options) {
+  if (!hasExactKeys(options, []) && !hasExactKeys(options, ['outputMode'])) {
+    throw new TypeError('Invalid output preview options.');
+  }
+  const outputMode = options.outputMode ?? 'explore';
+  if (!PREVIEW_OUTPUT_MODES.includes(outputMode)) {
+    throw new TypeError(`Invalid output preview mode: ${outputMode}.`);
+  }
+  return outputMode;
+}
+
+export function resolvePreviewOutputSource(source, outputMode = 'explore') {
+  if (!PREVIEW_OUTPUT_MODES.includes(outputMode)) {
+    throw new TypeError(`Invalid output preview mode: ${outputMode}.`);
+  }
+  const hashIndex = source.indexOf('#');
+  const hash = hashIndex === -1 ? '' : source.slice(hashIndex);
+  const beforeHash = hashIndex === -1 ? source : source.slice(0, hashIndex);
+  const queryIndex = beforeHash.indexOf('?');
+  const path = queryIndex === -1 ? beforeHash : beforeHash.slice(0, queryIndex);
+  const params = new URLSearchParams(queryIndex === -1 ? '' : beforeHash.slice(queryIndex + 1));
+  params.delete('outputMode');
+  if (outputMode !== 'explore') params.set('outputMode', outputMode);
+  const query = params.toString();
+  return `${path}${query ? `?${query}` : ''}${hash}`;
 }
 
 export function createPreviewBridge({
@@ -185,6 +222,8 @@ export function createPreviewBridge({
   let canRetryReadyHandshake = false;
   let ready = false;
   let queuedStart = null;
+  let activeSource = iframe.dataset?.previewSrc ?? iframe.src ?? null;
+  let currentOutputMode = 'explore';
 
   function post(message) {
     iframe.contentWindow?.postMessage(message, origin);
@@ -241,22 +280,23 @@ export function createPreviewBridge({
     queuedStart = null;
   }
 
-  function selectSnapshotSource(snapshot) {
+  function selectSnapshotSource(outputMode) {
     const configured = iframe.dataset?.previewSrc;
     if (!configured) return;
-    const source = configured;
-    if (iframe.dataset.previewSrc === source) return;
-    iframe.dataset.previewSrc = source;
+    const source = resolvePreviewOutputSource(configured, outputMode);
+    if (activeSource === source) return;
+    activeSource = source;
     clearSession();
     iframe.src = source;
   }
 
-  function start(lastValid) {
+  function start(lastValid, options = {}) {
     validatePreviewSnapshot(lastValid.snapshot);
     if (lastValid.revision !== lastValid.snapshot.revision) {
       throw new TypeError('Preview snapshot revision does not match last-valid revision.');
     }
-    selectSnapshotSource(lastValid.snapshot);
+    currentOutputMode = resolveStartOutputMode(options);
+    selectSnapshotSource(currentOutputMode);
     currentRevision = lastValid.revision;
     currentStartRequestId = `request-${++requestNumber}`;
     queuedStart = envelope(
@@ -270,7 +310,9 @@ export function createPreviewBridge({
 
   function reset() {
     clearSession();
-    iframe.src = iframe.dataset.previewSrc;
+    currentOutputMode = 'explore';
+    activeSource = iframe.dataset.previewSrc;
+    iframe.src = activeSource;
   }
 
   function command(name, payload = {}) {
@@ -285,5 +327,12 @@ export function createPreviewBridge({
     queuedStart = null;
   }
 
-  return { start, reset, command, dispose, get revision() { return currentRevision; } };
+  return {
+    start,
+    reset,
+    command,
+    dispose,
+    get revision() { return currentRevision; },
+    get outputMode() { return currentOutputMode; }
+  };
 }

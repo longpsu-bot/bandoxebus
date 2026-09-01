@@ -127,21 +127,21 @@ function renderHarness() {
 
 test('Studio Add Heading/Body creates valid Text envelopes and selection is UI-only', () => {
   const h = renderHarness();
-  findButton(h.roots, 'Add Heading').click();
+  findButton(h.roots, 'Heading').click();
   assert.deepEqual(h.story.states[0].content.blocks[0].block, { type: 'heading', text: 'Heading' });
   const afterHeading = JSON.stringify(h.story);
 
-  findButton(h.roots, 'heading').click();
+  findButton(h.roots, 'Heading · Heading').click();
   assert.equal(h.selected, 'heading');
   assert.equal(JSON.stringify(h.story), afterHeading, 'selection must not mutate production Story');
-  findButton(h.roots, 'Add Body Text').click();
+  findButton(h.roots, 'Body text').click();
   assert.deepEqual(h.story.states[0].content.blocks.map(({ block }) => block.type), ['heading', 'paragraph']);
   assert.equal(validateStoryDefinition(h.story, { actionContracts: {} }), h.story);
 });
 
 test('Text Properties expose approved appearance controls without normalized frame inputs', () => {
   const h = renderHarness();
-  findButton(h.roots, 'Add Heading').click();
+  findButton(h.roots, 'Heading').click();
   const requiredControls = [
     'studio-text-content', 'studio-text-font', 'studio-text-font-size', 'studio-text-bold',
     'studio-text-italic', 'studio-text-color', 'studio-text-align', 'studio-text-line-height',
@@ -175,11 +175,11 @@ test('Text Properties expose approved appearance controls without normalized fra
 
 test('Shift multi-selection survives Studio rerender and enables alignment', () => {
   const h = renderHarness();
-  findButton(h.roots, 'Add Heading').click();
-  findButton(h.roots, 'Add Body Text').click();
+  findButton(h.roots, 'Heading').click();
+  findButton(h.roots, 'Body text').click();
 
-  findButton(h.roots, 'heading').click();
-  findButton(h.roots, 'body-text').dispatch('click', { shiftKey: true });
+  findButton(h.roots, 'Heading · Heading').click();
+  findButton(h.roots, 'Body text · Body text').dispatch('click', { shiftKey: true });
   const align = findButton(h.roots, 'Align Left');
   assert.ok(align, 'Align Left exists after selecting Text objects');
   assert.equal(align.disabled, false, 'two-object selection must survive the rerender');
@@ -191,10 +191,10 @@ test('Shift multi-selection survives Studio rerender and enables alignment', () 
 
 test('history-wrapped Scene creation preserves PR A new-Scene selection and empty composition', () => {
   const h = renderHarness();
-  findButton(h.roots, 'Add Heading').click();
+  findButton(h.roots, 'Heading').click();
   assert.equal(h.sceneIndex, 0);
 
-  findButton(h.roots, 'Add Scene').click();
+  findButton(h.roots, '+ Add Scene').click();
 
   assert.equal(h.story.states.length, 2);
   assert.equal(h.sceneIndex, 1, 'new Scene should become the active authored Scene');

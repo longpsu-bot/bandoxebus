@@ -9,25 +9,33 @@
 </head>
 <body>
   <header class="editor-topbar">
-    <div>
+    <div class="editor-brand">
       <p class="editor-kicker">Map Story Studio V1.1</p>
       <h1>Map Story Studio</h1>
     </div>
     <div class="editor-actions" aria-label="Project commands">
-      <button id="new-project" type="button">New</button>
-      <button id="open-folder" type="button">Open Folder</button>
-      <label class="file-command" for="import-zip">Import ZIP
-        <input id="import-zip" type="file" accept=".zip,application/zip">
-      </label>
-      <button id="save-project" type="button" disabled>Save</button>
-      <button id="export-project-zip" type="button" disabled>Export Project ZIP</button>
-      <button id="validate-project" type="button" disabled>Validate</button>
-      <button id="undo-command" type="button" disabled>Undo</button>
-      <button id="redo-command" type="button" disabled>Redo</button>
-      <button id="preview-story" type="button" disabled>Preview Story</button>
-      <button id="present-story" type="button" disabled>Present</button>
+      <details id="project-menu" class="project-menu">
+        <summary>Project</summary>
+        <div class="project-menu-panel">
+          <button id="new-project" type="button">New project</button>
+          <button id="open-folder" type="button">Open folder</button>
+          <label class="file-command" for="import-zip">Import ZIP
+            <input id="import-zip" type="file" accept=".zip,application/zip">
+          </label>
+          <button id="export-project-zip" type="button" disabled>Export project ZIP</button>
+          <button id="validate-project" type="button" disabled>Check project</button>
+        </div>
+      </details>
+      <div class="editor-command-group" aria-label="History commands">
+        <button id="undo-command" type="button" disabled>Undo</button>
+        <button id="redo-command" type="button" disabled>Redo</button>
+      </div>
+      <div class="editor-command-group editor-output-actions" aria-label="Story output commands">
+        <button id="preview-story" type="button" disabled>Preview Story</button>
+        <button id="present-story" type="button" disabled>Present</button>
+      </div>
+      <button id="save-project" class="primary-command" type="button" disabled>Save</button>
       <span id="preview-status" role="status" aria-live="polite">Preview waiting</span>
-      <span id="dirty-status">No project</span>
     </div>
   </header>
 
@@ -82,13 +90,21 @@
     <section id="studio-scenes" class="studio-scenes" aria-label="Scenes" hidden></section>
   </div>
 
-  <section class="validation-drawer" aria-labelledby="validation-heading">
-    <div>
-      <h2 id="validation-heading">Validation</h2>
-      <p id="validation-status" role="status" aria-live="polite">Create a project to validate.</p>
+  <footer class="editor-statusbar">
+    <div class="editor-status-summary" role="status" aria-live="polite">
+      <span id="dirty-status">No project</span>
+      <span aria-hidden="true">·</span>
+      <span id="validity-status">Not checked</span>
+      <span id="preview-warning" class="preview-warning" hidden></span>
     </div>
-    <ul id="validation-errors"></ul>
-  </section>
+    <details id="problems-panel" class="problems-panel">
+      <summary>Problems <span id="problems-count">0</span></summary>
+      <div class="problems-drawer">
+        <p id="validation-status" role="status" aria-live="polite">Create a project to validate.</p>
+        <ul id="validation-errors"></ul>
+      </div>
+    </details>
+  </footer>
 
   <p id="ordering-announcements" class="visually-hidden" role="status" aria-live="polite"></p>
 

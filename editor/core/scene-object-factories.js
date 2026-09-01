@@ -20,25 +20,32 @@ function first(catalog, label) {
 }
 const catalogId = (item) => typeof item === 'string' ? item : item.id;
 
-function createRichBlock(kind, catalogs) {
+function selected(catalog, id, label) {
+  if (id === undefined) return first(catalog, label);
+  const value = catalog?.find((item) => catalogId(item) === id);
+  if (!value) unsupported(`Unknown ${label}: ${id}.`);
+  return value;
+}
+
+function createRichBlock(kind, catalogs, { metricId, datasetId, assetId, chartType = 'bar' } = {}) {
   if (kind === 'metric') {
-    const metric = first(catalogs.metrics, 'metric');
+    const metric = selected(catalogs.metrics, metricId, 'metric');
     return { type: 'stat-group', items: [{ label: metric.label ?? metric.id, metric: metric.id, format: clone(metric.format) }] };
   }
   if (kind === 'table') {
-    const table = first(catalogs.tables, 'normalized table');
+    const table = selected(catalogs.tables, datasetId, 'normalized table');
     const column = first(table.columns, 'table column');
     return { type: 'table', data: { dataset: table.id, columns: [{ field: column.id }] } };
   }
   if (kind === 'chart') {
-    const table = first(catalogs.tables, 'normalized table');
+    const table = selected(catalogs.tables, datasetId, 'normalized table');
     const x = table.columns?.find((column) => ['text', 'date', 'integer'].includes(column.type));
     const y = table.columns?.find((column) => ['integer', 'number'].includes(column.type));
     if (!x || !y) unsupported('A chart requires a categorical x column and a numeric series column.');
-    return { type: 'chart', chartType: 'bar', title: y.label ?? y.id, data: { dataset: table.id, x: x.id, series: [{ y: y.id, label: y.label ?? y.id }] } };
+    return { type: 'chart', chartType, title: y.label ?? y.id, data: { dataset: table.id, x: x.id, series: [{ y: y.id, label: y.label ?? y.id }] } };
   }
   if (kind === 'image') {
-    const asset = first(catalogs.assets, 'image asset');
+    const asset = selected(catalogs.assets, assetId, 'image asset');
     return { type: 'image', asset: catalogId(asset), alt: '', decorative: true };
   }
   if (kind === 'legend') return { type: 'legend', items: [{ label: '', sample: 'swatch', color: '#000000' }] };
@@ -56,13 +63,15 @@ export function validateRichBlock(block) {
   return clone(block);
 }
 
-export function createRichObjectEnvelope(kind, { catalogs = {}, usedIds = [], frame, z = 0 } = {}) {
+export function createRichObjectEnvelope(kind, {
+  catalogs = {}, usedIds = [], frame, z = 0, metricId, datasetId, assetId, chartType
+} = {}) {
   const definition = DEFAULTS[kind];
   if (!definition) throw new TypeError(`Unsupported rich object kind: ${kind}.`);
   const envelope = {
     id: createStableId(definition.id, usedIds),
     frame: { ...(frame ?? definition.frame), z: frame?.z ?? z },
-    block: createRichBlock(kind, catalogs)
+    block: createRichBlock(kind, catalogs, { metricId, datasetId, assetId, chartType })
   };
   validateRichBlock(envelope.block);
   return envelope;

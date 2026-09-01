@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
 import { createGenericStoryExperience } from '../src/runtime/generic-shell.js';
+import { createGenericApplicationOptions } from '../src/runtime/generic-app.js';
 import { createStoryActionRunner } from '../src/story-action-runner.js';
 import { createStoryRuntime } from '../src/story-runtime.js';
 
@@ -26,6 +27,87 @@ test('neutral generic app imports no Route 61-2 runtime modules or data', async 
   assert.match(source, /startApplication/);
   assert.match(source, /INSTALLED_CAPABILITY_REGISTRY/);
   assert.match(source, /startEditorPreviewHost/);
+  assert.match(source, /cooperativeGestures:\s*cooperativeScroll/);
+});
+
+test('generic application resolves one bounded output mode before bootstrap', () => {
+  const documentRef = { getElementById: () => null };
+  const optionsFor = (search) => createGenericApplicationOptions({
+    documentRef,
+    windowRef: {
+      location: { search },
+      matchMedia: () => ({ matches: false })
+    }
+  });
+
+  assert.deepEqual(
+    ['?outputMode=scroll', '?outputMode=presentation', '?editorPreview=1', '?outputMode=unknown']
+      .map((search) => {
+        const options = optionsFor(search);
+        return [options.outputMode, options.cooperativeScroll];
+      }),
+    [
+      ['scroll', true],
+      ['presentation', false],
+      ['explore', false],
+      ['explore', false]
+    ]
+  );
+});
+
+test('generic production map requests native compact attribution and preserves source credits', async () => {
+  const originalFetch = globalThis.fetch;
+  let mapOptions;
+  let loadListener;
+  let nativeToggleClicks = 0;
+  globalThis.fetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        version: 8,
+        sources: {
+          openmaptiles: {
+            type: 'vector',
+            url: 'https://tiles.openfreemap.org/planet',
+            attribution: 'OpenFreeMap © OpenMapTiles Data from OpenStreetMap'
+          }
+        },
+        layers: []
+      };
+    }
+  });
+  try {
+    class MapLibreMap {
+      constructor(options) { mapOptions = options; }
+      loaded() { return false; }
+      once(type, listener) { if (type === 'load') loadListener = listener; }
+      getContainer() {
+        return {
+          querySelector(selector) {
+            if (selector !== '.maplibregl-ctrl-attrib.maplibregl-compact.maplibregl-compact-show') return null;
+            return { querySelector: () => ({ click() { nativeToggleClicks += 1; } }) };
+          }
+        };
+      }
+    }
+    const options = createGenericApplicationOptions({
+      documentRef: { getElementById: () => null },
+      windowRef: { location: { search: '' }, matchMedia: () => ({ matches: false }) }
+    });
+    await options.createMap({
+      project: { map: { initialView: { center: [0, 0], zoom: 2, pitch: 0, bearing: 0 } } },
+      maplibregl: { Map: MapLibreMap }
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(mapOptions.attributionControl, { compact: true });
+  assert.notEqual(mapOptions.attributionControl, false);
+  assert.equal(mapOptions.style.sources.openmaptiles.attribution, 'OpenFreeMap © OpenMapTiles Data from OpenStreetMap');
+  assert.equal(typeof loadListener, 'function');
+  loadListener();
+  assert.equal(nativeToggleClicks, 1, 'the native compact control starts collapsed after its first load');
 });
 
 test('generic Story experience activates one existing runtime and supports direct Scene selection', () => {

@@ -138,8 +138,22 @@ try {
     ], { label: 'Rich browser package' });
   })()`);
   await waitFor(client, `document.getElementById('production-preview').contentDocument?.querySelectorAll('.maplibregl-canvas').length === 1`, 'rich package');
-  for (const label of ['Add Metric', 'Add Chart', 'Add Table', 'Add Image', 'Add Legend']) {
-    await evaluate(client, `([...document.querySelectorAll('button')].find((button) => button.textContent === ${JSON.stringify(label)})).click()`);
+  for (const label of ['Metric', 'Chart', 'Table', 'Image', 'Legend']) {
+    const confirmation = {
+      Chart: 'studio-insert-chart-add', Table: 'studio-insert-table-add', Image: 'studio-insert-image-add'
+    }[label];
+    await evaluate(client, `(() => {
+      const insert = [...document.querySelectorAll('button')].find((button) => button.textContent === ${JSON.stringify(label)});
+      if (!insert) throw new Error('Unavailable rich Insert action: ' + ${JSON.stringify(label)});
+      insert.click();
+      const confirmation = ${JSON.stringify(confirmation)};
+      if (confirmation) {
+        const add = document.getElementById(confirmation);
+        if (!add) throw new Error('Unavailable rich Insert confirmation: ' + confirmation);
+        add.click();
+      }
+      return true;
+    })()`);
   }
   const rich = await waitFor(client, `(() => {
     const child = document.getElementById('production-preview').contentDocument;

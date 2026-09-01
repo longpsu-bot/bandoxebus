@@ -26,6 +26,56 @@ import {
 
 const decoder = new TextDecoder();
 
+const CHART_TYPES = Object.freeze(['bar', 'line', 'area']);
+
+function chartCompatible(table) {
+  return Boolean(
+    table?.columns?.some(({ type }) => ['text', 'date', 'integer'].includes(type))
+    && table.columns.some(({ type }) => ['integer', 'number'].includes(type))
+  );
+}
+
+export function planStudioInsert(kind, catalogs = {}) {
+  if (kind === 'metric') {
+    const options = catalogs.metrics ?? [];
+    if (!options.length) return {
+      status: 'needs-resource', kind, title: 'Add metric',
+      message: 'No metrics in this project yet.', actionLabel: 'Create metric'
+    };
+    if (options.length === 1) return { status: 'ready', kind, selection: { metricId: options[0].id } };
+    return { status: 'choose', kind, title: 'Add metric', fieldLabel: 'Metric', options };
+  }
+  if (kind === 'chart') {
+    const tables = catalogs.tables ?? [];
+    const options = tables.filter(chartCompatible);
+    if (!options.length) return {
+      status: 'needs-resource', kind, title: 'Add chart',
+      message: tables.length
+        ? 'No compatible table data in this project yet.'
+        : 'No table data in this project yet.',
+      actionLabel: 'Add / Import data'
+    };
+    return { status: 'choose', kind, title: 'Add chart', fieldLabel: 'Data', options, chartTypes: [...CHART_TYPES] };
+  }
+  if (kind === 'table') {
+    const options = catalogs.tables ?? [];
+    if (!options.length) return {
+      status: 'needs-resource', kind, title: 'Add table',
+      message: 'No table data in this project yet.', actionLabel: 'Add / Import data'
+    };
+    return { status: 'choose', kind, title: 'Add table', fieldLabel: 'Data', options };
+  }
+  if (kind === 'image') {
+    const options = catalogs.assets ?? [];
+    if (!options.length) return {
+      status: 'needs-resource', kind, title: 'Add image',
+      message: 'No images in this project yet.', actionLabel: 'Import image'
+    };
+    return { status: 'choose', kind, title: 'Add image', fieldLabel: 'Image', options };
+  }
+  throw new TypeError(`Unsupported Studio insert kind: ${kind}.`);
+}
+
 export async function savePackageChanges({
   adapter,
   packageStore,
@@ -53,6 +103,35 @@ export async function exportPackageZip({ packageStore, validation }) {
   return createZipStorageAdapter().export(packageStore);
 }
 
+export function createOutputPreviewLaunch(validation, outputMode) {
+  if (!['scroll', 'presentation'].includes(outputMode)) {
+    throw new TypeError(`Unsupported output preview mode: ${outputMode}.`);
+  }
+  if (!validation?.lastValid?.snapshot) {
+    throw new TypeError('Output preview is unavailable because there is no valid revision.');
+  }
+  const usingPreviousValidRevision = validation.status === 'invalid';
+  const label = outputMode === 'scroll' ? 'Preview Story' : 'Present';
+  const status = usingPreviousValidRevision
+    ? `${label} using previous valid revision ${validation.lastValid.revision}`
+    : `${label} revision ${validation.lastValid.revision}`;
+  return Object.freeze({
+    lastValid: validation.lastValid,
+    outputMode,
+    usingPreviousValidRevision,
+    status
+  });
+}
+
+export function resolveProblemsPresentation({ status, diagnostics = [], lastValid = null } = {}) {
+  const count = diagnostics.length;
+  const validity = status === 'validating' ? 'Validating' : status === 'invalid' ? 'Invalid' : 'Valid';
+  const previewWarning = status === 'invalid' && lastValid
+    ? `Previewing previous valid version · Current edits contain ${count} ${count === 1 ? 'problem' : 'problems'}`
+    : '';
+  return Object.freeze({ count, open: status === 'invalid' && count > 0, validity, previewWarning });
+}
+
 export function createEditor({
   documentRef = globalThis.document,
   windowRef = globalThis.window
@@ -61,6 +140,7 @@ export function createEditor({
     newProject: documentRef.getElementById('new-project'),
     openFolder: documentRef.getElementById('open-folder'),
     importZip: documentRef.getElementById('import-zip'),
+    projectMenu: documentRef.getElementById('project-menu'),
     templateChooser: documentRef.getElementById('project-template-chooser'),
     chooseBlank: documentRef.getElementById('choose-template-blank'),
     chooseRouteProposal: documentRef.getElementById('choose-template-route-proposal'),
@@ -72,8 +152,14 @@ export function createEditor({
     save: documentRef.getElementById('save-project'),
     exportZip: documentRef.getElementById('export-project-zip'),
     validate: documentRef.getElementById('validate-project'),
+    previewStory: documentRef.getElementById('preview-story'),
+    presentStory: documentRef.getElementById('present-story'),
     previewStatus: documentRef.getElementById('preview-status'),
     dirtyStatus: documentRef.getElementById('dirty-status'),
+    validityStatus: documentRef.getElementById('validity-status'),
+    problemsPanel: documentRef.getElementById('problems-panel'),
+    problemsCount: documentRef.getElementById('problems-count'),
+    previewWarning: documentRef.getElementById('preview-warning'),
     validationStatus: documentRef.getElementById('validation-status'),
     validationErrors: documentRef.getElementById('validation-errors'),
     locale: documentRef.getElementById('project-locale'),
@@ -105,6 +191,17 @@ export function createEditor({
   let blockSelection = 0;
   let actionSelection = '';
   let viewportPreset = 'desktop';
+  let outputPreviewStatus = null;
+  let pendingStudioInsert = null;
+
+  function launchOutputPreview(outputMode) {
+    const launch = createOutputPreviewLaunch(validation, outputMode);
+    outputPreviewStatus = launch.status;
+    bridge.start(launch.lastValid, { outputMode: launch.outputMode });
+    elements.previewStatus.textContent = launch.status;
+    elements.paused.hidden = !launch.usingPreviousValidRevision;
+    return launch;
+  }
 
   function primaryStory() {
     const manifest = draftStore?.get('project.json');
@@ -118,12 +215,16 @@ export function createEditor({
     const selectedDescriptors = INSTALLED_CAPABILITY_REGISTRY.catalog().filter(({ id }) => selectedIds.has(id));
     const tables = Object.entries(manifest.datasets)
       .filter(([, descriptor]) => descriptor.type === 'table-json')
-      .map(([id, descriptor]) => ({ id, columns: draftStore.get(descriptor.src.replace(/^\.\//, ''))?.columns ?? [] }));
+      .map(([id, descriptor]) => ({
+        id,
+        label: descriptor.label ?? id,
+        columns: draftStore.get(descriptor.src.replace(/^\.\//, ''))?.columns ?? []
+      }));
     const metricFile = manifest.metrics ? draftStore.get(manifest.metrics.src.replace(/^\.\//, '')) : null;
     const catalogs = {
       tables,
       datasets: Object.entries(manifest.datasets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
-      assets: Object.keys(manifest.assets).map((id) => ({ id })),
+      assets: Object.entries(manifest.assets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
       metrics: [
         ...Object.entries(metricFile?.metrics ?? {}).map(([id, metric]) => ({ id, label: metric.label, format: metric.format })),
         ...selectedDescriptors.flatMap(({ metrics }) => metrics)
@@ -139,6 +240,75 @@ export function createEditor({
       'map.set-emphasis': datasetTargets
     };
     return { catalogs, selectedDescriptors };
+  }
+
+  function studioInsertSelection(kind, id, chartType = 'bar') {
+    if (kind === 'metric') return { metricId: id };
+    if (kind === 'chart') return { datasetId: id, chartType };
+    if (kind === 'table') return { datasetId: id };
+    if (kind === 'image') return { assetId: id };
+    throw new TypeError(`Unsupported Studio insert kind: ${kind}.`);
+  }
+
+  function completePendingStudioInsert(resourceId) {
+    if (!pendingStudioInsert) return false;
+    const { kind, insert } = pendingStudioInsert;
+    const catalogs = productionContentCatalogs(primaryStory().manifest).catalogs;
+    const options = kind === 'metric' ? catalogs.metrics
+      : kind === 'image' ? catalogs.assets : catalogs.tables;
+    const selected = options.find(({ id }) => id === resourceId);
+    if (!selected || (kind === 'chart' && !chartCompatible(selected))) {
+      const status = elements.inspector.querySelector?.('.authoring-status');
+      if (status) status.textContent = kind === 'chart'
+        ? 'This table needs a categorical or date column and a numeric column before it can be charted.'
+        : 'The new resource is not production-valid yet.';
+      return false;
+    }
+    pendingStudioInsert = null;
+    insert(studioInsertSelection(kind, resourceId), catalogs);
+    return true;
+  }
+
+  function cancelStudioInsert() {
+    pendingStudioInsert = null;
+    renderStudioWorkspace();
+  }
+
+  function renderStudioInsertRequest(kind, insert) {
+    const catalogs = productionContentCatalogs(primaryStory().manifest).catalogs;
+    const plan = planStudioInsert(kind, catalogs);
+    if (plan.status === 'ready') {
+      insert(plan.selection, catalogs);
+      return;
+    }
+
+    const { panel, status } = authoringPanel(plan.title);
+    status.textContent = plan.message ?? 'Choose the production resource to use.';
+    if (plan.status === 'needs-resource') {
+      panel.append(button(plan.actionLabel, `studio-insert-${kind}-resource`, () => {
+        pendingStudioInsert = { kind, insert };
+        if (kind === 'metric') renderMetricPanel();
+        else if (kind === 'image') renderAssetPanel();
+        else renderDatasetPanel();
+      }));
+      panel.append(button('Cancel', `studio-insert-${kind}-cancel`, cancelStudioInsert));
+      return;
+    }
+
+    const resource = labeled(panel, plan.fieldLabel, selectInput(`studio-insert-${kind}-resource`, [
+      ...plan.options.map(({ id, label }) => [id, label ?? id])
+    ]));
+    let chartType = null;
+    if (kind === 'chart') {
+      chartType = labeled(panel, 'Chart type', selectInput('studio-insert-chart-type', [
+        ['bar', 'Bar'], ['line', 'Line'], ['area', 'Area']
+      ]));
+    }
+    panel.append(button('Cancel', `studio-insert-${kind}-cancel`, cancelStudioInsert));
+    panel.append(button('Add', `studio-insert-${kind}-add`, () => {
+      insert(studioInsertSelection(kind, resource.value, chartType?.value), catalogs);
+      pendingStudioInsert = null;
+    }));
   }
 
   function renderStudioWorkspace() {
@@ -164,6 +334,11 @@ export function createEditor({
         bridge.command('activate-scene', { index, animate: false });
         renderStudioWorkspace();
       },
+      onRenderLayerProperties(datasetId, inspector) {
+        const group = node('section', undefined, { className: 'studio-property-group studio-layer-properties' });
+        renderDatasetDescriptorControls(group, datasetId);
+        inspector.append(group);
+      },
       onStoryCommand(name, payload) {
         const next = applyStudioStoryCommand(current.story, name, payload);
         if (name === 'add-scene') stateSelection = next.states.length - 1;
@@ -174,7 +349,9 @@ export function createEditor({
         renderDirty();
         renderStudioWorkspace();
       },
-      onPreviewCommand(name, payload) { bridge.command(name, payload); }
+      onRequestInsert(kind, insert) { renderStudioInsertRequest(kind, insert); },
+      onPreviewCommand(name, payload) { bridge.command(name, payload); },
+      onOutputPreview: launchOutputPreview
     });
     return true;
   }
@@ -436,6 +613,31 @@ export function createEditor({
     };
   }
 
+  function renderDatasetDescriptorControls(container, datasetId, { manifest = draftStore.get('project.json'), ui = inspect('dataset') } = {}) {
+    const descriptor = manifest.datasets[datasetId];
+    const entity = ui.entity(datasetId);
+    container.append(node('h3', descriptor.label ?? datasetId));
+    scalarControl(container, 'Label', 'author-dataset-edit-label', entity.control('label').value, (value) => entity.control('label').set(value));
+    if (entity.hasControl('required')) scalarControl(container, 'Required', 'author-dataset-edit-required', entity.control('required').value, (value) => entity.control('required').set(value), { type: 'checkbox' });
+    const roles = entity.roleOptions();
+    if (roles.length) scalarControl(container, 'Compatible role', 'author-dataset-edit-role', entity.control('role').value, (value) => entity.control('role').set(value), { options: [{ value: '', label: 'No role' }, ...roles.map((value) => ({ value, label: value }))] });
+    if (descriptor.type === 'geojson') {
+      for (const field of ['type', 'color', 'width', 'opacity', 'radius', 'strokeColor', 'strokeWidth', 'outlineColor', 'outlineWidth', 'lineStyle']) {
+        if (!entity.hasControl(`render.${field}`)) continue;
+        const control = entity.control(`render.${field}`);
+        const label = field === 'type' ? 'Render as' : `Render ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`;
+        scalarControl(container, label, `author-dataset-render-${field}`, control.value, (value) => entity.control(`render.${field}`).set(value), { type: control.inputType });
+      }
+      const fields = entity.labelFields();
+      if (fields.length) {
+        const labelValue = descriptor.render?.label ?? {};
+        scalarControl(container, 'Feature label field', 'author-dataset-label-field', labelValue.field, (value) => entity.control('render.label').set({ ...labelValue, field: value }), { options: fields.map((value) => ({ value, label: value })) });
+        scalarControl(container, 'Feature label placement', 'author-dataset-label-placement', labelValue.placement ?? 'auto', (value) => entity.control('render.label').set({ ...labelValue, placement: value }), { options: entity.labelPlacements().map((value) => ({ value, label: value })) });
+      }
+    }
+    return { descriptor, entity };
+  }
+
   function renderDatasetPanel() {
     const { panel, status } = authoringPanel('Datasets');
     const manifest = draftStore.get('project.json');
@@ -449,26 +651,8 @@ export function createEditor({
     function renderExisting() {
       inspectorPanel.replaceChildren();
       if (!existing.value) return;
-      const descriptor = manifest.datasets[existing.value];
-      const entity = ui.entity(existing.value);
-      inspectorPanel.append(node('h4', descriptor.label ?? existing.value));
-      scalarControl(inspectorPanel, 'Label', 'author-dataset-edit-label', entity.control('label').value, (value) => entity.control('label').set(value));
-      if (entity.hasControl('required')) scalarControl(inspectorPanel, 'Required', 'author-dataset-edit-required', entity.control('required').value, (value) => entity.control('required').set(value), { type: 'checkbox' });
-      const roles = entity.roleOptions();
-      if (roles.length) scalarControl(inspectorPanel, 'Compatible role', 'author-dataset-edit-role', entity.control('role').value, (value) => entity.control('role').set(value), { options: [{ value: '', label: 'No role' }, ...roles.map((value) => ({ value, label: value }))] });
-      if (descriptor.type === 'geojson') {
-        for (const field of ['type', 'color', 'width', 'opacity', 'radius', 'strokeColor', 'strokeWidth', 'outlineColor', 'outlineWidth', 'lineStyle']) {
-          if (!entity.hasControl(`render.${field}`)) continue;
-          const control = entity.control(`render.${field}`);
-          scalarControl(inspectorPanel, `Renderer ${field}`, `author-dataset-render-${field}`, control.value, (value) => control.set(value), { type: control.inputType });
-        }
-        const fields = entity.labelFields();
-        if (fields.length) {
-          const labelValue = descriptor.render?.label ?? {};
-          scalarControl(inspectorPanel, 'Feature label field', 'author-dataset-label-field', labelValue.field, (value) => entity.control('render.label').set({ ...labelValue, field: value }), { options: fields.map((value) => ({ value, label: value })) });
-          scalarControl(inspectorPanel, 'Feature label placement', 'author-dataset-label-placement', labelValue.placement ?? 'auto', (value) => entity.control('render.label').set({ ...labelValue, placement: value }), { options: entity.labelPlacements().map((value) => ({ value, label: value })) });
-        }
-      } else {
+      const { descriptor, entity } = renderDatasetDescriptorControls(inspectorPanel, existing.value, { manifest, ui });
+      if (descriptor.type !== 'geojson') {
         const table = draftStore.get(descriptor.src.replace(/^\.\//, ''));
         const tableSection = node('section', undefined, { className: 'table-editor', id: 'author-table-editor' });
         tableSection.append(node('h4', 'Normalized table'));
@@ -528,6 +712,7 @@ export function createEditor({
           const fields = entity.labelFields();
           if (fields.length) entity.control('render.label').set({ field: fields[0], placement: 'auto' });
         }
+        if (type.value === 'table' && completePendingStudioInsert(id.value)) return;
         refreshPanel(renderDatasetPanel, `Added dataset ${id.value}.`);
       } catch (error) { status.textContent = error.message; }
     });
@@ -575,6 +760,7 @@ export function createEditor({
         ui.command('add-image', id.value, {
           bytes: new Uint8Array(await selected.arrayBuffer()), mediaType: selected.type
         });
+        if (completePendingStudioInsert(id.value)) return;
         refreshPanel(renderAssetPanel, `Added image ${id.value}.`);
       } catch (error) { status.textContent = error.message; }
     });
@@ -614,6 +800,7 @@ export function createEditor({
         const descriptor = { label: label.value, value: scalar, format: { type: format.value } };
         if (format.value === 'currency') descriptor.format.currency = 'USD';
         ui.command('add-static', id.value, descriptor);
+        if (completePendingStudioInsert(id.value)) return;
         refreshPanel(renderMetricPanel, `Added metric ${id.value}.`);
       } catch (error) { status.textContent = error.message; }
     });
@@ -1028,7 +1215,7 @@ export function createEditor({
         setViewport(viewportPreset);
       } else if (event.type === 'editor-preview:loaded') {
         elements.iframe.dataset.previewRevision = String(event.revision);
-        elements.previewStatus.textContent = `Preview revision ${event.revision}`;
+        elements.previewStatus.textContent = outputPreviewStatus ?? 'Explore preview ready';
         if (primaryStory().story?.schemaVersion === '1.2') {
           bridge.command('activate-scene', { index: stateSelection, animate: false });
           bridge.command('authoring-mode', { mode: getStudioAuthoringMode() });
@@ -1039,6 +1226,8 @@ export function createEditor({
       } else if (event.type === 'editor-preview:camera') {
         previewTelemetry = structuredClone(event.payload);
         if (!renderStudioWorkspace() && activeSection === 'project') renderProjectInspector();
+      } else if (event.type === 'editor-preview:locate-result' && event.payload.status !== 'located') {
+        elements.previewStatus.textContent = event.payload.message;
       }
     }
   });
@@ -1046,7 +1235,7 @@ export function createEditor({
   elements.iframe.src = elements.iframe.dataset.previewSrc;
 
   function renderDirty() {
-    elements.dirtyStatus.textContent = packageStore?.dirty ? 'Unsaved changes' : 'No unsaved changes';
+    elements.dirtyStatus.textContent = packageStore?.dirty ? 'Unsaved' : 'Saved';
   }
 
   function buildNavigationIndex() {
@@ -1176,6 +1365,16 @@ export function createEditor({
     navigationIndex = buildNavigationIndex();
     renderDirty();
     renderDiagnostics(state.diagnostics);
+    const presentation = resolveProblemsPresentation(state);
+    if (elements.validityStatus) elements.validityStatus.textContent = presentation.validity;
+    if (elements.problemsCount) elements.problemsCount.textContent = String(presentation.count);
+    if (elements.problemsPanel) elements.problemsPanel.open = presentation.open;
+    if (elements.previewWarning) {
+      elements.previewWarning.textContent = presentation.previewWarning;
+      elements.previewWarning.hidden = !presentation.previewWarning;
+    }
+    elements.previewStory.disabled = !state.lastValid;
+    elements.presentStory.disabled = !state.lastValid;
     if (state.status === 'validating') {
       elements.validationStatus.textContent = 'Validating through the production loader…';
       return;
@@ -1195,6 +1394,7 @@ export function createEditor({
       elements.paused.hidden = true;
       if (state.lastValid.revision !== lastSentRevision) {
         lastSentRevision = state.lastValid.revision;
+        outputPreviewStatus = null;
         bridge.start(state.lastValid);
       }
     }
@@ -1206,7 +1406,7 @@ export function createEditor({
     elements.validate.disabled = false;
     elements.exportZip.disabled = !manifest;
     elements.save.disabled = !storageAdapter?.capabilities?.writeInPlace;
-    elements.save.textContent = storageAdapter?.capabilities?.writeInPlace ? 'Save' : 'Use Export Project ZIP';
+    elements.save.textContent = 'Save';
     if (!manifest) {
       primaryStoryPath = null;
       elements.heading.disabled = true;
@@ -1254,12 +1454,14 @@ export function createEditor({
     actionPhaseSelection = 'enter';
     blockSelection = 0;
     actionSelection = '';
+    outputPreviewStatus = null;
     if (storageAdapter && !storageAdapter.capabilities && capabilities) {
       storageAdapter = { ...storageAdapter, capabilities };
     }
     initializeDraftControls();
     navigationIndex = buildNavigationIndex();
     renderDirty();
+    if (elements.projectMenu) elements.projectMenu.open = false;
     return validation.validateNow();
   }
 
@@ -1375,6 +1577,14 @@ export function createEditor({
     }).catch((error) => { elements.validationStatus.textContent = error.message; });
   });
   elements.validate.addEventListener('click', () => { void validation?.validateNow(); });
+  elements.previewStory.addEventListener('click', () => {
+    try { launchOutputPreview('scroll'); }
+    catch (error) { elements.previewStatus.textContent = error.message; }
+  });
+  elements.presentStory.addEventListener('click', () => {
+    try { launchOutputPreview('presentation'); }
+    catch (error) { elements.previewStatus.textContent = error.message; }
+  });
   elements.heading.addEventListener('input', () => {
     if (!draftStore || !primaryStoryPath) return;
     draftStore.mutate(primaryStoryPath, (story) => {

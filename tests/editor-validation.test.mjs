@@ -4,7 +4,10 @@ import assert from 'node:assert/strict';
 import { createDraftStore } from '../editor/core/draft-store.js';
 import { createNewProjectEntries, createPackageStore } from '../editor/core/package-store.js';
 import { createValidationCoordinator, toProductionDiagnostic } from '../editor/core/validation.js';
+import * as editorModule from '../editor/editor.js';
 import { ProjectLoadError } from '../src/project/project-error.js';
+
+const { createOutputPreviewLaunch } = editorModule;
 
 function deferred() {
   let resolve;
@@ -137,5 +140,62 @@ test('production diagnostics retain stable fields without parsing message text',
     message: 'Fixture failed.',
     packagePath: 'data/route.geojson',
     revision: 7
+  });
+});
+
+test('valid unsaved output preview launches the validated production snapshot without saving', () => {
+  const lastValid = {
+    revision: 4,
+    snapshot: { revision: 4, entries: [{ path: 'project.json', bytes: new Uint8Array(), mediaType: 'application/json', kind: 'manifest' }] }
+  };
+  let saves = 0;
+  const launch = createOutputPreviewLaunch({ status: 'valid', lastValid }, 'scroll', {
+    save() { saves += 1; }
+  });
+
+  assert.equal(launch.lastValid, lastValid);
+  assert.equal(launch.outputMode, 'scroll');
+  assert.equal(launch.usingPreviousValidRevision, false);
+  assert.match(launch.status, /Preview Story revision 4/);
+  assert.equal(saves, 0);
+});
+
+test('invalid draft output preview uses the previous valid revision with explicit status', () => {
+  const lastValid = { revision: 7, snapshot: { revision: 7, entries: [] } };
+  const launch = createOutputPreviewLaunch({ status: 'invalid', lastValid }, 'presentation');
+
+  assert.equal(launch.lastValid, lastValid);
+  assert.equal(launch.outputMode, 'presentation');
+  assert.equal(launch.usingPreviousValidRevision, true);
+  assert.match(launch.status, /Present using previous valid revision 7/);
+  assert.throws(
+    () => createOutputPreviewLaunch({ status: 'invalid', lastValid: null }, 'scroll'),
+    /no valid revision/i
+  );
+});
+
+test('Problems presentation collapses valid diagnostics and exposes invalid diagnostics with previous-valid warning', () => {
+  assert.equal(typeof editorModule.resolveProblemsPresentation, 'function');
+  assert.deepEqual(editorModule.resolveProblemsPresentation({ status: 'valid', diagnostics: [], lastValid: { revision: 4 } }), {
+    count: 0,
+    open: false,
+    validity: 'Valid',
+    previewWarning: ''
+  });
+  assert.deepEqual(editorModule.resolveProblemsPresentation({
+    status: 'invalid',
+    diagnostics: [{ code: 'A' }, { code: 'B' }],
+    lastValid: { revision: 4 }
+  }), {
+    count: 2,
+    open: true,
+    validity: 'Invalid',
+    previewWarning: 'Previewing previous valid version · Current edits contain 2 problems'
+  });
+  assert.deepEqual(editorModule.resolveProblemsPresentation({ status: 'validating', diagnostics: [], lastValid: null }), {
+    count: 0,
+    open: false,
+    validity: 'Validating',
+    previewWarning: ''
   });
 });

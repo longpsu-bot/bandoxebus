@@ -109,7 +109,7 @@ const PRELOAD = String.raw`(() => {
   const nativeRaf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = (callback) => {
     const stack = new Error().stack || '';
-    const busCallback = callback?.name === 'animate' && stack.includes('/src/app.js');
+    const busCallback = callback?.name === 'tick' && stack.includes('/src/route-61-2/runtime-adapter.js');
     perf.rafScheduled += 1;
     if (busCallback) perf.busRafScheduled += 1;
     return nativeRaf((timestamp) => {
@@ -365,14 +365,14 @@ async function waitForStoryShellSettled(client, expectedIndex = 4) {
     let lastScrollY = window.scrollY;
     let lastMutationTotal = Object.values(perf.sourceSetData).reduce((sum, count) => sum + count, 0);
     while (performance.now() - started < 45000) {
-      const activeStep = document.querySelector('.story-step[aria-current="step"]');
-      const activeIndex = Number(activeStep?.dataset.storyStateIndex);
+      const activeStep = document.querySelector('.scroll-story__step[aria-current="step"]');
+      const activeIndex = Number(activeStep?.dataset.sceneIndex);
       const mutationTotal = Object.values(perf.sourceSetData).reduce((sum, count) => sum + count, 0);
       const scrollStable = Math.abs(window.scrollY - lastScrollY) < 0.5;
       const mutationsStable = mutationTotal === lastMutationTotal;
-      const ready = document.body.classList.contains('is-story-shell')
+      const ready = document.getElementById('runtime-navigation')?.classList.contains('scroll-story-navigation')
         && activeIndex === expectedIndex
-        && activeStep?.dataset.storyStateId === 'service-area'
+        && activeStep?.dataset.sceneId === 'service-area'
         && !map.isMoving()
         && scrollStable
         && mutationsStable
@@ -384,7 +384,7 @@ async function waitForStoryShellSettled(client, expectedIndex = 4) {
         if (performance.now() - stableSince >= 1500) {
           return {
             activeIndex,
-            activeStateId: activeStep.dataset.storyStateId,
+            activeStateId: activeStep.dataset.sceneId,
             cameraMoving: map.isMoving(),
             scrollY: window.scrollY,
             urbanState: document.getElementById('map').dataset.urbanContextState,
@@ -412,7 +412,7 @@ async function waitForStoryNavigation(client, expectedIndex) {
     let stableSince = 0;
     let lastScrollY = window.scrollY;
     while (performance.now() - started < 15000) {
-      const activeIndex = Number(document.querySelector('.story-step[aria-current="step"]')?.dataset.storyStateIndex);
+      const activeIndex = Number(document.querySelector('.scroll-story__step[aria-current="step"]')?.dataset.sceneIndex);
       const scrollStable = Math.abs(window.scrollY - lastScrollY) < 0.5;
       if (activeIndex === expectedIndex && !map.isMoving() && scrollStable) {
         if (!stableSince) stableSince = performance.now();
@@ -428,15 +428,17 @@ async function waitForStoryNavigation(client, expectedIndex) {
 }
 
 async function enterStoryShellServiceArea(client) {
+  await waitForStoryNavigation(client, 0);
   await evaluate(client, `(() => {
-    if (!document.body.classList.contains('is-story-shell')) {
-      document.getElementById('presentation-open').click();
-    }
+    const simulation = [...document.querySelectorAll('#capability-controls input[type="checkbox"]')]
+      .find((input) => input.parentElement?.textContent.trim() === 'Simulation');
+    if (!simulation) throw new Error('Production Simulation control is unavailable');
+    if (!simulation.checked) simulation.click();
     return true;
   })()`);
-  await waitForStoryNavigation(client, 0);
   for (let index = 1; index <= 4; index += 1) {
-    await evaluate(client, `document.getElementById('story-next').click()`);
+    await evaluate(client, `document.querySelector('.scroll-story__step[data-scene-index="${index}"]')
+      .scrollIntoView({ behavior: 'instant', block: 'center' })`);
     await waitForStoryNavigation(client, index);
   }
   return waitForStoryShellSettled(client);
@@ -447,8 +449,8 @@ async function storyShellSetup(client, width, height) {
   const settled = await enterStoryShellServiceArea(client);
   const setup = await evaluate(client, `(() => ({
     viewport: [innerWidth, innerHeight],
-    storyShellActive: document.body.classList.contains('is-story-shell'),
-    activeStateId: document.querySelector('.story-step[aria-current="step"]')?.dataset.storyStateId,
+    storyShellActive: document.getElementById('runtime-navigation')?.classList.contains('scroll-story-navigation'),
+    activeStateId: document.querySelector('.scroll-story__step[aria-current="step"]')?.dataset.sceneId,
     mapInstances: window.__routePerf.mapInstances,
     provider: document.getElementById('map').dataset.urbanContextProvider,
     urbanState: document.getElementById('map').dataset.urbanContextState,
@@ -456,7 +458,7 @@ async function storyShellSetup(client, width, height) {
     overtureDataState: document.getElementById('map').dataset.urbanOvertureDataState,
     busMarkers: document.querySelectorAll('.bus-marker').length,
     visibleBusMarkers: [...document.querySelectorAll('.bus-marker')]
-      .filter((element) => getComputedStyle(element).display !== 'none').length,
+      .filter((element) => !element.hidden && getComputedStyle(element).display !== 'none').length,
     console: window.__routePerf.console
   }))()`);
   return { ...setup, settled };

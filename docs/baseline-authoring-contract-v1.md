@@ -27,3 +27,24 @@ Story 1.0 compatibility remains supported and Route 61-2 stays byte-identical St
 Compatible baseline additions require an explicit additive minor revision. Breaking changes require a new major contract. Capability-specific evolution remains allowed behind the trusted capability registry and does not mean the baseline is closed to future capabilities.
 
 Certification authority: `review/well-rounded-map-story-template-v1/REPORT.md`, based on main `b504d8008550c030c2b72e2a1bc324d2a1455f7a` and post-merge CI run `33152413569`.
+
+## Certified additive Map Story Studio V1.1 desktop layer
+
+Map Story Studio V1.1 adds a certified Story Schema 1.2 authoring and output layer without rewriting the V1 history above. Story 1.0 and 1.1 remain compatible, Route 61-2 remains the byte-identical trusted capability/reference project, and a generic Blank project loads without Route modules.
+
+The V1.1 desktop contract is:
+
+- a Scene is an ordered production Story state;
+- Story 1.2 uses production `freeform-16x9` composition envelopes, not a GUI-only schema;
+- every Scene owns an explicit production camera, interaction policy, transition, and complete declarative layer-visibility snapshot;
+- camera changes remain working preview state until the author explicitly captures them into the Scene;
+- the shared Scene-state controller applies layer baselines, camera policy, and interaction policy around the existing Story runtime lifecycle;
+- one shared compositor renders the same production content blocks for Explore, Scroll Story, and Presentation;
+- Scroll Story and Presentation are output/navigation adapters over the shared production Story, runtime, Scene controller, compositor, and one active MapLibre map;
+- Presentation fits the map and compositor to the exact same 16:9 rectangle, including centered letterbox/pillarbox geometry;
+- Scroll Story preserves native document scrolling and cooperative map gestures;
+- Folder save/reopen and ZIP export/import round-trip exact Story 1.2 production semantics without selection, guides, handles, history, output mode, or uncaptured camera state;
+- valid unsaved output launches the current validated revision, while an invalid current draft can launch only the explicit previous valid revision; and
+- the one-map principle, neutral generic root, and Story 1.0/1.1 compatibility remain certified.
+
+V1.1 certification authority: `review/map-story-studio-v1-1/REPORT.md`.

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import { createPreviewBridge, PREVIEW_PROTOCOL_VERSION } from '../editor/preview/bridge.js';
+import { createStudioOutputPreviewControls } from '../editor/ui/studio-shell.js';
 import { startEditorPreviewHost } from '../editor/preview/package-resolver.js';
 import { createNewProjectEntries } from '../editor/core/package-store.js';
 import { validateProjectManifest } from '../src/project/project-schema.js';
@@ -327,6 +328,48 @@ test('Story 1.2 authoring commands use exact bounded preview payloads', () => {
   bridge.dispose();
 });
 
+test('output preview mode selection accepts only exact known session modes', () => {
+  const windowRef = fakeWindow();
+  let loadListener;
+  const iframe = {
+    contentWindow: { postMessage() {} },
+    dataset: { previewSrc: '../?editorPreview=1' },
+    src: '../?editorPreview=1',
+    addEventListener(type, listener) { if (type === 'load') loadListener = listener; },
+    removeEventListener() {}
+  };
+  const bridge = createPreviewBridge({ iframe, windowRef, origin: windowRef.location.origin });
+  const lastValid = { revision: 3, snapshot: { revision: 3, entries: [] } };
+
+  bridge.start(lastValid, { outputMode: 'scroll' });
+  assert.equal(iframe.src, '../?editorPreview=1&outputMode=scroll');
+  loadListener();
+  bridge.start(lastValid, { outputMode: 'presentation' });
+  assert.equal(iframe.src, '../?editorPreview=1&outputMode=presentation');
+  assert.throws(() => bridge.start(lastValid, { outputMode: 'unknown' }), TypeError);
+  assert.throws(() => bridge.start(lastValid, { outputMode: 'scroll', command: 'anything' }), /options/i);
+  bridge.dispose();
+});
+
+test('Studio output controls issue only Preview Story and Present mode requests', () => {
+  class Button {
+    constructor() { this.listeners = new Map(); this.textContent = ''; }
+    setAttribute() {}
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    click() { this.listeners.get('click')?.(); }
+  }
+  const calls = [];
+  const controls = createStudioOutputPreviewControls({
+    documentRef: { createElement: () => new Button() },
+    onOutputPreview(mode) { calls.push(mode); }
+  });
+  controls.previewStory.click();
+  controls.present.click();
+  assert.deepEqual(calls, ['scroll', 'presentation']);
+  assert.equal(controls.previewStory.textContent, 'Preview Story');
+  assert.equal(controls.present.textContent, 'Present');
+});
+
 test('preview host routes bounded Story commands only to the active production shell', async () => {
   const calls = [];
   const windowRef = fakeWindow();
@@ -387,7 +430,7 @@ test('Story 1.2 Studio source exposes Layers Canvas Properties Scenes and explic
   }
   assert.match(source, /addProjectLayerToStory12|setSceneLayerVisibility/);
   assert.match(source, /ArrowLeft|ArrowRight/);
-  assert.match(source, /Move Scene Up|Move Scene Down/);
+  assert.match(source, /Move previous|Move next/);
   assert.match(css, /aspect-ratio:\s*16\s*\/\s*9/);
   assert.match(editorSource, /schemaVersion\s*===\s*['"]1\.2['"]/);
 });
@@ -421,6 +464,18 @@ test('static editor shell and production preview mode expose only the PR A spine
   assert.doesNotMatch(appSource, /route-61-2|route-data|route-comparison/);
   assert.match(smokeSource, /project-locale/);
   assert.doesNotMatch(smokeSource, /project-title/);
+});
+
+test('static Studio shell exposes one global output action pair and a collapsed Problems affordance', async () => {
+  const html = await readFile(new URL('../editor/index.html', import.meta.url), 'utf8');
+  assert.equal((html.match(/>Preview Story</g) ?? []).length, 1);
+  assert.equal((html.match(/>Present</g) ?? []).length, 1);
+  assert.match(html, /<details[^>]+id="problems-panel"(?![^>]*\sopen)/);
+  assert.match(html, /id="problems-count"/);
+  assert.match(html, /id="validation-status"/);
+  assert.match(html, /id="validation-errors"/);
+  assert.match(html, /<details[^>]+id="project-menu"/);
+  assert.doesNotMatch(html, /<h2[^>]*>Validation<\/h2>/);
 });
 
 test('empty title remains valid because the GUI uses production validation only', () => {
