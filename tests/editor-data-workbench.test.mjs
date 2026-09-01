@@ -131,7 +131,7 @@ test('Add Data begins with friendly supported formats, accessible drop/picker co
 
   await find(dialog, (node) => node.tagName === 'BUTTON' && node.textContent === 'Cancel').click();
   assert.equal(dialog.open, false);
-  assert.equal(harness.events.includes('dispose'), true);
+  assert.equal(harness.events.includes('dispose'), false, 'blank open/cancel must not create a parser session or worker');
   assert.equal(returnFocus.focused, true);
 });
 

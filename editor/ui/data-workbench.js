@@ -1,4 +1,4 @@
-import { createDataImportSession } from '../import/data-import.js';
+import { createResponsiveDataImportSession } from '../import/data-import.js';
 
 const ACCEPT = '.geojson,.json,.kml,.kmz,.zip,.shp,.dbf,.prj,.cpg,.gpkg,.gpx,.csv,.xlsx';
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -103,7 +103,7 @@ function tablePreview(documentRef, candidate) {
 export function createDataWorkbench({
   documentRef = globalThis.document,
   windowRef = globalThis.window,
-  createSession = createDataImportSession,
+  createSession = createResponsiveDataImportSession,
   onConfirm = () => {}
 } = {}) {
   if (!documentRef?.createElement || !documentRef.body?.append) throw new TypeError('Data Workbench requires a document body.');
@@ -447,7 +447,7 @@ export function createDataWorkbench({
       close();
       options = { mode: 'add', ...nextOptions };
       returnFocus = nextOptions.returnFocus ?? documentRef.activeElement;
-      session = nextOptions.files?.length ? null : createSession({ files: [], replacement: options.existingDataset });
+      session = null;
       renderInitial();
       dialog.showModal();
       if (nextOptions.files?.length) await beginFiles(nextOptions.files);

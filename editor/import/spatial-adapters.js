@@ -164,13 +164,16 @@ export async function openGeoJsonSource(detection, { usedIds = [] } = {}) {
   const id = createImportId(label, usedIds);
   const declaredCrs = detection.value?.crs?.properties?.name;
   const defaultSourceCrs = typeof declaredCrs === 'string' && declaredCrs.trim() ? declaredCrs.trim().toUpperCase() : 'EPSG:4326';
+  const collection = detection.value.type === 'Feature'
+    ? { type: 'FeatureCollection', features: [detection.value] }
+    : detection.value;
   const sourceItems = [{ id, label, defaultSourceCrs }];
   return spatialSource({
     sourceItems,
     async prepare(itemId, { sourceCrs = defaultSourceCrs, proj4 } = {}) {
       checkedItem(sourceItems, itemId);
-      const value = sourceCrs === 'EPSG:4326' ? assertWgs84Coordinates(detection.value)
-        : reprojectFeatureCollection(detection.value, { sourceCrs, proj4 });
+      const value = sourceCrs === 'EPSG:4326' ? assertWgs84Coordinates(collection)
+        : reprojectFeatureCollection(collection, { sourceCrs, proj4 });
       return decorateSpatial(normalizeSpatialSource(value, {
         label, id, sourceFormat: 'GeoJSON', sourceCrs, usedIds
       }), { coordinateState: 'wgs84', reprojected: sourceCrs !== 'EPSG:4326' });

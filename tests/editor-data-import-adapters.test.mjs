@@ -76,6 +76,18 @@ test('detects GeoJSON and the two supported table JSON shapes by content', async
   await assert.rejects(detectDataFiles([file('misleading.json', '{"hello":"world"}')]), /unsupported JSON data shape/i);
 });
 
+test('single GeoJSON Feature is wrapped before production coordinate validation', async () => {
+  const { createDataImportSession } = await import('../editor/import/data-import.js');
+  const session = createDataImportSession({ files: [await fixture('point.geojson')] });
+  const sourceItems = await session.read();
+  session.selectSourceItem(sourceItems[0].id);
+  const candidates = await session.prepare();
+  assert.equal(candidates[0].value.type, 'FeatureCollection');
+  assert.equal(candidates[0].value.features.length, 1);
+  assert.equal(candidates[0].value.features[0].geometry.type, 'Point');
+  session.dispose();
+});
+
 test('detects local XML formats from extension and root element', async () => {
   const { detectDataFiles } = await optionalModule('../editor/import/data-import.js');
   assert.equal((await detectDataFiles([await fixture('mixed.kml')])).format, 'kml');

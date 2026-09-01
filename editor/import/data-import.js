@@ -2,6 +2,7 @@ import { DATA_IMPORT_ZIP_LIMITS, readSafeZipEntries } from '../core/safe-zip.js'
 import { validateTableData } from '../../src/project/resource-schemas.js';
 import { vendorLoaders } from './vendor-loaders.js';
 import { openGeoPackageSource } from './geopackage-adapter.js';
+import { createDataImportWorkerClient, selectDataImportExecution } from './data-import-worker-client.js';
 import { friendlyLabel } from './import-identifiers.js';
 import { openGeoJsonSource, openKmzSource, openShapefileSource, openXmlSpatialSource } from './spatial-adapters.js';
 import { openCsvSource, openJsonTableSource, openXlsxSource } from './table-adapters.js';
@@ -308,4 +309,14 @@ export function createDataImportSession({
       candidates = [];
     }
   });
+}
+
+export function createResponsiveDataImportSession({
+  directFactory = createDataImportSession,
+  workerFactory = createDataImportWorkerClient,
+  ...options
+} = {}) {
+  return selectDataImportExecution(options.files) === 'main-thread-xml'
+    ? directFactory(options)
+    : workerFactory(options);
 }

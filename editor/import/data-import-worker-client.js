@@ -132,6 +132,10 @@ export function createDataImportWorkerClient({
     if (message.type === 'error') {
       status = 'error';
       settle('reject', workerError(message));
+      disposed = true;
+      sourceItems = [];
+      candidates = [];
+      terminate();
       return;
     }
     if (message.type === 'cancel') {
@@ -157,6 +161,10 @@ export function createDataImportWorkerClient({
     if (!pending || disposed) return;
     status = 'error';
     settle('reject', workerError({ code: 'WORKER_FAILURE', message: event?.message || 'Data import worker failed.' }));
+    disposed = true;
+    sourceItems = [];
+    candidates = [];
+    terminate();
   }
 
   worker.addEventListener('message', onMessage);
