@@ -90,6 +90,7 @@ export function createEditor({
     newProject: documentRef.getElementById('new-project'),
     openFolder: documentRef.getElementById('open-folder'),
     importZip: documentRef.getElementById('import-zip'),
+    projectMenu: documentRef.getElementById('project-menu'),
     templateChooser: documentRef.getElementById('project-template-chooser'),
     chooseBlank: documentRef.getElementById('choose-template-blank'),
     chooseRouteProposal: documentRef.getElementById('choose-template-route-proposal'),
@@ -1330,6 +1331,7 @@ export function createEditor({
     initializeDraftControls();
     navigationIndex = buildNavigationIndex();
     renderDirty();
+    if (elements.projectMenu) elements.projectMenu.open = false;
     return validation.validateNow();
   }
 

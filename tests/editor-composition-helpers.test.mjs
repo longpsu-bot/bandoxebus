@@ -47,7 +47,7 @@ test('Studio helper commands reuse pure duplicate/delete/alignment/z-order opera
 test('Studio UI exposes constrained object helpers and no out-of-scope transform tools', async () => {
   const source = await readFile(new URL('../editor/ui/studio-shell.js', import.meta.url), 'utf8');
   for (const label of [
-    'Duplicate', 'Delete', 'Bring Forward', 'Send Backward',
+    'Duplicate', 'Delete', 'Bring forward', 'Send backward',
     'Align Left', 'Align Center', 'Align Right', 'Align Top', 'Align Middle', 'Align Bottom'
   ]) assert.match(source, new RegExp(label.replaceAll(' ', '\\s+')));
   assert.match(source, /shiftKey|selectedOverlayIds/);

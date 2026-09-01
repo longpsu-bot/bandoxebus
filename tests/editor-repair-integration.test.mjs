@@ -122,7 +122,7 @@ function editorHarness() {
     'validate-project', 'preview-story', 'present-story', 'preview-status', 'dirty-status', 'validation-status',
     'validation-errors', 'project-locale', 'story-heading', 'production-preview',
     'preview-frame', 'preview-paused', 'preview-desktop', 'preview-mobile',
-    'ordering-announcements', 'studio-scenes', 'undo-command', 'redo-command'
+    'ordering-announcements', 'studio-scenes', 'undo-command', 'redo-command', 'project-menu'
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, new TestElement('div', id)]));
   const roots = {
@@ -261,7 +261,7 @@ test('opening a replacement package clears Redo even when project and Story IDs 
   const entries = entriesWithHeading();
   await harness.editor.openEntries(entries, { label: 'Project A' });
 
-  findButton(harness.documentRef, 'heading').click();
+  findButton(harness.documentRef, 'Heading · Heading').click();
   const text = harness.documentRef.getElementById('studio-text-content');
   text.value = 'Project A only';
   text.dispatchEvent({ type: 'change' });
@@ -271,7 +271,18 @@ test('opening a replacement package clears Redo even when project and Story IDs 
   await harness.editor.openEntries(entries, { label: 'Project B' });
 
   assert.equal(harness.documentRef.getElementById('redo-command').disabled, true);
-  findButton(harness.documentRef, 'heading').click();
+  findButton(harness.documentRef, 'Heading · Heading').click();
   assert.equal(harness.documentRef.getElementById('studio-text-content').value, 'Heading');
+  harness.editor.dispose();
+});
+
+test('opening a project closes the transient Project menu without serializing menu state', async () => {
+  const harness = editorHarness();
+  const menu = harness.documentRef.getElementById('project-menu');
+  menu.open = true;
+
+  await harness.editor.openEntries(entriesWithHeading(), { label: 'Menu fixture' });
+
+  assert.equal(menu.open, false);
   harness.editor.dispose();
 });
