@@ -4,7 +4,7 @@
 
 **Goal:** Build a browser-local Add/Replace Data Workbench that converts ordinary GIS and tabular files into the existing managed GeoJSON and table-data-v1 contracts without changing production schemas or renderers.
 
-**Architecture:** Explicit lazy format adapters produce transient source items and normalized candidates. Shared identifier, archive, CRS, spatial, and table modules make conversion deterministic; the workbench previews one candidate and calls existing inspector validators/resource writes only after Confirm. Studio continues to render through one production MapLibre instance and reuses the existing Story 1.2 add-project-layer command.
+**Architecture:** Explicit lazy format adapters produce transient source items and normalized candidates. Worker-backed formats use a module worker by default so existing ESM adapters/normalizers are reused directly; CSV alone uses an evidence-backed PapaParse-specific classic fallback. The main thread production-validates a returned candidate before Workbench installation/preview, emits an explicit review-ready marker after a paint opportunity, and retains all Confirm/write authority. Studio continues to render through one production MapLibre instance and reuses the existing Story 1.2 add-project-layer command.
 
 **Tech Stack:** Native browser ESM, Node test runner, native DOM/dialog/SVG, vendored fflate 0.8.3, togeojson 7.1.2, shpjs 6.2.0, proj4 2.22.0, PapaParse 5.7.0, SheetJS CE 0.20.3, GeoPackage JS 4.2.9 + local SQL.js WASM.
 
@@ -14,7 +14,7 @@
 
 - Base is exactly `045a8b4b4ea0680273c1e9b676fa1677d749de3e`; branch is `feat/map-story-studio-v1-2-data-workbench`.
 - No changes to `data/schemas/story-1.2.schema.json`, `data/schemas/project-manifest-v1.schema.json`, `data/stories/route-61-2.story.json`, or `src/map/geojson-renderer.js`.
-- No bundler, `package.json` runtime dependency, runtime CDN, EPSG network lookup, worker subsystem, second MapLibre map, authored SQL/JavaScript/formula execution, parser HTML insertion, image work, or 3D work.
+- No bundler, `package.json` runtime dependency, runtime CDN, EPSG network lookup, generic worker manager/pool/scheduler, second MapLibre map, authored SQL/JavaScript/formula execution, parser HTML insertion, image work, or 3D work.
 - Pending imports remain memory-only until Confirm; Cancel and failed validation write nothing.
 - Stored spatial output is a valid EPSG:4326 FeatureCollection partitioned into point, line, or polygon candidates; never create a new mixed dataset.
 - Source CRS remains visible and locally overridable; EPSG:4326, EPSG:3857, and EPSG:32648 are hard cases.
@@ -23,6 +23,13 @@
 - Direct file ceiling is 512 MiB, loose aggregate 768 MiB / 256 files, XML 128 MiB; import ZIP ceiling is 2,048 entries, 512 MiB per entry, 1 GiB total, and 100:1 expansion after 1 MiB compressed.
 - Develop with focused suites. Run the full `npm test` once at the final executable head.
 - Use no subagents and no parallel agents.
+- Construct `data-import-worker.js` as `new Worker(new URL('./data-import-worker.js', import.meta.url), { type: 'module' })` by default. Only detected CSV may select the documented `data-import-worker-classic.js` fallback for PapaParse 5.7.0; no silent fallback is allowed.
+- Measure the complete post-worker main-thread interval from accepted result-handler entry through production validation, Workbench candidate installation, preview DOM commit, and the next browser paint opportunity. The whole interval must be below 250 ms.
+- Completion is the matching explicit Workbench state/event. No benchmark or test may poll an assumed DOM attribute, status string, class, or element existence.
+
+## Current checkpoint
+
+Tasks 1–5 below are the executed historical plan represented by commits `a48936c` through `6d01052`, followed by production-contract fixes at `27ab337` and the corrected browser stop-gate evidence at `93854a3`. The focused worker design commit `6374a42` was approved with the two amendments now incorporated in the spec and in Tasks 6–10 below. Execution resumes at Task 6; prior checkboxes are retained as historical plan text rather than replay instructions.
 
 ---
 
@@ -40,6 +47,10 @@
 - `editor/import/table-adapters.js` — CSV, table JSON, record-array JSON, and XLSX adapters.
 - `editor/import/geopackage-adapter.js` — feature-table chooser, SRS verification, extraction, and cleanup.
 - `editor/import/data-import.js` — detection, session lifecycle, candidate selection/configuration, and replacement constraints.
+- `editor/import/data-import-worker.js` — default module-worker entry point.
+- `editor/import/data-import-worker-classic.js` — CSV-only PapaParse fallback entry point.
+- `editor/import/data-import-worker-runtime.js` — shared focused worker protocol/runtime.
+- `editor/import/data-import-worker-client.js` — one-session main-thread worker client.
 - `editor/ui/data-workbench.js` — accessible transient dialog and bounded previews.
 
 ### Modified application modules
@@ -54,7 +65,9 @@
 
 - `tests/editor-data-import.test.mjs`
 - `tests/editor-data-import-adapters.test.mjs`
+- `tests/editor-data-import-worker.test.mjs`
 - `tests/editor-data-workbench.test.mjs`
+- `tests/editor-data-workbench-benchmark.test.mjs`
 - modify `tests/editor-zip-storage.test.mjs`
 - modify `tests/editor-data-inspectors.test.mjs`
 - modify `tests/editor-studio-preview.test.mjs`
@@ -64,6 +77,7 @@
 ### Vendor and certification artifacts
 
 - exact version directories and disclosures under `vendor/data-import/` from spec section 5;
+- `scripts/map-story-studio-data-workbench-benchmark.mjs` — permanent explicit-event benchmark/cancellation harness;
 - `review/map-story-studio-v1-2/DATA-WORKBENCH.md`;
 - six bounded PNGs under `review/map-story-studio-v1-2/data-workbench/`.
 
@@ -514,19 +528,241 @@ git commit -m "feat: add Data Workbench authoring flow"
 
 ---
 
-### Task 6: Certify security, regression behavior, real browser workflows, and Draft PR
+### Task 6: Lock the module-first worker construction and bounded protocol
+
+**Files:**
+- Create: `editor/import/data-import-worker-client.js`
+- Create: `tests/editor-data-import-worker.test.mjs`
+- Modify: `editor/import/vendor-loaders.js`
+
+**Interfaces:**
+- Produces `createDataImportWorkerClient({ files, usedIds, replacement, WorkerCtor, now, onStatus }) -> transient session` with the existing `read/selectSourceItem/configure/prepare/candidate/state/dispose` surface.
+- Produces an explicit worker selection result: `module` for every worker-backed non-CSV source, `classic-papaparse` only for detected `.csv`, and `main-thread-xml` for KML/KMZ/GPX.
+- Default module construction is exactly `new Worker(new URL('./data-import-worker.js', import.meta.url), { type: 'module' })`.
+- The client records `lastResultReceivedAt` at entry to the accepted `result` handler and exposes it only in transient session timing state.
+
+- [ ] **Step 1: Write RED construction/protocol tests**
+
+Use a fake `WorkerCtor` to prove the exact module URL/options, CSV-only classic URL with no `type: 'module'`, monotonic session/request IDs, bounded message envelopes, stale-result rejection, normalized error mapping, progress routing, and absence of mutation dependencies. Assert that JSON, GeoJSON, XLSX, Shapefile, GeoPackage, and unsupported inputs never silently select classic.
+
+```js
+test('module worker is the default and CSV is the sole evidenced classic fallback', async () => {
+  const workers = fakeWorkers();
+  createDataImportWorkerClient({ files: [file('data.geojson')], WorkerCtor: workers.Ctor });
+  createDataImportWorkerClient({ files: [file('data.csv')], WorkerCtor: workers.Ctor });
+  assert.match(workers.instances[0].url.href, /data-import-worker\.js$/);
+  assert.deepEqual(workers.instances[0].options, { type: 'module' });
+  assert.match(workers.instances[1].url.href, /data-import-worker-classic\.js$/);
+  assert.deepEqual(workers.instances[1].options, {});
+});
+```
+
+- [ ] **Step 2: Run RED worker-client tests**
+
+Run: `node --test tests/editor-data-import-worker.test.mjs`
+
+Expected: FAIL because the worker client does not exist.
+
+- [ ] **Step 3: Implement the minimal one-session client**
+
+Keep one active request and one worker only. For CSV, structured-clone the `File` so PapaParse can use `FileStreamer`. For JSON/GeoJSON, XLSX, Shapefile, and GeoPackage, asynchronously read and transfer ArrayBuffers exactly once. Retain original File references only for an explicit retry. Do not add a registry, pool, scheduler, queue, or generic RPC surface.
+
+- [ ] **Step 4: Write RED cancellation/teardown tests, then implement GREEN**
+
+Prove `cancel()` posts the bounded cancellation envelope, immediately calls `terminate()`, rejects in-flight work with the stable cancellation error, clears callbacks, and ignores a late result. Prove `dispose()` is idempotent after success, error, Cancel, close, and replacement.
+
+Run: `node --test tests/editor-data-import-worker.test.mjs`
+
+Expected: all selected tests PASS.
+
+- [ ] **Step 5: Commit Task 6**
+
+```powershell
+git add -- editor/import/data-import-worker-client.js editor/import/vendor-loaders.js tests/editor-data-import-worker.test.mjs
+git commit -m "feat: add module-first data import worker client"
+```
+
+---
+
+### Task 7: Execute existing adapters through the focused worker runtime
+
+**Files:**
+- Create: `editor/import/data-import-worker-runtime.js`
+- Create: `editor/import/data-import-worker.js`
+- Create: `editor/import/data-import-worker-classic.js`
+- Modify: `editor/import/data-import.js`
+- Modify: `editor/import/vendor-loaders.js`
+- Modify: `tests/editor-data-import-worker.test.mjs`
+- Modify: `tests/editor-data-import-adapters.test.mjs`
+
+**Interfaces:**
+- `data-import-worker.js` is a true module entry point that directly imports and boots `data-import-worker-runtime.js`.
+- `data-import-worker-classic.js` is CSV-only, calls `importScripts` for the exact local PapaParse 5.7.0 bundle, then dynamically imports the same runtime.
+- Produces `createDataImportWorkerRuntime({ scope, loaders, createSession })` for deterministic protocol tests; it owns no project/storage/history references.
+- Preserves the existing normalized source-item and candidate contracts exactly.
+
+- [ ] **Step 1: Write RED runtime tests**
+
+Drive the runtime with an injected worker scope. Prove `read` reconstructs file-like inputs, calls the existing detector/session, reports allowed progress phases, returns public source items, and retains only transient session state. Prove `prepare` returns the existing candidates and clears large result/intermediate references after posting.
+
+- [ ] **Step 2: Run RED runtime tests**
+
+Run: `node --test --test-name-pattern="worker runtime|worker protocol|module worker|classic Papa" tests/editor-data-import-worker.test.mjs`
+
+Expected: FAIL on missing runtime and entry points.
+
+- [ ] **Step 3: Implement the shared runtime and explicit loaders**
+
+Module-worker loaders use local dynamic imports/side effects for Proj4 and GeoPackage, direct ESM imports for shpjs and SheetJS, and explicit local SQL.js WASM redirection. The classic entry point loads only PapaParse through `importScripts`; it must not become a second implementation. Both entries boot the same runtime and import the existing adapters/normalizers rather than copying conversion logic.
+
+- [ ] **Step 4: Run runtime tests GREEN**
+
+Run: `node --test tests/editor-data-import-worker.test.mjs tests/editor-data-import-adapters.test.mjs`
+
+Expected: all selected tests PASS.
+
+- [ ] **Step 5: Run real-browser worker compatibility gate**
+
+Through the product client/runtime boundary, prove:
+
+- module worker: Proj4 transform, SheetJS sheet inventory, shpjs projected fixture, GeoPackage local WASM open/list/close, and pure normalizers;
+- classic fallback: PapaParse CSV read/prepare plus shared ESM normalization;
+- no parser/WASM/CDN/EPSG network request before use or outside the local origin.
+
+If any non-CSV format requires classic fallback, stop and amend the spec with reproducible evidence before continuing. Do not silently switch.
+
+- [ ] **Step 6: Commit Task 7**
+
+```powershell
+git add -- editor/import/data-import-worker-runtime.js editor/import/data-import-worker.js editor/import/data-import-worker-classic.js editor/import/data-import.js editor/import/vendor-loaders.js tests/editor-data-import-worker.test.mjs tests/editor-data-import-adapters.test.mjs
+git commit -m "feat: run data adapters in dedicated workers"
+```
+
+---
+
+### Task 8: Remove redundant CSV/table passes and preserve certification contracts
+
+**Files:**
+- Modify: `editor/import/table-adapters.js`
+- Modify: `editor/import/table-normalizer.js`
+- Modify: `tests/editor-data-import.test.mjs`
+- Modify: `tests/editor-data-import-adapters.test.mjs`
+- Modify: `tests/editor-data-import-worker.test.mjs`
+
+**Interfaces:**
+- PapaParse performs one chunked parse with `dynamicTyping:false`; there is no separate full-data delimiter-detection parse.
+- Table normalization does not clone the full grid, create a second complete data-row array, or allocate one full value array per column.
+- Candidate transport relies on `postMessage` ownership copy; `tableCandidate` does not perform an additional `structuredClone`.
+
+- [ ] **Step 1: Write RED single-pass/copy tests**
+
+Use an instrumented PapaParse fake and clone sentinel to prove one parse call, real chunk progress, bounded diagnostics, no explicit candidate clone, no `grid.map(row => [...row])`, and unchanged CSV table/points output. Add a tall narrow table case that would fail the old spread-based width scan.
+
+- [ ] **Step 2: Run RED optimization tests**
+
+Run: `node --test --test-name-pattern="single pass|chunk progress|copy|tall table|CSV|32648" tests/editor-data-import.test.mjs tests/editor-data-import-adapters.test.mjs tests/editor-data-import-worker.test.mjs`
+
+Expected: new assertions FAIL against the current double-parse/clone path.
+
+- [ ] **Step 3: Implement minimal one-pass parsing and direct normalization**
+
+Accumulate each parser chunk once, trim trailing blank rows without copying all prior rows, track width and per-column inference state with loops, and construct normalized rows directly. Preserve leading-zero text, blank-to-null, date validity, scalar-only cells, complete row keys, and EPSG:32648 point output.
+
+- [ ] **Step 4: Run focused adapter/normalizer suites GREEN**
+
+Run: `node --test tests/editor-data-import.test.mjs tests/editor-data-import-adapters.test.mjs tests/editor-data-import-worker.test.mjs`
+
+Expected: all selected tests PASS, including the hard EPSG:32648 gate and Shapefile no-double-reprojection cases.
+
+- [ ] **Step 5: Commit Task 8**
+
+```powershell
+git add -- editor/import/table-adapters.js editor/import/table-normalizer.js tests/editor-data-import.test.mjs tests/editor-data-import-adapters.test.mjs tests/editor-data-import-worker.test.mjs
+git commit -m "perf: remove redundant data import copies"
+```
+
+---
+
+### Task 9: Install only production-valid candidates and emit real completion
+
+**Files:**
+- Modify: `editor/ui/data-workbench.js`
+- Modify: `editor/editor.js`
+- Modify: `tests/editor-data-workbench.test.mjs`
+- Modify: `tests/editor-data-inspectors.test.mjs`
+- Create: `scripts/map-story-studio-data-workbench-benchmark.mjs`
+- Create: `tests/editor-data-workbench-benchmark.test.mjs`
+
+**Interfaces:**
+- Extend `createDataWorkbench` with injected `validateCandidate`, `requestAnimationFrame`, `now`, and completion-event construction seams; production defaults remain native browser APIs.
+- The Workbench phase becomes `review-ready` only after worker result receipt, production validation with no mutation, candidate installation, preview DOM commit, and two animation-frame callbacks.
+- Dispatch `data-workbench:review-ready` with matching `sessionId`, `requestId`, `receivedAt`, `completedAt`, and `postWorkerDurationMs`.
+- The permanent benchmark listens for that event before starting import and never polls presentation DOM.
+
+- [ ] **Step 1: Write RED validation/install/order tests**
+
+Prove the returned candidate is passed through the existing `preflightDatasetCandidate` path before it appears in Workbench state/preview; validation failure installs nothing and leaves Confirm unavailable. With a deterministic fake animation-frame queue, prove no completion event occurs before validation, state install, preview commit, first frame, and second frame.
+
+```js
+assert.deepEqual(events, [
+  'worker-result', 'production-validation', 'state-install', 'preview-commit',
+  'animation-frame-1', 'animation-frame-2', 'review-ready'
+]);
+```
+
+- [ ] **Step 2: Run RED Workbench tests**
+
+Run: `node --test tests/editor-data-workbench.test.mjs tests/editor-data-inspectors.test.mjs`
+
+Expected: new ordering/completion cases FAIL.
+
+- [ ] **Step 3: Implement production-valid preview installation and explicit completion**
+
+Use the worker client's accepted-result timestamp as the start. Validate without writing, install only the validated candidate, render the bounded preview, wait through two animation frames, set explicit state, and dispatch the matching event. Confirm repeats production preflight at the transaction boundary and remains the only mutation path.
+
+- [ ] **Step 4: Write the permanent event-driven benchmark harness RED/GREEN**
+
+The harness must register its listener before file selection, reject wrong session/request events, fail on timeout, record frame gaps/Long Tasks/progress/cancel/teardown, and calculate the complete post-worker duration from event detail. Add source-level regression assertions that the harness contains no `getAttribute('textContent')`, status-text completion predicate, or generic DOM-attribute polling.
+
+Run: `node --test tests/editor-data-workbench-benchmark.test.mjs tests/editor-data-workbench.test.mjs`
+
+Expected: all selected tests PASS.
+
+- [ ] **Step 5: Commit Task 9**
+
+```powershell
+git add -- editor/ui/data-workbench.js editor/editor.js scripts/map-story-studio-data-workbench-benchmark.mjs tests/editor-data-workbench.test.mjs tests/editor-data-inspectors.test.mjs tests/editor-data-workbench-benchmark.test.mjs
+git commit -m "feat: signal production-valid workbench completion"
+```
+
+---
+
+### Task 10: Certify responsiveness, security, regression behavior, browser workflows, and Draft PR
 
 **Files:**
 - Modify: all new/affected tests only for real defects found during certification
-- Create: `review/map-story-studio-v1-2/DATA-WORKBENCH.md`
-- Create: six exact screenshots under `review/map-story-studio-v1-2/data-workbench/`
+- Modify: `review/map-story-studio-v1-2/DATA-WORKBENCH.md`
+- Replace only if browser evidence materially changed: six bounded screenshots under `review/map-story-studio-v1-2/data-workbench/`
 
 **Interfaces:**
-- Produces the final evidence report with base SHA, executable SHA, dependency files/licenses/hashes, formats, normalized contracts, CRS evidence, mixed partitioning, limits, browser flows, test counts, exclusions, and known issues.
+- Produces the final evidence report with base SHA, executable SHA, module-worker/default and PapaParse-fallback evidence, dependency files/licenses/hashes, formats, normalized contracts, CRS evidence, mixed partitioning, complete post-worker timing, limits, browser flows, test counts, exclusions, and known issues.
 
 - [ ] **Step 1: Run the focused development suites once at the assembled feature head**
 
-Run the Task 5 focused command.
+Run:
+
+```powershell
+node --test `
+  tests/editor-data-import.test.mjs `
+  tests/editor-data-import-adapters.test.mjs `
+  tests/editor-data-import-worker.test.mjs `
+  tests/editor-data-workbench.test.mjs `
+  tests/editor-data-workbench-benchmark.test.mjs `
+  tests/editor-data-inspectors.test.mjs `
+  tests/editor-studio-preview.test.mjs `
+  tests/editor-rich-content-authoring.test.mjs `
+  tests/editor-scene-commands.test.mjs
+```
 
 Expected: PASS; record exact test count.
 
@@ -536,7 +772,9 @@ Expected: PASS; record exact test count.
 node --test `
   tests/editor-data-import.test.mjs `
   tests/editor-data-import-adapters.test.mjs `
+  tests/editor-data-import-worker.test.mjs `
   tests/editor-data-workbench.test.mjs `
+  tests/editor-data-workbench-benchmark.test.mjs `
   tests/editor-data-inspectors.test.mjs `
   tests/editor-rich-content-authoring.test.mjs `
   tests/editor-studio-preview.test.mjs `
@@ -565,30 +803,36 @@ Expected: no prohibited application use; schema/story diff empty; SHA-256 exactl
 
 Serve the repository locally, create a new temporary browser user-data directory outside the user's normal profile, and test at 1440x900 and 1366x768. Cover blank Cancel, GeoJSON line, KML, mixed KML partition, CSV table immediate Table/Chart use, critical CSV EPSG:32648 points, projected Shapefile ZIP, XLSX sheets, GeoPackage layers, replacement, compact layout, initial network lazy loading, and application-origin console.
 
-If a realistic 20–50 MiB input freezes the editor unacceptably, stop and report instead of adding workers.
+KML/KMZ/GPX remain on the bounded main-thread XML path. If representative browser evidence shows a material freeze, stop at the XML worker/dependency design gate; do not add an XML dependency or broaden the worker design silently.
 
-- [ ] **Step 5: Capture bounded evidence and write report**
+- [ ] **Step 5: Run the corrected 20.43 MiB responsiveness/cancellation benchmark**
+
+Generate the exact temporary 21,420,020-byte / 21,000-row CSV and register the matching `data-workbench:review-ready` listener before beginning each import. Record cold and three warm throughput runs, worker phases, frame gaps, Long Tasks, progress, cancellation latency, teardown, and memory diagnostics. Completion must come only from the explicit event.
+
+The complete interval from accepted worker-result handler entry through production validation, Workbench state installation, preview DOM commit, and the subsequent paint opportunity must be below 250 ms. A result-delivery-only measurement does not pass. Cancel must terminate and recover within 250 ms with no late result or project/history/package mutation. Any failure is a stop gate for implementation investigation, not a report-only caveat.
+
+- [ ] **Step 6: Capture bounded evidence and write report**
 
 Capture only the six approved PNGs. Write `DATA-WORKBENCH.md` with exact evidence, real limitations, inherited warnings, and no unsupported PASS claims.
 
-- [ ] **Step 6: Commit certification artifacts**
+- [ ] **Step 7: Commit certification artifacts**
 
 ```powershell
-git add -- tests review/map-story-studio-v1-2 vendor/data-import/THIRD-PARTY.md
+git add -- scripts/map-story-studio-data-workbench-benchmark.mjs tests review/map-story-studio-v1-2 vendor/data-import/THIRD-PARTY.md
 git commit -m "test: certify Data Workbench V2"
 ```
 
-- [ ] **Step 7: Invoke `superpowers:verification-before-completion` and run the full suite once**
+- [ ] **Step 8: Invoke `superpowers:verification-before-completion` and run the full suite once**
 
 Run: `npm test`
 
 Expected: PASS; record the new real count. Re-run affected focused tests only if a fix is required; if any executable fix changes HEAD after the full suite, the final full suite must be run again at the new executable head before claiming completion.
 
-- [ ] **Step 8: Invoke `superpowers:requesting-code-review` and review the exact final diff locally**
+- [ ] **Step 9: Invoke `superpowers:requesting-code-review` and review the exact final diff locally**
 
 Review base-to-HEAD requirements, security, tests, file scope, browser evidence, vendor notices, and freeze paths. Fix only evidenced findings, then rerun proportionate verification.
 
-- [ ] **Step 9: Push and open a Draft PR**
+- [ ] **Step 10: Push and open a Draft PR**
 
 ```powershell
 git push -u origin feat/map-story-studio-v1-2-data-workbench
@@ -597,7 +841,7 @@ gh pr create --draft --base main --head feat/map-story-studio-v1-2-data-workbenc
 
 Do not mark Ready and do not merge.
 
-- [ ] **Step 10: Final clean-worktree and exact-head checks**
+- [ ] **Step 11: Invoke `superpowers:finishing-a-development-branch` and perform final exact-head checks**
 
 ```powershell
 git status --short --branch
@@ -614,6 +858,8 @@ Expected: clean worktree, pushed exact HEAD, Draft PR open, diff check PASS.
 - Checkpoint A after Task 1: vendor provenance, lazy loading, and ZIP regression evidence.
 - Checkpoint B after Task 3: all pure conversion/adapters pass, including EPSG:32648, projected Shapefile, XLSX, and GeoPackage cleanup.
 - Checkpoint C after Task 5: complete author workflow passes focused automated suites.
-- Checkpoint D after Task 6: browser evidence, bounded regression, one final full suite at exact executable HEAD, review, push, and Draft PR.
+- Checkpoint D after Task 7: module-worker production adapter boundary and CSV-only PapaParse fallback pass focused and real-browser gates.
+- Checkpoint E after Task 9: production-valid preview installation and explicit completion ordering pass focused tests.
+- Checkpoint F after Task 10: corrected responsiveness evidence, bounded regression, one final full suite at exact executable HEAD, review, push, and Draft PR.
 
 Implementation must stop at any approved stop gate instead of broadening scope.

@@ -1,11 +1,11 @@
 # Data Workbench V2 certification checkpoint
 
-Status: **WORKER DESIGN IN REVIEW — final certification paused**
+Status: **WORKER DESIGN APPROVED WITH AMENDMENTS — implementation in progress**
 
 - Base SHA: `045a8b4b4ea0680273c1e9b676fa1677d749de3e`
 - Current executable HEAD: `27ab3373eb84a88fc7ede87261ddb5a8095e8c60`
 - Branch: `feat/map-story-studio-v1-2-data-workbench`
-- Draft PR: not opened while the focused worker revision awaits approval
+- Draft PR: not opened; it remains a final post-certification Draft handoff
 - Final full suite: intentionally not run because this is not a certifiable final executable head
 
 ## Passing checkpoint
@@ -26,6 +26,10 @@ A generated 20.4277 MiB UTF-8 CSV containing 21,000 records was selected in the 
 Correct measurement reached review-ready in **1.009 seconds** in the Workbench. Three direct importer runs completed in **0.745–0.875 seconds**, but each contained one **0.662–0.794 second main-thread long task** and a **0.650–0.800 second animation-frame gap**. Throughput is already sub-second; responsiveness and larger-file scaling remain the reasons for the approved dedicated worker boundary.
 
 The phase profile, diagnosed copies/passes, worker protocol, format split, memory strategy, and revised acceptance gate are recorded in `docs/superpowers/specs/2026-09-01-map-story-studio-v1-2-data-workbench-design.md`. No smaller main-thread file limit is proposed as the primary solution, and no generic worker framework has been implemented.
+
+The approved amendment makes the module worker the default. A 2026-09-02 headed-Chromium probe successfully ran Proj4, SheetJS, shpjs, GeoPackage with locally redirected SQL.js WASM, and the existing ESM normalizer through a module worker. PapaParse 5.7.0 alone failed as a module side effect because its UMD wrapper assigns through top-level `this`; that exact evidence permits a CSV-only classic fallback and no broader fallback.
+
+The final 250 ms gate covers the complete main-thread interval from accepted worker-result handler entry through production validation, Workbench state/preview installation, and a subsequent paint opportunity. The permanent benchmark will wait for a matching explicit `data-workbench:review-ready` event. Status text and assumed DOM attributes are not completion markers.
 
 ## Dependency disclosure
 
@@ -50,4 +54,4 @@ Exact vendored artifacts, provenance, licenses, and SHA-256 values are recorded 
 - `data-workbench/05-xlsx-sheet-table-preview.png`
 - `data-workbench/06-geopackage-layer-preview.png`
 
-These are checkpoint evidence only; final certification, console assessment, bounded regression, one-time full suite, push, and Draft PR remain pending approval and implementation of the focused worker revision.
+These are checkpoint evidence only; final certification, console assessment, bounded regression, one-time full suite, push, and Draft PR remain pending implementation of the approved focused worker revision.
