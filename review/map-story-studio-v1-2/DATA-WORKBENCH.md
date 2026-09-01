@@ -1,12 +1,12 @@
 # Data Workbench V2 certification checkpoint
 
-Status: **CERTIFICATION EVIDENCE COMPLETE — final full-suite and Draft PR handoff pending**
+Status: **CERTIFIED — Draft PR handoff pending**
 
 - Base SHA: `045a8b4b4ea0680273c1e9b676fa1677d749de3e`
-- Current executable HEAD: `15b0f7f18e2314666540c075351cda0c1c91043a`
+- Current executable HEAD: `6968965d40b416b147a23d6c5c3c117af4684cd1`
 - Branch: `feat/map-story-studio-v1-2-data-workbench`
 - Draft PR: not opened; it remains a final post-certification Draft handoff
-- Final full suite: intentionally reserved for the post-certification commit, as required by the locked plan
+- Final full suite: **630/630 tests passed** at the current executable HEAD in **11.87 s**
 
 ## Passing checkpoint
 
@@ -17,7 +17,7 @@ The browser found and drove two fixes before the stop gate:
 1. New spatial descriptors now receive complete production-valid geometry-specific render defaults before the first manifest write.
 2. The GeoPackage adapter supports the actual 4.2.9 browser export shape, where `GeoPackageAPI` is exported but the reprojection helper is reached through the feature DAO instance constructor.
 
-The post-review focused implementation set passes **112/112** tests. The bounded import, authoring, persistence, loader, ZIP, and runtime regression set passes **135/135** tests.
+The post-review focused implementation set passes **113/113** tests. The bounded import, authoring, persistence, loader, ZIP, and runtime regression set passes **135/135** tests.
 
 The clean executable head was reloaded after all temporary benchmark instrumentation had been removed. A quoted-comma CSV reached the explicit review state, rendered the expected quoted comma and multiline cells, confirmed through production validation, and left the project at **Valid / Problems 0**.
 
@@ -92,4 +92,4 @@ Exact vendored artifacts, provenance, licenses, and SHA-256 values are recorded 
 - `data-workbench/05-xlsx-sheet-table-preview.png`
 - `data-workbench/06-geopackage-layer-preview.png`
 
-These six files remain the bounded visual evidence set. The one-time final full suite, exact-diff review, push, and Draft PR are the remaining handoff steps; the branch must not be merged in this task.
+These six files remain the bounded visual evidence set. The final full suite and independent exact-diff review are complete; push and Draft PR creation are the remaining handoff steps. The branch must not be merged in this task.

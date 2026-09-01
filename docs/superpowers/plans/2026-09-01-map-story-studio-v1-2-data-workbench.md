@@ -815,20 +815,20 @@ The complete interval from accepted worker-result handler entry through producti
 
 Capture only the six approved PNGs. Write `DATA-WORKBENCH.md` with exact evidence, real limitations, inherited warnings, and no unsupported PASS claims.
 
-- [ ] **Step 7: Commit certification artifacts**
+- [x] **Step 7: Commit certification artifacts**
 
 ```powershell
 git add -- scripts/map-story-studio-data-workbench-benchmark.mjs tests review/map-story-studio-v1-2 vendor/data-import/THIRD-PARTY.md
 git commit -m "test: certify Data Workbench V2"
 ```
 
-- [ ] **Step 8: Invoke `superpowers:verification-before-completion` and run the full suite once**
+- [x] **Step 8: Invoke `superpowers:verification-before-completion` and run the full suite once**
 
 Run: `npm test`
 
 Expected: PASS; record the new real count. Re-run affected focused tests only if a fix is required; if any executable fix changes HEAD after the full suite, the final full suite must be run again at the new executable head before claiming completion.
 
-- [ ] **Step 9: Invoke `superpowers:requesting-code-review` and review the exact final diff locally**
+- [x] **Step 9: Invoke `superpowers:requesting-code-review` and review the exact final diff locally**
 
 Review base-to-HEAD requirements, security, tests, file scope, browser evidence, vendor notices, and freeze paths. Fix only evidenced findings, then rerun proportionate verification.
 
