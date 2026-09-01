@@ -341,7 +341,7 @@ export function createSceneAuthoringAdapter({ root, documentRef = document, emit
     const id = overlay.dataset.sceneOverlayId; selectOverlay(id);
     const frame = readSceneOverlayFrame(root, id); const bounds = readSceneRootBounds(root);
     if (!frame || !bounds) return;
-    interaction = { id, pointerId: event.pointerId, kind: direction ? 'resize' : 'move', direction, active: Boolean(direction), changed: false, startX: event.clientX, startY: event.clientY, frame, bounds };
+    interaction = { id, pointerId: event.pointerId, kind: direction ? 'resize' : 'move', direction, active: Boolean(direction), startX: event.clientX, startY: event.clientY, frame, bounds };
     if (event.pointerId !== undefined) root.setPointerCapture?.(event.pointerId);
     event.preventDefault?.();
   }
@@ -354,7 +354,6 @@ export function createSceneAuthoringAdapter({ root, documentRef = document, emit
     const result = pointerResult(event); if (!result) return;
     applySceneOverlayFrame(root, interaction.id, result.frame); syncChrome(result.frame); showGuides(result.guides);
     if (interaction.kind === 'resize') showFeedback(result.frame, interaction.bounds);
-    interaction.changed = JSON.stringify(result.frame) !== JSON.stringify(interaction.frame);
     event.preventDefault?.();
   }
 
@@ -366,7 +365,12 @@ export function createSceneAuthoringAdapter({ root, documentRef = document, emit
     interaction = null; clearGuides(); hideFeedback();
     if (result) { applySceneOverlayFrame(root, current.id, result.frame); syncChrome(result.frame); }
     releaseCapture(current);
-    if (result && current.changed) emit('commit-frame', { id: current.id, frame: result.frame });
+    const finalFrameChanged = result && (
+      result.frame.x !== current.frame.x || result.frame.y !== current.frame.y ||
+      result.frame.width !== current.frame.width || result.frame.height !== current.frame.height ||
+      result.frame.z !== current.frame.z
+    );
+    if (finalFrameChanged) emit('commit-frame', { id: current.id, frame: result.frame });
     event.preventDefault?.();
   }
 

@@ -159,6 +159,27 @@ test('movement above threshold stays transient and pointer-up emits exactly one 
   assert.deepEqual(events.filter(({ type }) => type === 'commit-frame'), [{ type: 'commit-frame', payload: { id: 'title', frame: { x: 0.22, y: 0.24, width: 0.4, height: 0.3, z: 3 } } }]); adapter.destroy();
 });
 
+test('resize pointer-up applies and commits changed final geometry without an intervening pointermove', async () => {
+  const f = fixture(); const events = []; const adapter = await adapterFor(f, events); adapter.selectOverlay('title'); const handle = handleOf(f.root, 'se');
+  f.root.dispatch('pointerdown', { target: handle, clientX: 200, clientY: 100, pointerId: 40 });
+  f.root.dispatch('pointerup', { target: handle, clientX: 250, clientY: 150, pointerId: 40 });
+  const finalFrame = { x: 0.2, y: 0.2, width: 0.45, height: 0.4, z: 3 };
+  assert.deepEqual(currentFrame(f.overlay), finalFrame);
+  assert.deepEqual(events.filter(({ type }) => type === 'commit-frame'), [{ type: 'commit-frame', payload: { id: 'title', frame: finalFrame } }]);
+  adapter.destroy();
+});
+
+test('pointer-up returning to exact starting geometry emits no commit after a changed pointermove', async () => {
+  const f = fixture(); const events = []; const adapter = await adapterFor(f, events); adapter.selectOverlay('title'); const handle = handleOf(f.root, 'se'); const start = currentFrame(f.overlay);
+  f.root.dispatch('pointerdown', { target: handle, clientX: 200, clientY: 100, pointerId: 41 });
+  f.root.dispatch('pointermove', { target: handle, clientX: 250, clientY: 150, pointerId: 41 });
+  assert.notDeepEqual(currentFrame(f.overlay), start);
+  f.root.dispatch('pointerup', { target: handle, clientX: 200, clientY: 100, pointerId: 41 });
+  assert.deepEqual(currentFrame(f.overlay), start);
+  assert.equal(events.filter(({ type }) => type === 'commit-frame').length, 0);
+  adapter.destroy();
+});
+
 for (const [eventType, values] of [['pointercancel', { pointerId: 3 }], ['lostpointercapture', { pointerId: 3 }], ['keydown', { key: 'Escape' }]]) {
   test(`${eventType} rolls an active move back with no commit`, async () => {
     const f = fixture(); const events = []; const adapter = await adapterFor(f, events); const start = currentFrame(f.overlay);
