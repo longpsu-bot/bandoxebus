@@ -1,8 +1,8 @@
 # Map Story Studio V1.2 — Slice B: Data Workbench V2 Design
 
-Status: ready for human approval
+Status: worker architecture revision ready for human approval
 
-Date: 2026-09-01
+Date: 2026-09-01; worker responsiveness revision 2026-09-02
 
 Authoritative repository base: `main` at `045a8b4b4ea0680273c1e9b676fa1677d749de3e`
 
@@ -18,7 +18,7 @@ Data Workbench V2 is a browser-local import boundary for ordinary GIS and table 
 
 The production model does not change. Every confirmed spatial candidate is stored as an existing `geojson` dataset at `./data/<id>.geojson`; every confirmed tabular candidate is stored as an existing `table-json` dataset at `./data/<id>.json`. Existing production validators remain the final authority. KML, KMZ, Shapefile, GeoPackage, GPX, CSV, and XLSX parsing exists only in Studio and is never added to the production loader.
 
-The selected architecture uses explicit format adapters, focused normalization modules, a thin stateful dialog, locally vendored pinned parser builds, and a preflight-then-commit mutation boundary. No bundler, runtime CDN, parser plugin framework, second MapLibre map, worker subsystem, schema change, or production renderer change is introduced.
+The selected architecture uses explicit format adapters, focused normalization modules, a thin stateful dialog, locally vendored pinned parser builds, one dedicated Data Import worker/client boundary for expensive formats, and a preflight-then-commit mutation boundary. The worker prepares transient candidates only; production validation, project/history mutation, managed writes, manifest writes, and the existing Story layer command remain on the main thread. No bundler, runtime CDN, parser plugin framework, worker pool/framework, second MapLibre map, schema change, or production renderer change is introduced.
 
 ## 2. Approved scope and invariants
 
@@ -30,6 +30,7 @@ Locked invariants:
 - `package.json` gains no runtime dependencies;
 - all parser code and matching WASM are local and version-pinned;
 - parsers load only after a source requiring them is selected;
+- one dedicated import worker may parse and normalize transient input, but it cannot access project, history, Story, manifest, storage, or production mutation APIs;
 - pending import state is transient and never enters the package, Story, revision history, or authoring history;
 - confirmation produces only existing managed resource and manifest shapes;
 - spatial confirmation reuses `addProjectLayerToStory12` / the `add-project-layer` command semantics;
@@ -62,11 +63,19 @@ Each supported source is detected explicitly and parsed by a mature pinned libra
 
 This fits the static application, makes lazy loading obvious, keeps production format-neutral, allows focused tests around the application's glue, and avoids a generic loader or plugin framework.
 
-### 4.2 Rejected: one monolithic importer in `editor/editor.js`
+### 4.2 Selected responsiveness addition: one classic Data Import worker per workbench session
+
+The main thread owns the dialog and transaction boundary. A focused client starts one classic dedicated worker for an active Workbench session, sends bounded commands, receives progress and normalized results, and terminates the worker deterministically. The worker dynamically imports the existing pure ESM normalizers/adapters and uses `importScripts` only for the pinned UMD parser artifacts that cannot execute as module-worker imports.
+
+This is selected over PapaParse's built-in `worker: true` mode because the product needs the same cancellation, progress, local-vendor, and teardown boundary for JSON/GeoJSON, XLSX, Shapefile, GeoPackage, and CRS work—not a CSV-only nested blob worker. A classic worker is selected over a module worker because the pinned PapaParse 5.7.0 browser build assigns through top-level `this`; it loads correctly with `importScripts` but not as a side-effect module. Dynamic `import()` remains available from the classic worker for shpjs, SheetJS, safe ZIP handling, and the pure normalizer modules.
+
+The worker is not a manager, pool, scheduler, job queue, or concurrency subsystem. Only one import session is active for one dialog.
+
+### 4.3 Rejected: one monolithic importer in `editor/editor.js`
 
 This would minimize file count but would mix file security, parser globals, CRS rules, geometry recursion, table inference, dialog state, and package mutation in an already large controller. It would be difficult to test without DOM setup and easy to couple to production persistence.
 
-### 4.3 Rejected: npm runtime dependencies plus a bundler
+### 4.4 Rejected: npm runtime dependencies plus a bundler
 
 This would simplify package imports but changes the certified deployment architecture, eagerly risks pulling parser dependency graphs into initial Studio startup, and violates the explicit no-bundler boundary. The required packages all expose browser-usable artifacts, so a bundler is unnecessary.
 
@@ -92,7 +101,7 @@ The stale public npm `xlsx@0.18.5` package is not used.
 
 - togeojson, shpjs, and SheetJS use vendored ESM with dynamic `import()`;
 - proj4, PapaParse, and GeoPackage use their official browser bundles and are loaded by one explicit local script loader;
-- only `editor/import/vendor-loaders.js` may read `globalThis.proj4`, `globalThis.Papa`, or `globalThis.GeoPackage`;
+- only `editor/import/vendor-loaders.js` on the main thread and `editor/import/data-import-worker.js` inside its isolated realm may read the parser globals (`proj4`, `Papa`, or `GeoPackage`);
 - the GeoPackage loader calls `setSqljsWasmLocateFile` with the local versioned `sql-wasm.wasm` URL before opening bytes;
 - successful loader promises are cached; rejected promises are cleared so a later retry is possible;
 - no parser script or WASM is referenced by `editor/index.html`, so opening Studio does not load it.
@@ -106,7 +115,7 @@ This is a few explicit loaders, not a generic module-loader framework.
 | Path | Responsibility |
 | --- | --- |
 | `editor/core/safe-zip.js` | Shared bounded ZIP inventory/expansion using fflate; normalized paths, duplicate detection, encryption rejection, size/ratio ceilings, and deterministic entry order. Existing project ZIP behavior retains its current limits through a separate limit profile. |
-| `editor/import/vendor-loaders.js` | Explicit cached lazy loaders and the only browser-global isolation boundary. |
+| `editor/import/vendor-loaders.js` | Explicit cached main-thread lazy loaders and local parser URL exports; together with the worker entry point, this is the only parser-global isolation boundary. |
 | `editor/import/import-identifiers.js` | Unicode-preserving labels and deterministic ASCII dataset/column ID slugging and collision suffixing. |
 | `editor/import/crs.js` | CRS state, local definition resolution, coordinate recursion/reprojection, Z preservation, and post-transform bounds/finite validation. |
 | `editor/import/spatial-normalizer.js` | Feature/FeatureCollection normalization, GeometryCollection flattening, null counting, geometry-family partitioning, bounds/field summaries, and SVG-preview sampling model. |
@@ -115,6 +124,8 @@ This is a few explicit loaders, not a generic module-loader framework.
 | `editor/import/table-adapters.js` | CSV, normalized/plain JSON table, and XLSX workbook/sheet/header parsing. |
 | `editor/import/geopackage-adapter.js` | Local GeoPackage open/list/extract/verify/close lifecycle and feature-table-only chooser model. |
 | `editor/import/data-import.js` | File-set detection, transient session state machine, candidate configuration, warnings, replacement constraints, and confirm preflight model. It does not write package state. |
+| `editor/import/data-import-worker.js` | Classic dedicated-worker entry point, parser loading inside the worker, read/prepare command dispatch, progress events, candidate preparation, error normalization, cancellation acknowledgement, and resource cleanup. It imports existing adapters/normalizers rather than duplicating them. |
+| `editor/import/data-import-worker-client.js` | Main-thread one-session client, request/session IDs, input transfer, progress/result routing, prompt cancellation via termination, stale-message rejection, and deterministic disposal. It exposes the same transient session shape consumed by the Workbench. |
 | `editor/ui/data-workbench.js` | Accessible dialog, drop/browse surface, source-item/configuration sections, progress states, previews, Advanced details, Cancel/dispose, and Confirm callback. |
 
 ### 6.2 Modified application files
@@ -126,6 +137,11 @@ This is a few explicit loaders, not a generic module-loader framework.
 | `editor/ui/studio-shell.js` | Add `+ Add data`, candidate layer summaries, and `Replace data…` callback points. |
 | `editor/editor.js` | Own workbench lifecycle, preflight all deterministic confirmation operations, call existing dataset and Scene commands, refresh Studio, and route table/chart resource requests to the workbench. |
 | `editor/editor.css` | Responsive dialog, drop zone, source chooser, preview, warnings, SVG silhouette, table viewport, and compact 1366×768 rules. |
+| `editor/import/vendor-loaders.js` | Preserve main-thread loaders and add only worker-safe URL exports/helpers needed by the dedicated worker; no generic loader registry. |
+| `editor/import/table-adapters.js` | Use one chunked PapaParse pass in worker CSV sessions and remove full-grid copies that are not ownership boundaries. |
+| `editor/import/table-normalizer.js` | Preserve its pure public API while replacing temporary full row/column arrays with bounded per-column inference state and direct normalized-row construction. |
+| `editor/import/data-import.js` | Keep the existing direct session for lightweight DOM-bound XML paths and tests; route heavy formats through the dedicated client without changing candidate contracts. |
+| `editor/ui/data-workbench.js` | Render worker progress phases and dispose the active worker on Cancel, close, replacement, success, or error. |
 
 No change is proposed to `editor/index.html`; the workbench creates one dialog with native DOM construction when first opened.
 
@@ -134,13 +150,17 @@ No change is proposed to `editor/index.html`; the workbench creates one dialog w
 ```text
 File selection / drop
   -> enforce selection byte ceilings
-  -> detect source from extension plus bounded signature/content checks
-  -> lazy-load only the required parser
-  -> parse into source items
-  -> choose sheet/layer/KML/shapefile item when needed
-  -> configure label, CSV mode/X/Y, header row, and source CRS
-  -> normalize into one or more candidates
-  -> prepare summaries and bounded preview
+  -> for heavy formats, start the dedicated Data Import worker
+       -> transfer bytes or pass a CSV File for chunk streaming
+       -> detect source and lazy-load only the required local parser
+       -> parse into source items
+       -> receive source-item result on the main thread
+       -> choose sheet/layer/shapefile item and source configuration
+       -> start worker prepare operation
+       -> normalize into one or more candidates
+       -> prepare summaries and bounded preview data
+       -> receive normalized candidate result on the main thread
+  -> for DOM-bound KML/GPX/KMZ, use the existing bounded main-thread path
   -> user confirms exactly one candidate
   -> preflight existing production validation
   -> preflight add-project-layer for new spatial imports
@@ -150,9 +170,9 @@ File selection / drop
   -> refresh Studio and resource catalogs
 ```
 
-Everything before confirmation lives in a disposable `DataImportSession` object. The session contains file references/bytes, source items, options, candidates, warnings, status, and an optional cleanup callback. It has no serializer and is never passed to the draft store, package store, preview bridge, or Story history.
+Everything before confirmation lives in a disposable transient session split across `data-import-worker-client.js` and one worker realm. The main side contains file references, public source items, configuration, candidates, warnings, and status. The worker side may temporarily contain transferred bytes, parser state, source inventory, and normalization intermediates. Neither side has project mutation authority or a serializer into package state, and neither is passed to the draft store, package store, preview bridge, or Story history.
 
-Progress changes to `Reading…`, `Parsing…`, `Reprojecting…`, and `Preparing preview…` are rendered before each expensive phase by yielding to the browser once. Parser work remains on the main thread in this slice; no worker abstraction is introduced.
+Progress messages for `Reading`, `Parsing`, `Inferring`, `Reprojecting`, and `Preparing preview` cross the worker boundary before the corresponding expensive phase. CSV chunk callbacks additionally report byte/row progress. The main thread remains free to repaint and terminate the worker; it does not wait for a cooperative cancel handler inside a synchronous parser call.
 
 ### 7.1 Confirm preflight
 
@@ -326,7 +346,7 @@ The GeoPackage comparison prevents both silent source-coordinate storage and dou
 
 ### 12.1 CSV
 
-PapaParse receives decoded local file content with `dynamicTyping: false`. It owns quoting, embedded commas, line endings, BOM, and delimiter detection. Parser errors are converted into bounded row/message diagnostics.
+PapaParse receives the local `File` inside the dedicated worker with `dynamicTyping: false` and one chunked parse. It owns quoting, embedded commas, line endings, BOM, delimiter detection, and file streaming. The adapter accumulates owned chunk rows once, reports honest chunk progress, and converts parser errors into bounded row/message diagnostics. PapaParse's built-in `worker: true` option stays off because parsing already runs inside the product-owned worker.
 
 The author chooses Table or Map points after parsing. For Map points, X and Y selectors and Source CRS remain visible and editable. The adapter converts selected finite numeric X/Y cells into Point features and reports rows with blank coordinates separately from invalid numeric coordinates.
 
@@ -456,11 +476,147 @@ The existing project-package ZIP profile remains at its certified 2,048 entries 
 
 ## 16. Responsiveness and performance stop gate
 
-The dialog paints progress before parser calls and keeps previews bounded. Successful parser loader promises and parsed source inventories are reused within the active session.
+### 16.1 Corrected baseline profile
 
-No Web Worker is added preemptively. Browser QA includes a realistic 20–50 MiB input. If that freezes the editor for an unacceptable period, implementation stops and reports the result rather than inventing worker infrastructure. The documented 512 MiB ceiling is a security maximum, not a latency promise.
+The 2026-09-02 profiling fixture is a generated 20.4277 MiB UTF-8 CSV with 21,000 data rows and three columns, including enough text payload to exercise a realistic 20 MiB table. It is temporary certification input and is not committed.
 
-Vendor code is absent from initial Studio network loading. Opening CSV loads PapaParse only; opening XLSX loads SheetJS only; opening KML/GPX loads togeojson only; opening Shapefile loads shpjs (and proj4 only for manual CRS work); opening GeoPackage loads GeoPackage JS, its local WASM, and proj4 only for independent CRS verification.
+The earlier reported 38.615-second review-ready time was not application throughput. The browser harness polled `getAttribute('textContent')`; that attribute does not exist, so the harness always added 30 seconds of polling after the import had completed. Correct measurement reads the status node's `textContent` property. The actual Workbench reached `Review the preview` in 1.009 seconds in the real isolated Chromium flow.
+
+Three isolated page-side phase runs produced a measured pipeline subtotal of 1,171.6 ms cold, then 728.9 ms and 771.0 ms warm. Median phase timings are:
+
+| Phase | Median ms | Observed range ms | Notes |
+| --- | ---: | ---: | --- |
+| fetch/open plus ArrayBuffer read | 162.6 | 134.4–262.4 | Diagnostic server read; browser file reads are asynchronous. |
+| byte-view construction | 0.0 | 0.0–0.2 | No material cost. |
+| UTF-8 decode | 39.5 | 30.6–45.4 | Creates the complete 20 MiB string in the current path. |
+| PapaParse delimiter-detection parse | 129.4 | 126.8–141.6 | Current code parses the complete text once to choose a delimiter. |
+| PapaParse full parse | 41.5 | 30.1–58.1 | Current code parses the same text a second time. |
+| full grid clone/trailing trim | 7.9 | 4.6–11.5 | `grid.map(row => [...row])` duplicates every row array. |
+| table normalization | 201.9 | 181.3–331.8 | Includes width scan, another row-array copy, inference arrays, and normalized row objects. |
+| production table validation | 73.7 | 66.4–88.7 | Required and retained on the main thread after the worker result. |
+| candidate `structuredClone` | 125.9 | 108.9–253.4 | Avoidable before a worker result; `postMessage` already provides an ownership copy. |
+| candidate metadata | 0.2 | 0.1–0.3 | Negligible. |
+| bounded 20-row preview DOM | 1.5 | 1.2–9.6 | Not a bottleneck. |
+| `JSON.stringify` diagnostic | 157.2 | 97.3–214.4 | Not part of review-ready time; recorded because later persistence serialization is a large copy. |
+| CRS work | 0.0 | 0.0 | This benchmark is a table import. Projected CSV has a separate CRS certification flow. |
+
+The normalization-only diagnostic measured median costs of 19.0 ms for the width/slice temporary array, 47.5 ms for the second data-row array copy, 7.7 ms for scalar validation, 68.0 ms for per-column inference arrays, and 86.9 ms for normalized row-object construction. No O(n²) row algorithm was found; the hot path is O(rows × columns), but it performs too many complete passes and allocations. `Math.max(...grid.slice(...).map(...))` also creates an avoidable row-count-sized array and risks the engine argument ceiling on much taller tables.
+
+One cold heap observation grew from about 10.2 MiB at start to 56.8 MiB after parsing, 63.5 MiB after normalization, 84.4 MiB after the candidate clone, and 106.5 MiB after the diagnostic stringify. Repeated-page heap readings reached 179–189 MiB because garbage collection is nondeterministic; those repeated peaks are not treated as retained-memory proof.
+
+Actual importer runs were 744.5, 787.6, and 874.7 ms review-ready. They contained one 662–794 ms main-thread long task and one 650–800 ms animation-frame gap. The corrected diagnosis is therefore:
+
+- **throughput is already sub-second for the 20.43 MiB benchmark, not 38 seconds;**
+- **responsiveness still needs work because read, parse, normalize, validate, clone, and preview preparation chain into one long main-thread task;**
+- the worker must preserve roughly sub-second warm throughput rather than hiding a 30–40 second algorithm.
+
+### 16.2 Worker feasibility evidence
+
+A temporary, uncommitted classic-worker probe loaded and executed the pinned local artifacts without a bundler or CDN:
+
+- PapaParse 5.7.0 via `importScripts`, exposing `Papa.parse`;
+- proj4 2.22.0 via `importScripts`, exposing `proj4`;
+- GeoPackage 4.2.9 via `importScripts`, local SQL.js WASM redirection, actual open/list of `stops` and `stations`, and close;
+- shpjs 6.2.0 via dynamic `import()`, with the projected ZIP fixture parsed to one Point;
+- SheetJS CE 0.20.3 via dynamic `import()`, with both `Ridership` and `Other` sheets listed;
+- the existing pure table normalizer via dynamic `import()`.
+
+This removes the browser-artifact feasibility blocker. Implementation must repeat these operations through production adapters and must not retain the probe files.
+
+### 16.3 Dedicated worker boundary
+
+`data-import-worker-client.js` is the only main-thread worker API. `data-import-worker.js` is the only worker entry point. One Workbench dialog owns at most one worker; there is no global registry or concurrency. The worker may detect, parse, normalize, reproject, infer types, and produce bounded preview metadata. It cannot import or receive project, Story, draft-store, package-store, history, inspector, or storage mutation functions.
+
+The main thread retains:
+
+- selection size checks before reading;
+- Workbench DOM and accessibility state;
+- replacement compatibility presentation;
+- existing production resource validation;
+- descriptor/resource/manifest writes;
+- history/revision effects;
+- existing `add-project-layer` semantics;
+- final worker disposal.
+
+### 16.4 Message contract
+
+Every message has `type`, `sessionId`, and `requestId`. IDs are monotonically generated by the client and stale responses are ignored.
+
+Main to worker:
+
+```js
+{ type: 'start', sessionId, requestId, operation: 'read', inputs, usedIds, replacement }
+{ type: 'start', sessionId, requestId, operation: 'prepare', itemId, config }
+{ type: 'cancel', sessionId, requestId, reason }
+```
+
+Worker to main:
+
+```js
+{ type: 'progress', sessionId, requestId, phase, completed, total, unit, message }
+{ type: 'result', sessionId, requestId, operation: 'read', format, sourceItems }
+{ type: 'result', sessionId, requestId, operation: 'prepare', candidates }
+{ type: 'error', sessionId, requestId, phase, code, message, recoverable }
+{ type: 'cancel', sessionId, requestId, state: 'cancelled' }
+```
+
+Allowed progress phases are `Reading`, `Parsing`, `Inferring`, `Reprojecting`, and `Preparing preview`. `completed`, `total`, and `unit` are omitted when a parser cannot expose honest progress; fake percentages are prohibited. Errors expose bounded application codes/messages and do not send parser stacks into UI text.
+
+The repeated `start` type deliberately covers the two existing session operations (`read` and `prepare`) instead of creating a generic RPC protocol. No arbitrary method names or callable code cross the boundary.
+
+### 16.5 Formats by execution surface
+
+| Format/work | Worker | Main thread | Reason |
+| --- | --- | --- | --- |
+| CSV table/points | parse, chunk progress, inference, normalization, CRS, preview data | UI, validation, confirm/write | Largest measured main-thread path; Papa File streaming is available. |
+| JSON table / GeoJSON | decode, JSON parse, normalize, CRS override, preview data | UI, validation, confirm/write | Native worker operations and transferable input. |
+| XLSX | workbook parse, sheet inventory, selected-sheet grid, inference, preview data | sheet choice UI, validation, confirm/write | SheetJS ESM works in the worker. |
+| zipped/loose Shapefile | safe ZIP work, shpjs parse, CRS decision/application, normalize, preview data | missing-PRJ choice UI, validation, confirm/write | shpjs and pure CRS modules work in the worker. |
+| GeoPackage | open/inventory/extract/reproject/verify/close, preview data | layer choice UI, validation, confirm/write | Actual local bundle and WASM open successfully in the worker. |
+| KML, KMZ, GPX | — initially | bounded XML/DOM parse, togeojson, normalize, preview | Worker DOMParser is unavailable; the approved direction permits this bounded path rather than adding an XML DOM dependency. Browser certification records timing and reopens design if representative inputs become unresponsive. |
+
+KMZ continues to use safe local ZIP inspection and never fetches embedded/external resources. The XML path does not become an exception to transaction safety; it remains transient before Confirm.
+
+### 16.6 Transfer and copy strategy
+
+- CSV sends the `File` object to the worker so PapaParse's `FileStreamer` can read bounded chunks. The Blob/File backing store is structured-cloned by the platform; the application does not copy it into a main-thread text string or ArrayBuffer first.
+- JSON/GeoJSON, XLSX, Shapefile components/archives, and GeoPackage use transferable ArrayBuffers. The client reads bytes asynchronously, posts them in the transfer list, and treats the detached buffers as worker-owned. The original `File` references remain available for an explicit retry.
+- KML/GPX/KMZ remain on the main thread and do not cross the worker boundary.
+- Normalized candidates return through one structured-clone `result`. Production contracts require ordinary nested arrays/objects on the main thread, so replacing this with a transferable JSON buffer would merely move decode/`JSON.parse` back into a blocking main-thread phase.
+- The explicit `structuredClone` in `tableCandidate` is removed where the adapter/normalizer already created a worker-owned value. The `postMessage` result is the ownership copy.
+- CSV delimiter detection and parsing become one PapaParse operation. Chunk results are appended without cloning every row for trailing-blank removal.
+- `normalizeTableGrid` retains its pure API but tracks per-column inference state while validating cells, then constructs normalized rows directly. It does not create `dataRows` plus one temporary full column array per type inference.
+- No `JSON.stringify` is used for worker transport, preview, or progress.
+
+### 16.7 Progress, cancellation, and teardown
+
+The worker emits a progress phase before expensive work. PapaParse chunk callbacks report real byte or row progress. Other parsers report phase transitions only unless their API exposes a trustworthy completed/total value.
+
+Cancel is controlled by the main thread. `client.cancel(reason)` marks the request cancelled, posts the bounded cancel message for cooperative cleanup, immediately terminates the worker, rejects the outstanding promise with a stable cancellation error, and clears callbacks/references. Termination is the authority because a synchronous third-party parser cannot process an inbound cancel message until it yields. Cancel therefore remains operable even when worker code is busy.
+
+The same idempotent `dispose(reason)` path runs after confirmed success, any worker error, Cancel/Escape, dialog close, project close, selecting replacement files, or replacing the active import session. A recoverable error means the UI may retry from its retained File references by creating a fresh worker; it never means retaining a failed worker realm. GeoPackage/result-set cleanup still runs in adapter `finally` blocks on normal completion; worker termination is the final resource boundary on cancellation.
+
+After a prepared result is posted, large normalization intermediates and the worker's candidate reference are cleared. The worker may retain only the original File/source inventory and parser-specific state needed for another item/configuration while the dialog remains open. CSV reparses from the retained File when configuration changes rather than retaining both a full raw grid and normalized result. GeoPackage connections never remain open while the worker is idle. In this lifecycle, "success teardown" means confirmation or another dialog-closing completion; an idle worker after a preview result is still the explicitly owned active Workbench session and is terminated if that session ends.
+
+### 16.8 Expected memory behavior
+
+For the 20.43 MiB CSV, the design removes the full decoded main-thread string, the first complete delimiter-detection parse result, the cloned grid, the second row-array copy, per-column value arrays, and the explicit normalized-candidate clone. The worker still must hold parsed cell strings and construct the normalized production object, and the main thread ultimately receives one normalized candidate for production validation. Peak memory is therefore expected to be dominated by the source Blob backing, one raw worker representation during conversion, one normalized worker result during posting, and one main-thread normalized result after delivery—not by several deliberate duplicate representations.
+
+Because browser GC and parser internals are nondeterministic, certification records `performance.memory` only as diagnostic evidence where available. It does not claim a universal byte ceiling. A repeated import/cancel loop must show that disposed workers disappear and heap use returns toward a stable band after forced navigation/ordinary GC opportunities; monotonic growth is a failure.
+
+### 16.9 Revised 20 MiB acceptance procedure
+
+The final browser gate regenerates the same 21,420,020-byte / 21,000-row CSV outside the committed fixture tree and removes it afterward. It runs in isolated headed Chromium at both approved viewports.
+
+Measurements are independent:
+
+1. **Throughput:** record cold first-run and three warm review-ready wall times plus worker phase timings. Report median/min/max. A 30–40 second result is an automatic stop. Any material regression from the corrected sub-second main-thread baseline must be attributed to parser load, transport, normalization, or result delivery before certification; worker responsiveness alone cannot excuse it.
+2. **Responsiveness:** run a requestAnimationFrame gap sampler and Long Tasks observer on the main thread while importing. Progress must visibly advance, the Studio must repaint, and the main thread must have no frame gap above 250 ms during parsing/normalization. A large final-result delivery pause is measured separately and must also stay below 250 ms.
+3. **Cancel:** start the same import, activate Cancel during parsing, and require dialog recovery plus worker termination within 250 ms. No result may arrive afterward and project revision, resources, manifest, Story, and history remain unchanged.
+4. **Memory/teardown:** repeat import/cancel and import/success cycles, verify only one worker exists per active dialog, and verify termination on success, failure, Cancel, project close, and replacement.
+5. **Correctness:** confirm the completed candidate still passes the existing production validator; repeat the EPSG:32648 CSV coordinate gate independently.
+
+Vendor code remains absent from initial Studio loading. The worker lazily loads only the selected format's local parser. No worker, parser, WASM, or CRS request may target a CDN or network lookup.
 
 ## 17. Test and fixture design
 
@@ -470,6 +626,7 @@ Tests prove application conversion and production contracts, not complete upstre
 
 - `tests/editor-data-import.test.mjs` — detection, IDs, normalization, CRS, archive limits, and pure session behavior;
 - `tests/editor-data-import-adapters.test.mjs` — actual parser fixtures for CSV, KML/KMZ, GPX, Shapefile, XLSX, and GeoPackage;
+- `tests/editor-data-import-worker.test.mjs` — explicit protocol envelopes, stale-result rejection, transfer lists, progress, prompt termination, error mapping, and deterministic client disposal with a fake Worker plus real-browser parser probes;
 - `tests/editor-data-workbench.test.mjs` — DOM workflow, bounded previews, no-before-confirm mutation, confirm, Cancel, and replacement;
 - modify `tests/editor-zip-storage.test.mjs` — prove the shared ZIP helper preserves the certified project-package safety limits and behavior;
 - modify `tests/editor-data-inspectors.test.mjs` — validated add/replace boundary and stable replacement path;
@@ -519,12 +676,18 @@ The 64 numbered acceptance behaviors in the approved prompt are test requirement
 - changing workbench options and preparing previews leave package revision, manifest, Story, and history unchanged;
 - confirmation writes one resource/descriptor pair and spatial confirmation uses the existing Scene command;
 - replacement retains exact ID/path and blocks incompatible geometry.
+- worker `read`/`prepare` results remain transient, confirmation still crosses the production validator on the main thread, and the worker cannot receive mutation dependencies;
+- Cancel terminates an in-flight parser promptly, ignores late messages, and leaves project/history/package state byte-for-byte unchanged;
+- worker parser loading remains local/lazy and actual CSV, XLSX, Shapefile, GeoPackage/WASM, proj4, and pure normalizer operations execute in the classic-worker realm;
+- the generated 20.43 MiB browser benchmark reports phase, throughput, frame-gap, long-task, cancellation, and teardown evidence without committing the large file.
 
 ## 18. Browser and visual certification
 
 Implementation certification uses headed Edge/Chromium with an isolated profile at 1440x900 and 1366x768. It covers the approved workflows A–K: blank open/cancel, GeoJSON, KML, mixed KML, CSV table, critical CSV EPSG:32648 points, projected Shapefile ZIP, multi-sheet XLSX, multi-feature-table GeoPackage, replacement, and compact dialog layout.
 
 Spatial rendering is checked in the one existing production map. Browser network inspection proves parser artifacts are absent from initial load and no parser CDN / EPSG lookup occurs. The application-origin console must have no new errors.
+
+The worker certification additionally performs the section 16.9 benchmark. It records cold and warm throughput separately, captures actual progress transitions, proves Cancel remains clickable and terminates work, checks that no late result mutates UI/project state, and repeats success/cancel cycles to detect leaked worker realms or monotonically retained heap. KML/GPX/KMZ remain on the main thread only while their representative browser timing stays responsive; a material XML-path freeze is a new design stop gate rather than permission to add an XML dependency silently.
 
 Bounded evidence is stored at:
 
@@ -596,6 +759,8 @@ editor/import/spatial-adapters.js
 editor/import/table-adapters.js
 editor/import/geopackage-adapter.js
 editor/import/data-import.js
+editor/import/data-import-worker.js
+editor/import/data-import-worker-client.js
 editor/ui/data-workbench.js
 editor/ui/inspectors.js
 editor/ui/studio-shell.js
@@ -610,6 +775,7 @@ vendor/data-import/sheetjs/0.20.3/{xlsx.mjs,LICENSE}
 vendor/data-import/geopackage/4.2.9/{geopackage.min.js,sql-wasm.wasm,geopackage.min.js.LICENSE.txt,LICENSE}
 tests/editor-data-import.test.mjs
 tests/editor-data-import-adapters.test.mjs
+tests/editor-data-import-worker.test.mjs
 tests/editor-data-workbench.test.mjs
 tests/editor-zip-storage.test.mjs
 tests/editor-data-inspectors.test.mjs
@@ -626,13 +792,13 @@ The plan document, review report, and screenshots are created only after design 
 
 ## 22. Non-goals
 
-This slice does not add GeoTIFF, raster GIS layers, MBTiles, vector tiles, FlatGeobuf, GeoParquet, XLSM/XLSB/XLS/ODS, TCX, WKT/WKB columns, database connections, image crop/fill/pan/zoom, a media manager, fill extrusion, building-height mapping, generic 3D UI, geometry editing, a generic importer plugin framework, a second preview map, or cross-resource Undo.
+This slice does not add GeoTIFF, raster GIS layers, MBTiles, vector tiles, FlatGeobuf, GeoParquet, XLSM/XLSB/XLS/ODS, TCX, WKT/WKB columns, database connections, image crop/fill/pan/zoom, a media manager, fill extrusion, building-height mapping, generic 3D UI, geometry editing, a generic importer plugin framework, a generic worker manager/pool/scheduler, a second preview map, or cross-resource Undo.
 
 It does not persist original source format/filename provenance. After confirmation the resource is intentionally ordinary GeoJSON or table-data-v1 JSON.
 
 ## 23. Deviations and open blockers
 
-Deviations from the approved prompt: none.
+The original design deliberately omitted workers and required a browser stop gate. That gate was reported after a faulty 38.615-second measurement; the corrected application throughput is 0.745–1.009 seconds, but real profiling still found a 0.662–0.794 second main-thread long task. The user explicitly authorized this focused worker revision on 2026-09-02. No smaller main-thread file limit is adopted as the primary solution.
 
 Version resolution filled the two intentionally unspecified pins with current verified releases:
 
@@ -643,10 +809,10 @@ The candidate versions supplied in the prompt remain current for togeojson 7.1.2
 
 Open design blockers: none.
 
-GeoPackage browser-local feasibility is supported by the upstream static-browser bundle and local SQL.js WASM configuration. Implementation still has a mandatory projected-fixture verification gate; inability to robustly verify/close projected GeoPackage output is a stop condition, not grounds to fake support.
+No new dependency is required. Temporary design probes proved actual GeoPackage/WASM open/list/close, projected Shapefile parsing, XLSX sheet inventory, PapaParse, proj4, and pure normalizer loading inside the classic worker. Implementation still has mandatory production-adapter and projected-fixture gates; inability to reproduce those results through the final worker/client boundary is a stop condition, not grounds to fake support.
 
 ## 24. Approval gate
 
-This document is the Phase 0 design deliverable. No product code, vendor files, tests, fixtures, plan, browser QA, push, or PR work begins until the user explicitly approves this design.
+This revision is the focused worker-architecture design deliverable. No worker/client product code, worker tests, implementation-plan revision, final browser certification, push, or PR work resumes until the user explicitly approves it.
 
-After approval, the next process step is `superpowers:writing-plans`, producing `docs/superpowers/plans/2026-09-01-map-story-studio-v1-2-data-workbench.md`, followed by self-review and inline execution with TDD.
+After approval, the next process step is `superpowers:writing-plans`, revising `docs/superpowers/plans/2026-09-01-map-story-studio-v1-2-data-workbench.md` with the worker tasks, followed by self-review and inline execution with TDD.

@@ -1,11 +1,11 @@
 # Data Workbench V2 certification checkpoint
 
-Status: **STOPPED — responsiveness stop gate triggered**
+Status: **WORKER DESIGN IN REVIEW — final certification paused**
 
 - Base SHA: `045a8b4b4ea0680273c1e9b676fa1677d749de3e`
 - Current executable HEAD: `27ab3373eb84a88fc7ede87261ddb5a8095e8c60`
 - Branch: `feat/map-story-studio-v1-2-data-workbench`
-- Draft PR: not opened because certification is blocked
+- Draft PR: not opened while the focused worker revision awaits approval
 - Final full suite: intentionally not run because this is not a certifiable final executable head
 
 ## Passing checkpoint
@@ -19,11 +19,13 @@ The browser found and drove two fixes before the stop gate:
 
 The directly affected post-fix tests pass: **42/42** across `editor-data-import-adapters`, `editor-data-inspectors`, and `editor-data-workbench`.
 
-## Blocking evidence
+## Corrected responsiveness evidence
 
-A generated 20.43 MiB UTF-8 CSV containing 21,000 records was selected in the real browser. The table preview remained bounded to 20 rows, but file selection did not return to a review-ready state for **38.615 seconds**. Parsing and normalization run on the browser main thread, so this is an unacceptable editor freeze under the prompt's required realistic 20–50 MiB QA gate.
+A generated 20.4277 MiB UTF-8 CSV containing 21,000 records was selected in the real browser. The earlier **38.615-second** report was a profiling-harness error: it polled a nonexistent `textContent` attribute and therefore added 30 seconds after the import had completed.
 
-The approved brief requires stopping and reporting before adding generic worker infrastructure. No worker subsystem, reduced file-size workaround, or architectural expansion has been attempted.
+Correct measurement reached review-ready in **1.009 seconds** in the Workbench. Three direct importer runs completed in **0.745–0.875 seconds**, but each contained one **0.662–0.794 second main-thread long task** and a **0.650–0.800 second animation-frame gap**. Throughput is already sub-second; responsiveness and larger-file scaling remain the reasons for the approved dedicated worker boundary.
+
+The phase profile, diagnosed copies/passes, worker protocol, format split, memory strategy, and revised acceptance gate are recorded in `docs/superpowers/specs/2026-09-01-map-story-studio-v1-2-data-workbench-design.md`. No smaller main-thread file limit is proposed as the primary solution, and no generic worker framework has been implemented.
 
 ## Dependency disclosure
 
@@ -48,4 +50,4 @@ Exact vendored artifacts, provenance, licenses, and SHA-256 values are recorded 
 - `data-workbench/05-xlsx-sheet-table-preview.png`
 - `data-workbench/06-geopackage-layer-preview.png`
 
-These are checkpoint evidence only; final certification, console assessment, bounded regression, one-time full suite, push, and Draft PR remain pending a worker/large-file direction.
+These are checkpoint evidence only; final certification, console assessment, bounded regression, one-time full suite, push, and Draft PR remain pending approval and implementation of the focused worker revision.
