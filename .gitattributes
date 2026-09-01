@@ -1,0 +1,2 @@
+# Preserve upstream vendored files byte-for-byte; application source retains Git's default whitespace checks.
+vendor/data-import/** -whitespace
