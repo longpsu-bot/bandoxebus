@@ -26,6 +26,56 @@ import {
 
 const decoder = new TextDecoder();
 
+const CHART_TYPES = Object.freeze(['bar', 'line', 'area']);
+
+function chartCompatible(table) {
+  return Boolean(
+    table?.columns?.some(({ type }) => ['text', 'date', 'integer'].includes(type))
+    && table.columns.some(({ type }) => ['integer', 'number'].includes(type))
+  );
+}
+
+export function planStudioInsert(kind, catalogs = {}) {
+  if (kind === 'metric') {
+    const options = catalogs.metrics ?? [];
+    if (!options.length) return {
+      status: 'needs-resource', kind, title: 'Add metric',
+      message: 'No metrics in this project yet.', actionLabel: 'Create metric'
+    };
+    if (options.length === 1) return { status: 'ready', kind, selection: { metricId: options[0].id } };
+    return { status: 'choose', kind, title: 'Add metric', fieldLabel: 'Metric', options };
+  }
+  if (kind === 'chart') {
+    const tables = catalogs.tables ?? [];
+    const options = tables.filter(chartCompatible);
+    if (!options.length) return {
+      status: 'needs-resource', kind, title: 'Add chart',
+      message: tables.length
+        ? 'No compatible table data in this project yet.'
+        : 'No table data in this project yet.',
+      actionLabel: 'Add / Import data'
+    };
+    return { status: 'choose', kind, title: 'Add chart', fieldLabel: 'Data', options, chartTypes: [...CHART_TYPES] };
+  }
+  if (kind === 'table') {
+    const options = catalogs.tables ?? [];
+    if (!options.length) return {
+      status: 'needs-resource', kind, title: 'Add table',
+      message: 'No table data in this project yet.', actionLabel: 'Add / Import data'
+    };
+    return { status: 'choose', kind, title: 'Add table', fieldLabel: 'Data', options };
+  }
+  if (kind === 'image') {
+    const options = catalogs.assets ?? [];
+    if (!options.length) return {
+      status: 'needs-resource', kind, title: 'Add image',
+      message: 'No images in this project yet.', actionLabel: 'Import image'
+    };
+    return { status: 'choose', kind, title: 'Add image', fieldLabel: 'Image', options };
+  }
+  throw new TypeError(`Unsupported Studio insert kind: ${kind}.`);
+}
+
 export async function savePackageChanges({
   adapter,
   packageStore,
@@ -142,6 +192,7 @@ export function createEditor({
   let actionSelection = '';
   let viewportPreset = 'desktop';
   let outputPreviewStatus = null;
+  let pendingStudioInsert = null;
 
   function launchOutputPreview(outputMode) {
     const launch = createOutputPreviewLaunch(validation, outputMode);
@@ -164,12 +215,16 @@ export function createEditor({
     const selectedDescriptors = INSTALLED_CAPABILITY_REGISTRY.catalog().filter(({ id }) => selectedIds.has(id));
     const tables = Object.entries(manifest.datasets)
       .filter(([, descriptor]) => descriptor.type === 'table-json')
-      .map(([id, descriptor]) => ({ id, columns: draftStore.get(descriptor.src.replace(/^\.\//, ''))?.columns ?? [] }));
+      .map(([id, descriptor]) => ({
+        id,
+        label: descriptor.label ?? id,
+        columns: draftStore.get(descriptor.src.replace(/^\.\//, ''))?.columns ?? []
+      }));
     const metricFile = manifest.metrics ? draftStore.get(manifest.metrics.src.replace(/^\.\//, '')) : null;
     const catalogs = {
       tables,
       datasets: Object.entries(manifest.datasets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
-      assets: Object.keys(manifest.assets).map((id) => ({ id })),
+      assets: Object.entries(manifest.assets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
       metrics: [
         ...Object.entries(metricFile?.metrics ?? {}).map(([id, metric]) => ({ id, label: metric.label, format: metric.format })),
         ...selectedDescriptors.flatMap(({ metrics }) => metrics)
@@ -185,6 +240,75 @@ export function createEditor({
       'map.set-emphasis': datasetTargets
     };
     return { catalogs, selectedDescriptors };
+  }
+
+  function studioInsertSelection(kind, id, chartType = 'bar') {
+    if (kind === 'metric') return { metricId: id };
+    if (kind === 'chart') return { datasetId: id, chartType };
+    if (kind === 'table') return { datasetId: id };
+    if (kind === 'image') return { assetId: id };
+    throw new TypeError(`Unsupported Studio insert kind: ${kind}.`);
+  }
+
+  function completePendingStudioInsert(resourceId) {
+    if (!pendingStudioInsert) return false;
+    const { kind, insert } = pendingStudioInsert;
+    const catalogs = productionContentCatalogs(primaryStory().manifest).catalogs;
+    const options = kind === 'metric' ? catalogs.metrics
+      : kind === 'image' ? catalogs.assets : catalogs.tables;
+    const selected = options.find(({ id }) => id === resourceId);
+    if (!selected || (kind === 'chart' && !chartCompatible(selected))) {
+      const status = elements.inspector.querySelector?.('.authoring-status');
+      if (status) status.textContent = kind === 'chart'
+        ? 'This table needs a categorical or date column and a numeric column before it can be charted.'
+        : 'The new resource is not production-valid yet.';
+      return false;
+    }
+    pendingStudioInsert = null;
+    insert(studioInsertSelection(kind, resourceId), catalogs);
+    return true;
+  }
+
+  function cancelStudioInsert() {
+    pendingStudioInsert = null;
+    renderStudioWorkspace();
+  }
+
+  function renderStudioInsertRequest(kind, insert) {
+    const catalogs = productionContentCatalogs(primaryStory().manifest).catalogs;
+    const plan = planStudioInsert(kind, catalogs);
+    if (plan.status === 'ready') {
+      insert(plan.selection, catalogs);
+      return;
+    }
+
+    const { panel, status } = authoringPanel(plan.title);
+    status.textContent = plan.message ?? 'Choose the production resource to use.';
+    if (plan.status === 'needs-resource') {
+      panel.append(button(plan.actionLabel, `studio-insert-${kind}-resource`, () => {
+        pendingStudioInsert = { kind, insert };
+        if (kind === 'metric') renderMetricPanel();
+        else if (kind === 'image') renderAssetPanel();
+        else renderDatasetPanel();
+      }));
+      panel.append(button('Cancel', `studio-insert-${kind}-cancel`, cancelStudioInsert));
+      return;
+    }
+
+    const resource = labeled(panel, plan.fieldLabel, selectInput(`studio-insert-${kind}-resource`, [
+      ...plan.options.map(({ id, label }) => [id, label ?? id])
+    ]));
+    let chartType = null;
+    if (kind === 'chart') {
+      chartType = labeled(panel, 'Chart type', selectInput('studio-insert-chart-type', [
+        ['bar', 'Bar'], ['line', 'Line'], ['area', 'Area']
+      ]));
+    }
+    panel.append(button('Cancel', `studio-insert-${kind}-cancel`, cancelStudioInsert));
+    panel.append(button('Add', `studio-insert-${kind}-add`, () => {
+      insert(studioInsertSelection(kind, resource.value, chartType?.value), catalogs);
+      pendingStudioInsert = null;
+    }));
   }
 
   function renderStudioWorkspace() {
@@ -225,6 +349,7 @@ export function createEditor({
         renderDirty();
         renderStudioWorkspace();
       },
+      onRequestInsert(kind, insert) { renderStudioInsertRequest(kind, insert); },
       onPreviewCommand(name, payload) { bridge.command(name, payload); },
       onOutputPreview: launchOutputPreview
     });
@@ -587,6 +712,7 @@ export function createEditor({
           const fields = entity.labelFields();
           if (fields.length) entity.control('render.label').set({ field: fields[0], placement: 'auto' });
         }
+        if (type.value === 'table' && completePendingStudioInsert(id.value)) return;
         refreshPanel(renderDatasetPanel, `Added dataset ${id.value}.`);
       } catch (error) { status.textContent = error.message; }
     });
@@ -634,6 +760,7 @@ export function createEditor({
         ui.command('add-image', id.value, {
           bytes: new Uint8Array(await selected.arrayBuffer()), mediaType: selected.type
         });
+        if (completePendingStudioInsert(id.value)) return;
         refreshPanel(renderAssetPanel, `Added image ${id.value}.`);
       } catch (error) { status.textContent = error.message; }
     });
@@ -673,6 +800,7 @@ export function createEditor({
         const descriptor = { label: label.value, value: scalar, format: { type: format.value } };
         if (format.value === 'currency') descriptor.format.currency = 'USD';
         ui.command('add-static', id.value, descriptor);
+        if (completePendingStudioInsert(id.value)) return;
         refreshPanel(renderMetricPanel, `Added metric ${id.value}.`);
       } catch (error) { status.textContent = error.message; }
     });

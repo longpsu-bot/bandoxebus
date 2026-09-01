@@ -99,6 +99,64 @@ test('Studio Add menu exposes every rich family and selected Metric Properties e
   assert.equal(byId.has('studio-frame-x'), false, 'normalized frame remains canvas-authored');
 });
 
+test('Blank Studio inserts Heading, Body text, and Legend immediately while resource-backed buttons request guided insertion', () => {
+  resetStudioAuthoringSession();
+  const documentRef = { createElement: (tag) => new Element(tag), getElementById: () => null };
+  const roots = [new Element('nav'), new Element('aside'), new Element('section'), new Element('div')];
+  let story = baseStory();
+  const requests = [];
+  const mount = () => mountStudioShell({
+    documentRef, navigation: roots[0], inspector: roots[1], scenesHost: roots[2], previewToolbar: roots[3],
+    manifest: { id: 'blank-project', datasets: {}, assets: {} }, story, catalogs: { metrics: [], tables: [], assets: [] },
+    onStoryCommand(name, payload) { story = applyStudioStoryCommand(story, name, payload); mount(); },
+    onRequestInsert(kind, insert) { requests.push({ kind, insert }); }
+  });
+  mount();
+  const button = (label) => roots.flatMap(walk).find((node) => node.tagName === 'BUTTON' && node.textContent === label);
+
+  button('Heading').click();
+  button('Body text').click();
+  button('Legend').click();
+  assert.deepEqual(story.states[0].content.blocks.map(({ block }) => block.type), ['heading', 'paragraph', 'legend']);
+
+  const beforeResourceRequests = structuredClone(story);
+  for (const label of ['Metric', 'Chart', 'Table', 'Image']) assert.doesNotThrow(() => button(label).click());
+  assert.deepEqual(requests.map(({ kind }) => kind), ['metric', 'chart', 'table', 'image']);
+  assert.deepEqual(story, beforeResourceRequests, 'opening or cancelling resource guidance must not mutate Story data');
+  assert.equal(requests.every(({ insert }) => typeof insert === 'function'), true);
+});
+
+test('guided rich insertion commits an explicit resource and selects the production-valid object', () => {
+  resetStudioAuthoringSession();
+  const byId = new Map();
+  const documentRef = {
+    createElement(tag) {
+      const node = new Element(tag);
+      const set = node.setAttribute.bind(node);
+      node.setAttribute = (name, value) => { set(name, value); if (name === 'id') byId.set(String(value), node); };
+      return node;
+    },
+    getElementById(id) { return byId.get(id) ?? null; }
+  };
+  const roots = [new Element('nav'), new Element('aside'), new Element('section'), new Element('div')];
+  let story = baseStory();
+  let pendingInsert;
+  const mount = () => mountStudioShell({
+    documentRef, navigation: roots[0], inspector: roots[1], scenesHost: roots[2], previewToolbar: roots[3],
+    manifest: { id: 'choice-project', datasets: {}, assets: {} }, story, catalogs,
+    onStoryCommand(name, payload) { story = applyStudioStoryCommand(story, name, payload); mount(); },
+    onRequestInsert(_kind, insert) { pendingInsert = insert; }
+  });
+  mount();
+  roots.flatMap(walk).find((node) => node.tagName === 'BUTTON' && node.textContent === 'Metric').click();
+  pendingInsert({ metricId: 'ridership' }, catalogs);
+
+  const inserted = story.states[0].content.blocks[0];
+  assert.equal(inserted.block.items[0].metric, 'ridership');
+  assert.equal(validateStoryDefinition(story, { actionContracts: {} }), story);
+  assert.ok(byId.get('studio-metric-label'), 'new rich object is selected and its Properties are open');
+});
+
 test('Studio derives semantic object and Scene labels without mutating stable production IDs', () => {
   assert.equal(typeof studioShell.deriveStudioObjectLabel, 'function');
   assert.equal(typeof studioShell.deriveStudioSceneLabel, 'function');

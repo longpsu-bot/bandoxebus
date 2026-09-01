@@ -320,11 +320,17 @@ export function addTextEnvelope(story, { sceneIndex, kind = 'body', frame } = {}
   return next;
 }
 
-export function addRichEnvelope(story, { sceneIndex, kind, catalogs = {}, frame } = {}) {
+export function addRichEnvelope(story, {
+  sceneIndex, kind, catalogs = {}, frame, metricId, datasetId, assetId, chartType
+} = {}) {
   const blocks = blocksAt(story, sceneIndex);
   const next = clone(story);
   const envelope = createRichObjectEnvelope(kind, {
     catalogs,
+    metricId,
+    datasetId,
+    assetId,
+    chartType,
     usedIds: blocks.map(({ id }) => id),
     frame: frame ? normalizeFrame(frame) : undefined,
     z: Math.min(9999, highestZ(blocks) + 1)

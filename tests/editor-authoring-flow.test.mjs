@@ -20,6 +20,7 @@ import {
   createNetworkServicePlanTemplate,
   createRouteProposalTemplate
 } from '../editor/core/templates.js';
+import * as editorModule from '../editor/editor.js';
 
 const encoder = new TextEncoder();
 
@@ -48,6 +49,44 @@ test('Import Existing routes to the certified Folder and ZIP paths', async () =>
   assert.equal(await routeStudioImportExisting('zip', handlers, file), 'zip-opened');
   assert.deepEqual(calls, [['folder'], ['zip', file, { label: 'existing.zip' }]]);
   assert.throws(() => routeStudioImportExisting('remote', handlers), /unsupported import/i);
+});
+
+test('Studio insert planning gives missing resources product guidance and explicit choices', () => {
+  assert.equal(typeof editorModule.planStudioInsert, 'function');
+  assert.deepEqual(editorModule.planStudioInsert('metric', { metrics: [] }), {
+    status: 'needs-resource', kind: 'metric', title: 'Add metric',
+    message: 'No metrics in this project yet.', actionLabel: 'Create metric'
+  });
+  assert.deepEqual(editorModule.planStudioInsert('chart', { tables: [] }), {
+    status: 'needs-resource', kind: 'chart', title: 'Add chart',
+    message: 'No table data in this project yet.', actionLabel: 'Add / Import data'
+  });
+  assert.deepEqual(editorModule.planStudioInsert('table', { tables: [] }), {
+    status: 'needs-resource', kind: 'table', title: 'Add table',
+    message: 'No table data in this project yet.', actionLabel: 'Add / Import data'
+  });
+  assert.deepEqual(editorModule.planStudioInsert('image', { assets: [] }), {
+    status: 'needs-resource', kind: 'image', title: 'Add image',
+    message: 'No images in this project yet.', actionLabel: 'Import image'
+  });
+
+  const metrics = [{ id: 'ridership', label: 'Ridership' }, { id: 'speed', label: 'Speed' }];
+  const metricChoice = editorModule.planStudioInsert('metric', { metrics });
+  assert.equal(metricChoice.status, 'choose');
+  assert.deepEqual(metricChoice.options.map(({ id }) => id), ['ridership', 'speed']);
+
+  const tables = [
+    { id: 'labels-only', columns: [{ id: 'name', type: 'text' }] },
+    { id: 'ridership', columns: [{ id: 'date', type: 'date' }, { id: 'trips', type: 'integer' }] }
+  ];
+  const chartChoice = editorModule.planStudioInsert('chart', { tables });
+  assert.equal(chartChoice.status, 'choose');
+  assert.deepEqual(chartChoice.options.map(({ id }) => id), ['ridership']);
+  assert.deepEqual(chartChoice.chartTypes, ['bar', 'line', 'area']);
+
+  const incompatible = editorModule.planStudioInsert('chart', { tables: [tables[0]] });
+  assert.equal(incompatible.status, 'needs-resource');
+  assert.equal(incompatible.message, 'No compatible table data in this project yet.');
 });
 
 function geo(type, coordinates, properties = {}) {

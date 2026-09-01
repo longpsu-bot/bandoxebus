@@ -70,3 +70,47 @@ test('factories require the declared catalog entry needed by their descriptor', 
   assert.throws(() => createChartEnvelope({ catalogs: {}, usedIds: [] }), /normalized table/i);
   assert.throws(() => createImageEnvelope({ catalogs: {}, usedIds: [] }), /image asset/i);
 });
+
+test('rich factories bind the explicitly selected production resource', () => {
+  const choices = {
+    metrics: [
+      ...catalogs.metrics,
+      { id: 'on-time', label: 'On-time trips', format: { type: 'percentage' } }
+    ],
+    tables: [
+      ...catalogs.tables,
+      {
+        id: 'ridership-by-stop',
+        columns: [
+          { id: 'stop', label: 'Stop', type: 'text' },
+          { id: 'boardings', label: 'Boardings', type: 'number' }
+        ]
+      }
+    ],
+    assets: [...catalogs.assets, { id: 'stop-photo' }]
+  };
+
+  const metric = createMetricEnvelope({ catalogs: choices, metricId: 'on-time' }).block;
+  const chart = createChartEnvelope({ catalogs: choices, datasetId: 'ridership-by-stop', chartType: 'line' }).block;
+  const table = createTableEnvelope({ catalogs: choices, datasetId: 'ridership-by-stop' }).block;
+  const image = createImageEnvelope({ catalogs: choices, assetId: 'stop-photo' }).block;
+
+  assert.equal(metric.items[0].metric, 'on-time');
+  assert.equal(chart.data.dataset, 'ridership-by-stop');
+  assert.equal(chart.chartType, 'line');
+  assert.equal(table.data.dataset, 'ridership-by-stop');
+  assert.equal(image.asset, 'stop-photo');
+  for (const envelope of [metric, chart, table, image]) {
+    assert.equal(JSON.stringify(envelope).includes('chooser'), false);
+    assert.equal(JSON.stringify(envelope).includes('pending'), false);
+  }
+});
+
+test('an unknown or incompatible explicit resource is rejected before Story mutation', () => {
+  assert.throws(() => createMetricEnvelope({ catalogs, metricId: 'missing' }), /unknown metric/i);
+  assert.throws(() => createImageEnvelope({ catalogs, assetId: 'missing' }), /unknown image asset/i);
+  assert.throws(() => createChartEnvelope({
+    catalogs: { tables: [{ id: 'labels-only', columns: [{ id: 'label', type: 'text' }] }] },
+    datasetId: 'labels-only'
+  }), /categorical x column and a numeric series column/i);
+});

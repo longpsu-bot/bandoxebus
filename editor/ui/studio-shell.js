@@ -607,6 +607,7 @@ export function mountStudioShell({
   onSelectOverlay = () => {},
   onRenderLayerProperties = () => {},
   onStoryCommand = () => {},
+  onRequestInsert = (_kind, insert) => insert(),
   onPreviewCommand = () => {},
   onOutputPreview = () => {}
 } = {}) {
@@ -624,7 +625,7 @@ export function mountStudioShell({
   activeStudio = {
     documentRef, navigation, inspector, scenesHost, previewToolbar,
     manifest, story, catalogs, sceneIndex, workingCamera,
-    onSelectScene, onSelectOverlay, onRenderLayerProperties, onStoryCommand, onPreviewCommand, onOutputPreview
+    onSelectScene, onSelectOverlay, onRenderLayerProperties, onStoryCommand, onRequestInsert, onPreviewCommand, onOutputPreview
   };
   normalizeSelection();
   ensureHistory(activeStudio);
@@ -669,7 +670,15 @@ export function mountStudioShell({
     ['Metric', 'metric'], ['Chart', 'chart'], ['Table', 'table'], ['Image', 'image'], ['Legend', 'legend']
   ]) {
     const button = element(documentRef, 'button', label, { type: 'button', title: `Add ${label.toLowerCase()}` });
-    button.addEventListener('click', () => executeStoryCommand('add-rich-object', { sceneIndex, kind, catalogs }));
+    button.addEventListener('click', () => {
+      if (kind === 'legend') {
+        executeStoryCommand('add-rich-object', { sceneIndex, kind, catalogs });
+        return;
+      }
+      onRequestInsert(kind, (selection = {}, refreshedCatalogs = activeStudio?.catalogs ?? catalogs) => (
+        executeStoryCommand('add-rich-object', { sceneIndex, kind, catalogs: refreshedCatalogs, ...selection })
+      ));
+    });
     addMenu.append(button);
   }
   const objectsHeading = element(documentRef, 'h2', 'Objects');
