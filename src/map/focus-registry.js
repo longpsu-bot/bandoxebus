@@ -7,18 +7,42 @@ function coordinates(value, output = []) {
   return output;
 }
 
-function datasetBounds(ids, datasets, path) {
-  const all = [];
-  for (const id of ids) {
-    const resource = datasets.get(id);
-    if (!resource) throw new ProjectLoadError('FOCUS_DATASET_UNKNOWN', path, `Unknown focus dataset ID: ${id}.`);
-    for (const feature of resource.value?.features ?? []) coordinates(feature.geometry?.coordinates, all);
+function geometryCoordinates(geometry, output = []) {
+  if (!geometry) return output;
+  if (geometry.type === 'GeometryCollection') {
+    for (const child of geometry.geometries ?? []) geometryCoordinates(child, output);
+    return output;
   }
-  if (!all.length) throw new ProjectLoadError('FOCUS_DATASET_EMPTY', path, 'Focus datasets contain no coordinates.');
+  return coordinates(geometry.coordinates, output);
+}
+
+export function geoJsonBounds(value) {
+  const all = [];
+  if (value?.type === 'FeatureCollection') {
+    for (const feature of value.features ?? []) geometryCoordinates(feature?.geometry, all);
+  } else if (value?.type === 'Feature') geometryCoordinates(value.geometry, all);
+  else geometryCoordinates(value, all);
+  if (!all.length) return null;
   return all.reduce((bounds, [lng, lat]) => [
     [Math.min(bounds[0][0], lng), Math.min(bounds[0][1], lat)],
     [Math.max(bounds[1][0], lng), Math.max(bounds[1][1], lat)]
   ], [[Infinity, Infinity], [-Infinity, -Infinity]]);
+}
+
+function datasetBounds(ids, datasets, path) {
+  let bounds = null;
+  for (const id of ids) {
+    const resource = datasets.get(id);
+    if (!resource) throw new ProjectLoadError('FOCUS_DATASET_UNKNOWN', path, `Unknown focus dataset ID: ${id}.`);
+    const next = geoJsonBounds(resource.value);
+    if (!next) continue;
+    bounds = bounds ? [
+      [Math.min(bounds[0][0], next[0][0]), Math.min(bounds[0][1], next[0][1])],
+      [Math.max(bounds[1][0], next[1][0]), Math.max(bounds[1][1], next[1][1])]
+    ] : next;
+  }
+  if (!bounds) throw new ProjectLoadError('FOCUS_DATASET_EMPTY', path, 'Focus datasets contain no coordinates.');
+  return bounds;
 }
 
 function normalize(id, target, datasets, owner = 'project') {

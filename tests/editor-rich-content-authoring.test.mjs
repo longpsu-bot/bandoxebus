@@ -193,12 +193,14 @@ test('Studio layer selection is UI-only, does not toggle Scene visibility, and r
   story.states[0].map.layerVisibility.route = true;
   const before = structuredClone(story);
   const commands = [];
+  const previewCommands = [];
   const renderedLayerProperties = [];
   const mount = () => mountStudioShell({
     documentRef, navigation: roots[0], inspector: roots[1], scenesHost: roots[2], previewToolbar: roots[3],
     manifest: { id: 'layer-project', datasets: { route: { type: 'geojson', label: 'Existing route', render: { type: 'line', color: '#00AAFF', width: 4 } } }, assets: {} },
     story,
     onStoryCommand(name, payload) { commands.push([name, payload]); },
+    onPreviewCommand(name, payload) { previewCommands.push([name, payload]); },
     onRenderLayerProperties(datasetId, inspector) {
       renderedLayerProperties.push(datasetId);
       inspector.append(new Element('section'));
@@ -213,9 +215,16 @@ test('Studio layer selection is UI-only, does not toggle Scene visibility, and r
   assert.deepEqual(story, before, 'selection does not serialize into Story data');
   assert.deepEqual(commands, [], 'selection does not author visibility');
   assert.deepEqual(renderedLayerProperties, ['route']);
+  assert.deepEqual(previewCommands, [['locate-project-layer', { datasetId: 'route' }]]);
+  layerButton.click();
+  assert.deepEqual(previewCommands, [
+    ['locate-project-layer', { datasetId: 'route' }],
+    ['locate-project-layer', { datasetId: 'route' }]
+  ], 'clicking the selected layer again re-locates it');
   const visibility = nodes().find((node) => node.tagName === 'INPUT' && node.attributes.get('type') === 'checkbox');
   visibility.checked = false;
   visibility.change();
+  assert.equal(previewCommands.length, 2, 'visibility checkbox never sends locate');
   assert.equal(commands.length, 1);
   assert.equal(commands[0][0], 'replace-story');
   assert.equal(commands[0][1].story.states[0].map.layerVisibility.route, false);
@@ -272,4 +281,30 @@ test('Scene and Text Properties expose meaningful groups with friendly enum labe
 
   mountStudioShell({ ...options, selectedOverlayId: 'opening-heading' });
   assert.deepEqual(walk(roots[1]).filter((node) => node.tagName === 'H3').map(({ textContent }) => textContent), ['Text', 'Appearance', 'Arrange']);
+});
+
+test('working-camera divergence is UI-only until Capture Camera explicitly persists it', () => {
+  resetStudioAuthoringSession();
+  const documentRef = { createElement: (tag) => new Element(tag), getElementById: () => null };
+  const roots = [new Element('nav'), new Element('aside'), new Element('section'), new Element('div')];
+  let story = baseStory();
+  const savedCamera = structuredClone(story.states[0].map.camera);
+  const workingCamera = {
+    center: [106.7, 10.8], zoom: 15, pitch: 0, bearing: 0,
+    bounds: [[106.69, 10.79], [106.71, 10.81]]
+  };
+  const mount = () => mountStudioShell({
+    documentRef, navigation: roots[0], inspector: roots[1], scenesHost: roots[2], previewToolbar: roots[3],
+    manifest: { id: 'camera-project', datasets: {}, assets: {} }, story, workingCamera,
+    onStoryCommand(name, payload) { story = applyStudioStoryCommand(story, name, payload); mount(); }
+  });
+  mount();
+  const nodes = () => roots.flatMap(walk);
+  assert.equal(nodes().some((node) => node.textContent === 'Camera changed · not captured'), true);
+  assert.deepEqual(story.states[0].map.camera, savedCamera);
+  nodes().find((node) => node.tagName === 'BUTTON' && node.textContent === 'Capture Camera').click();
+  assert.deepEqual(story.states[0].map.camera, {
+    center: workingCamera.center, zoom: workingCamera.zoom,
+    pitch: workingCamera.pitch, bearing: workingCamera.bearing
+  });
 });

@@ -1,5 +1,6 @@
 import { PREVIEW_PROTOCOL_VERSION, validatePreviewSnapshot } from './bridge.js';
 import { createSceneAuthoringAdapter } from '../../src/scene/scene-authoring-adapter.js';
+import { geoJsonBounds } from '../../src/map/focus-registry.js';
 
 const DEFAULT_PACKAGE_ORIGIN = globalThis.location?.origin ?? 'http://localhost';
 
@@ -133,6 +134,8 @@ function validCommand(data) {
   if (name === 'authoring-mode') return exactKeys(payload, ['mode']) && ['select', 'map'].includes(payload.mode);
   if (name === 'restore-scene-camera') return exactKeys(payload, ['index'])
     && Number.isInteger(payload.index) && payload.index >= 0;
+  if (name === 'locate-project-layer') return exactKeys(payload, ['datasetId'])
+    && typeof payload.datasetId === 'string' && /^[a-z][a-z0-9-]*$/.test(payload.datasetId);
   return false;
 }
 
@@ -274,6 +277,43 @@ export function startEditorPreviewHost({
       activeAuthoringAdapter?.setMode?.(payload.mode);
     }
     else if (name === 'restore-scene-camera') activeRuntime?.shell?.restoreSceneCamera?.(payload.index);
+    else if (name === 'locate-project-layer') {
+      const resource = activeRuntime?.project?.resources?.get?.(payload.datasetId);
+      if (!resource || resource.descriptor?.type !== 'geojson') {
+        post('locate-result', activeSnapshot?.revision ?? 0, {
+          datasetId: payload.datasetId,
+          status: 'error',
+          message: resource ? 'Only project GeoJSON layers can be located.' : 'Layer data is unavailable.'
+        }, data.requestId);
+        return;
+      }
+      const bounds = geoJsonBounds(resource.value);
+      if (!bounds) {
+        post('locate-result', activeSnapshot?.revision ?? 0, {
+          datasetId: payload.datasetId,
+          status: 'empty',
+          message: 'Layer has no features to locate.'
+        }, data.requestId);
+        return;
+      }
+      const map = activeRuntime?.map;
+      const duration = windowRef.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 400;
+      if (bounds[0][0] === bounds[1][0] && bounds[0][1] === bounds[1][1]) {
+        map?.easeTo?.({
+          center: [...bounds[0]],
+          zoom: Math.min(15, map?.getMaxZoom?.() ?? 15),
+          duration,
+          essential: false
+        });
+      } else {
+        map?.fitBounds?.(bounds, { padding: 48, maxZoom: 16, duration, essential: false });
+      }
+      post('locate-result', activeSnapshot?.revision ?? 0, {
+        datasetId: payload.datasetId,
+        status: 'located',
+        message: 'Layer located on the working map.'
+      }, data.requestId);
+    }
   }
 
   function handleMessage(event) {

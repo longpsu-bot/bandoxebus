@@ -1226,6 +1226,8 @@ export function createEditor({
       } else if (event.type === 'editor-preview:camera') {
         previewTelemetry = structuredClone(event.payload);
         if (!renderStudioWorkspace() && activeSection === 'project') renderProjectInspector();
+      } else if (event.type === 'editor-preview:locate-result' && event.payload.status !== 'located') {
+        elements.previewStatus.textContent = event.payload.message;
       }
     }
   });

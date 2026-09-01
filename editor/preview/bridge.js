@@ -15,6 +15,7 @@ const EVENT_TYPES = new Set([
   'editor-preview:runtime-error',
   'editor-preview:state',
   'editor-preview:camera',
+  'editor-preview:locate-result',
   ...AUTHORING_EVENT_TYPES
 ]);
 const START_RESPONSE_TYPES = new Set([
@@ -86,6 +87,12 @@ function validEventPayload(data) {
   if (data.type === 'editor-preview:state') return hasExactKeys(data.payload, ['viewport']);
   if (data.type === 'editor-preview:camera') {
     return hasExactKeys(data.payload, ['center', 'zoom', 'pitch', 'bearing', 'bounds']);
+  }
+  if (data.type === 'editor-preview:locate-result') {
+    return hasExactKeys(data.payload, ['datasetId', 'status', 'message'])
+      && validOverlayId(data.payload.datasetId)
+      && ['located', 'empty', 'error'].includes(data.payload.status)
+      && typeof data.payload.message === 'string' && data.payload.message.length <= 4096;
   }
   if (data.type === 'editor-preview:select-overlay') {
     return hasExactKeys(data.payload, ['id']) && validOverlayId(data.payload.id);
@@ -165,6 +172,8 @@ function validCommandPayload(payload) {
     && ['select', 'map'].includes(payload.payload.mode);
   if (payload.name === 'restore-scene-camera') return hasExactKeys(payload.payload, ['index'])
     && Number.isInteger(payload.payload.index) && payload.payload.index >= 0;
+  if (payload.name === 'locate-project-layer') return hasExactKeys(payload.payload, ['datasetId'])
+    && validOverlayId(payload.payload.datasetId);
   return false;
 }
 

@@ -282,6 +282,7 @@ function selectLayer(id) {
   selectedLayerId = id;
   selectedOverlayId = null;
   selectedOverlayIds = [];
+  activeStudio?.onPreviewCommand?.('locate-project-layer', { datasetId: id });
   rerenderActive();
 }
 
