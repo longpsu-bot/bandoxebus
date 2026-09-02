@@ -16,6 +16,7 @@ const EVENT_TYPES = new Set([
   'editor-preview:state',
   'editor-preview:camera',
   'editor-preview:locate-result',
+  'editor-preview:urban-context-status',
   ...AUTHORING_EVENT_TYPES
 ]);
 const START_RESPONSE_TYPES = new Set([
@@ -93,6 +94,15 @@ function validEventPayload(data) {
       && validOverlayId(data.payload.datasetId)
       && ['located', 'empty', 'error'].includes(data.payload.status)
       && typeof data.payload.message === 'string' && data.payload.message.length <= 4096;
+  }
+  if (data.type === 'editor-preview:urban-context-status') {
+    return hasExactKeys(data.payload, ['status', 'source', 'release', 'failureCategory'])
+      && ['not-requested', 'loading', 'available', 'unavailable', 'local-benchmark'].includes(data.payload.status)
+      && ['overture-pmtiles', 'local-geojson'].includes(data.payload.source)
+      && typeof data.payload.release === 'string'
+      && /^[0-9]{4}-[0-9]{2}-[0-9]{2}\.0$/.test(data.payload.release)
+      && (data.payload.failureCategory === null
+        || (typeof data.payload.failureCategory === 'string' && data.payload.failureCategory.length <= 128));
   }
   if (data.type === 'editor-preview:select-overlay') {
     return hasExactKeys(data.payload, ['id']) && validOverlayId(data.payload.id);

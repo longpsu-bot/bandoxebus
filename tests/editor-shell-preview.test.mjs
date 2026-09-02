@@ -72,6 +72,35 @@ test('bridge accepts only the known iframe, origin, version, and newest revision
   bridge.dispose();
 });
 
+test('bridge accepts only exact bounded urban context status telemetry', () => {
+  const windowRef = fakeWindow();
+  const frame = { postMessage() {} };
+  const iframe = { contentWindow: frame };
+  const events = [];
+  const bridge = createPreviewBridge({ iframe, windowRef, origin: windowRef.location.origin, onEvent: (event) => events.push(event) });
+  bridge.start({ revision: 5, snapshot: { revision: 5, entries: [] } });
+  const valid = {
+    status: 'available',
+    source: 'overture-pmtiles',
+    release: '2026-08-19.0',
+    failureCategory: null
+  };
+
+  windowRef.emit('message', { source: frame, origin: windowRef.location.origin, data: envelope('urban-context-status', 5, valid) });
+  for (const payload of [
+    { ...valid, status: 'ready' },
+    { ...valid, source: 'arbitrary-url' },
+    { ...valid, release: undefined },
+    { ...valid, failureCategory: 500 },
+    { ...valid, extra: true }
+  ]) {
+    windowRef.emit('message', { source: frame, origin: windowRef.location.origin, data: envelope('urban-context-status', 5, payload) });
+  }
+
+  assert.deepEqual(events.map(({ payload }) => payload), [valid]);
+  bridge.dispose();
+});
+
 test('bridge queues the newest valid snapshot until the production iframe is ready', () => {
   const windowRef = fakeWindow();
   const messages = [];

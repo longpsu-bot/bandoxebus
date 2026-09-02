@@ -129,6 +129,13 @@ export function createUrbanContextController({
     mapElement.dataset.urbanContextStatus = payload.status;
     mapElement.dataset.urbanOvertureRelease = payload.release;
     mapElement.dataset.urbanContextFailure = payload.failureCategory ?? '';
+    const CustomEventCtor = mapElement.ownerDocument?.defaultView?.CustomEvent ?? globalThis.CustomEvent;
+    if (typeof mapElement.dispatchEvent === 'function' && typeof CustomEventCtor === 'function') {
+      mapElement.dispatchEvent(new CustomEventCtor('map-story:urban-context-status', {
+        detail: payload,
+        bubbles: true
+      }));
+    }
     onStatus(payload);
     return payload;
   }

@@ -162,6 +162,7 @@ export function startEditorPreviewHost({
   let disposed = false;
   let replacement = Promise.resolve();
   let removeCameraListener = null;
+  let removeUrbanContextListener = null;
   let activeAuthoringAdapter = null;
   let selectedOverlayId = null;
   let authoringMode = 'select';
@@ -186,6 +187,8 @@ export function startEditorPreviewHost({
     destroyAuthoringAdapter();
     removeCameraListener?.();
     removeCameraListener = null;
+    removeUrbanContextListener?.();
+    removeUrbanContextListener = null;
     await activeRuntime?.destroy?.();
     activeRuntime = null;
     activeResolver?.revoke();
@@ -195,6 +198,16 @@ export function startEditorPreviewHost({
     validatePreviewSnapshot(snapshot);
     const resolver = createResolver(structuredClone(snapshot));
     try {
+      if (typeof windowRef.document?.addEventListener === 'function') {
+        const handleUrbanContextStatus = (event) => {
+          post('urban-context-status', snapshot.revision, structuredClone(event.detail));
+        };
+        windowRef.document.addEventListener('map-story:urban-context-status', handleUrbanContextStatus);
+        removeUrbanContextListener = () => windowRef.document.removeEventListener(
+          'map-story:urban-context-status',
+          handleUrbanContextStatus
+        );
+      }
       const runtime = await startProductionApplication({
         manifestUrl: resolver.manifestUrl,
         fetchImpl: resolver.fetchImpl,
@@ -252,6 +265,8 @@ export function startEditorPreviewHost({
       }
     } catch (error) {
       destroyAuthoringAdapter();
+      removeUrbanContextListener?.();
+      removeUrbanContextListener = null;
       resolver.revoke();
       post('runtime-error', snapshot.revision, toRuntimeErrorPayload(error), requestId);
       throw error;
@@ -368,6 +383,8 @@ export function startEditorPreviewHost({
       destroyAuthoringAdapter();
       removeCameraListener?.();
       removeCameraListener = null;
+      removeUrbanContextListener?.();
+      removeUrbanContextListener = null;
       await activeRuntime?.destroy?.();
       activeRuntime = null;
       activeResolver?.revoke();
