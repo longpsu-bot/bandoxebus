@@ -151,6 +151,83 @@ test('Workbench passes existing dataset IDs into each transient import session',
   assert.match(editorSource, /usedIds:\s*Object\.keys\(manifest\.datasets\)/);
 });
 
+test('Add Data exposes editable Name outside Advanced and passes the edited value to Confirm', async () => {
+  const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
+  const documentRef = documentHarness();
+  const candidate = { ...tableCandidate(2), id: 'my-phuoc-buildings', label: 'My Phuoc Buildings' };
+  const harness = sessionHarness({ candidates: [candidate] });
+  let confirmed;
+  const workbench = createDataWorkbench({
+    documentRef,
+    createSession: () => harness.session,
+    onConfirm(value) { confirmed = value; }
+  });
+  await workbench.open({ mode: 'add', files: [new File(['x'], 'buildings.csv')] });
+
+  const dialog = find(documentRef.body, (node) => node.tagName === 'DIALOG');
+  const advanced = find(dialog, (node) => node.tagName === 'DETAILS');
+  const name = documentRef.getElementById('data-workbench-label');
+  assert.ok(name, 'Add Data should expose an editable Name input');
+  assert.equal(name.parentNode.textContent, 'Name');
+  assert.equal(walk(advanced).includes(name), false, 'human Name must not be inside Advanced');
+  name.value = 'My Phuoc Buildings 2026';
+
+  await find(dialog, (node) => node.tagName === 'BUTTON' && node.textContent === 'Add data').click();
+  assert.equal(confirmed.label, 'My Phuoc Buildings 2026');
+});
+
+test('Add Data keeps Technical ID in Advanced and updates the managed resource before Confirm', async () => {
+  const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
+  const documentRef = documentHarness();
+  const candidate = { ...tableCandidate(2), id: 'my-phuoc-buildings', label: 'My Phuoc Buildings' };
+  const harness = sessionHarness({ candidates: [candidate] });
+  let confirmed;
+  const workbench = createDataWorkbench({
+    documentRef,
+    createSession: () => harness.session,
+    onConfirm(value) { confirmed = value; }
+  });
+  await workbench.open({ mode: 'add', files: [new File(['x'], 'buildings.csv')] });
+
+  const dialog = find(documentRef.body, (node) => node.tagName === 'DIALOG');
+  const advanced = find(dialog, (node) => node.tagName === 'DETAILS');
+  const id = documentRef.getElementById('data-workbench-id');
+  assert.ok(walk(advanced).includes(id));
+  assert.equal(id.parentNode.textContent, 'Technical ID');
+  const managedResource = find(advanced, (node) => node.textContent.startsWith('Managed resource'));
+  assert.equal(managedResource.textContent, 'Managed resource · data/my-phuoc-buildings.json');
+
+  id.value = 'my-phuoc-buildings-2';
+  await id.dispatch('input');
+  assert.equal(managedResource.textContent, 'Managed resource · data/my-phuoc-buildings-2.json');
+  await find(dialog, (node) => node.tagName === 'BUTTON' && node.textContent === 'Add data').click();
+  assert.equal(confirmed.id, 'my-phuoc-buildings-2');
+});
+
+test('Replace Data shows the existing Name without an editable rename control and preserves it on Confirm', async () => {
+  const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
+  const documentRef = documentHarness();
+  const harness = sessionHarness({ candidates: [{ ...tableCandidate(2), label: 'Imported replacement name' }] });
+  let confirmed;
+  const existingDataset = { id: 'demand', label: 'Existing demand', type: 'table-json', src: './data/demand.json' };
+  const workbench = createDataWorkbench({
+    documentRef,
+    createSession: () => harness.session,
+    onConfirm(value) { confirmed = value; }
+  });
+  await workbench.open({ mode: 'replace', existingDataset, files: [new File(['x'], 'demand.csv')] });
+
+  const dialog = find(documentRef.body, (node) => node.tagName === 'DIALOG');
+  const advanced = find(dialog, (node) => node.tagName === 'DETAILS');
+  assert.match(text(dialog), /Name\s+Existing demand/i);
+  assert.equal(documentRef.getElementById('data-workbench-label'), null);
+  assert.ok(walk(advanced).includes(documentRef.getElementById('data-workbench-id')));
+
+  await find(dialog, (node) => node.tagName === 'BUTTON' && node.textContent === 'Replace data').click();
+  assert.equal(confirmed.label, 'Existing demand');
+  assert.equal(confirmed.id, 'demand');
+});
+
 test('workbench reads dropped files, exposes candidate choice and CRS, and renders SVG without MapLibre', async () => {
   const { createDataWorkbench } = await import('../editor/ui/data-workbench.js');
   const documentRef = documentHarness();

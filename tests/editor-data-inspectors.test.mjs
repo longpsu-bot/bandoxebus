@@ -259,14 +259,14 @@ test('Data Workbench table confirmation updates catalogs without authoring a Sce
   const state = harness();
   const story = story12();
   let storyMutations = 0;
-  confirmDataWorkbenchCandidate({ kind: 'table', id: 'demand', label: 'Demand', value: table() }, {
+  confirmDataWorkbenchCandidate({ kind: 'table', id: 'my-phuoc-buildings-2', label: 'My Phuoc Buildings', value: table() }, {
     manifest: state.manifest,
     datasetInspector: state.ui,
     story,
     mutateStory() { storyMutations += 1; }
   });
-  assert.equal(state.manifest.datasets.demand.type, 'table-json');
-  assert.equal(state.writes[0].path, 'data/demand.json');
+  assert.equal(state.manifest.datasets['my-phuoc-buildings-2'].type, 'table-json');
+  assert.equal(state.writes[0].path, 'data/my-phuoc-buildings-2.json');
   assert.equal(storyMutations, 0);
 });
 

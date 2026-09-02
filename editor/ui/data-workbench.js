@@ -491,23 +491,35 @@ export function createDataWorkbench({
       candidate.warnings.forEach((warning) => warnings.append(element(documentRef, 'li', warning)));
       container.append(warnings);
     }
+    const stableId = options.mode === 'replace' ? options.existingDataset.id : candidate.id;
+    const labelValue = options.mode === 'replace' ? (options.existingDataset.label ?? stableId) : candidate.label;
+    let humanLabel;
+    if (options.mode === 'replace') {
+      const name = element(documentRef, 'dl', undefined, { className: 'data-workbench-name-readonly' });
+      name.append(element(documentRef, 'dt', 'Name'), element(documentRef, 'dd', labelValue));
+      container.append(name);
+    } else {
+      const labelNode = element(documentRef, 'label', 'Name');
+      humanLabel = element(documentRef, 'input', undefined, { id: 'data-workbench-label', value: labelValue });
+      humanLabel.value = labelValue;
+      labelNode.append(humanLabel);
+      container.append(labelNode);
+    }
+
     const advanced = element(documentRef, 'details', undefined, { className: 'data-workbench-advanced' });
     advanced.append(element(documentRef, 'summary', 'Advanced / Technical details'));
-    const idLabel = element(documentRef, 'label', 'Stable dataset ID');
-    const stableId = options.mode === 'replace' ? options.existingDataset.id : candidate.id;
+    const idLabel = element(documentRef, 'label', 'Technical ID');
     const id = element(documentRef, 'input', undefined, { id: 'data-workbench-id', value: stableId });
     id.value = stableId;
     id.readOnly = options.mode === 'replace';
     id.disabled = options.mode === 'replace';
     idLabel.append(id);
-    const labelNode = element(documentRef, 'label', 'Dataset label');
-    const labelValue = options.mode === 'replace' ? (options.existingDataset.label ?? stableId) : candidate.label;
-    const humanLabel = element(documentRef, 'input', undefined, { id: 'data-workbench-label', value: labelValue });
-    humanLabel.value = labelValue;
-    labelNode.append(humanLabel);
-    const path = options.mode === 'replace' ? options.existingDataset.src
-      : candidate.kind === 'spatial' ? `./data/${candidate.id}.geojson` : `./data/${candidate.id}.json`;
-    advanced.append(idLabel, labelNode, element(documentRef, 'p', `Managed path · ${path}`));
+    const extension = candidate.kind === 'spatial' ? 'geojson' : 'json';
+    const currentPath = () => (options.mode === 'replace' ? options.existingDataset.src : `./data/${id.value.trim()}.${extension}`)
+      .replace(/^\.\//, '');
+    const managedResource = element(documentRef, 'p', `Managed resource · ${currentPath()}`);
+    id.addEventListener('input', () => { managedResource.textContent = `Managed resource · ${currentPath()}`; });
+    advanced.append(idLabel, managedResource);
     container.append(advanced);
 
     const footer = dialog.children.find?.((child) => child.tagName === 'FOOTER')
@@ -521,7 +533,11 @@ export function createDataWorkbench({
       setStatus('Validating with production contracts…');
       try {
         const selected = session.candidate(selectedCandidateId);
-        const confirmed = { ...selected, id: id.value.trim(), label: humanLabel.value.trim() };
+        const confirmed = {
+          ...selected,
+          id: id.value.trim(),
+          label: options.mode === 'replace' ? labelValue : humanLabel.value.trim()
+        };
         await onConfirm(confirmed, { mode: options.mode, existingDataset: options.existingDataset });
         close();
       } catch (error) {
