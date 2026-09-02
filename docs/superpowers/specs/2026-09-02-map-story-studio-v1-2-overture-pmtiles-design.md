@@ -14,7 +14,7 @@ Map Story Studio currently renders Route 61-2's Overture building context from a
 
 This design replaces per-Scene or per-area extraction as the authoring workflow with a reusable PMTiles-backed Overture building source. During authoring and exploration, Studio uses the official Overture global `buildings.pmtiles` archive for a project-pinned release. MapLibre requests only the tile ranges required by the current camera. A Scene therefore changes only camera and semantic context visibility; it does not own a building extract.
 
-For durable publication, an old Story must not depend indefinitely on an official Overture release URL because Overture retains public monthly release data only for a limited period. A frozen/published project therefore uses one project-area PMTiles snapshot for the whole project, derived from the same pinned Overture release and served as a static project asset. This is one snapshot per project publication, never one extract per Scene.
+Official Overture public data releases are retained for a maximum of 60 days, approximately the latest two monthly releases. Therefore an old Story cannot depend indefinitely on an official release URL. A frozen/published project uses one project-area PMTiles snapshot for the whole project, derived from the same pinned Overture release and served as a static project asset. This is one snapshot per project publication, never one extract per Scene.
 
 The runtime rendering contract remains the same in both cases: MapLibre + PMTiles + HTTP range requests. Only the trusted PMTiles location changes.
 
@@ -101,7 +101,7 @@ That mode uses the current processed collection and existing `render_height_m` /
 
 ### 4.3 Frozen publication
 
-Official Overture release URLs are not a durable archival publication mechanism. When a Story is frozen/published for long-term use, the target architecture is:
+Official Overture release URLs are not a durable archival publication mechanism because public release files are automatically removed after the retention window. When a Story is frozen/published for long-term use, the target architecture is:
 
 ```text
 pinned Overture release
@@ -119,6 +119,8 @@ The publication snapshot covers the complete bounded geographic area required by
 
 The published snapshot records provenance including at minimum the Overture release, source theme, creation timestamp, geographic bounds, and snapshot artifact hash.
 
+A C1 project using the official Overture URL is an authoring/current-release deployment, not an archival publication. A Story must not be declared durably frozen until C2 has produced the project-area snapshot.
+
 ## 5. Implementation phases
 
 The approved architecture is implemented in two sequential phases so runtime streaming and publication packaging are independently testable.
@@ -135,9 +137,9 @@ C1 proves and ships:
 - Studio capability settings for source and release;
 - graceful remote-unavailable behavior;
 - explicit local benchmark mode;
-- Route 61-2 migration to online authoring mode after certification.
+- Route 61-2 migration to online current-release mode after certification.
 
-C1 does not generate publication snapshots.
+C1 does not generate publication snapshots and must not be presented as the archival publication solution.
 
 ### Phase C2 — Durable project-area PMTiles publication snapshot
 
@@ -159,7 +161,7 @@ context.set-mode
 
 Legacy `map.urban-context` normalization remains unchanged. The canonical Route 61-2 Story therefore requires no modification.
 
-The Route 61-2 project capability declaration becomes conceptually:
+The Route 61-2 project capability declaration becomes:
 
 ```json
 {
@@ -174,14 +176,22 @@ The Route 61-2 project capability declaration becomes conceptually:
 
 The installed trusted capability descriptor owns validation for these settings.
 
-`buildingSource` is an enum:
+`buildingSource` is exactly one of:
 
 ```text
 overture-pmtiles
 local-geojson
 ```
 
-`overtureRelease` is a bounded release identifier, not a URL. It must match the exact release form accepted by trusted URL derivation. The first implementation need not expose an arbitrary release picker populated from the network; Studio may expose the configured value as a validated text/select field with the current certified release.
+`overtureRelease` is a bounded release identifier, not a URL. In C1 it must match:
+
+```text
+^[0-9]{4}-[0-9]{2}-[0-9]{2}\.0$
+```
+
+This syntactic validation is not a claim that every matching release is still publicly available. Availability is a runtime condition because of Overture's retention policy.
+
+Studio does not fetch an online release catalog in C1. It exposes the configured release through the existing trusted capability settings UI, with `2026-08-19.0` as the certified initial value.
 
 No Project Manifest schema change is required because capability settings are already validated by installed trusted descriptors.
 
@@ -189,44 +199,37 @@ No Project Manifest schema change is required because capability settings are al
 
 The runtime never consumes an author-provided PMTiles URL for Overture online mode. Trusted code builds the official Overture buildings archive location from the validated release.
 
-The derived endpoint is structurally equivalent to:
+The exact C1 HTTP template is:
 
 ```text
-https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/
-tiles/<RELEASE>/buildings.pmtiles
+https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/<RELEASE>/buildings.pmtiles
 ```
 
-The exact host/path template belongs in one focused trusted module and must be unit-tested. The release value may not introduce path separators, schemes, query strings, fragments, traversal, percent-encoded path escape, or other URL mutation.
+The host, theme name, and path structure are constants in trusted code. Only `<RELEASE>` is substituted after descriptor validation. The release value may not introduce path separators, schemes, query strings, fragments, traversal, percent-encoded path escape, or other URL mutation.
 
 The online path does not weaken the existing project resource URL security model. No new general external resource kind is introduced.
 
-PMTiles JavaScript is vendored locally. Only the Overture PMTiles data itself is remote in authoring mode.
+PMTiles JavaScript is vendored locally. Only the Overture PMTiles data itself is remote in authoring/current-release mode.
 
 ## 8. PMTiles library boundary
 
-Use a pinned PMTiles browser library, initially version 4.5.0, vendored under a dedicated directory such as:
+Use PMTiles JavaScript version `4.5.0`, vendored under:
 
 ```text
 vendor/pmtiles/4.5.0/
 ```
 
-Include provenance, license, version, upstream URL, and SHA-256 in the same style as the existing vendored data-import dependencies.
+Include provenance, BSD-3-Clause license, exact version, upstream artifact URL, and SHA-256 in the same style as the existing vendored data-import dependencies.
 
 Do not load PMTiles JavaScript from a CDN.
 
-A focused application module owns protocol registration. Conceptually it provides:
+A focused application module owns protocol registration and Overture PMTiles layer construction. The implementation plan must lock exact exported names, but responsibilities are fixed:
 
-```text
-ensurePmtilesProtocol(maplibregl)
-deriveOvertureBuildingsPmtilesUrl(release)
-createOverturePmtilesLayerDefinitions(config)
-```
-
-The exact names may be adjusted during implementation planning, but responsibilities must remain separated:
-
-- trusted URL derivation;
-- PMTiles protocol lifecycle;
-- Overture source/layer definitions.
+- trusted Overture buildings URL derivation;
+- lazy PMTiles library loading;
+- idempotent `pmtiles://` protocol registration;
+- online Overture vector source definition;
+- online flat/3D layer definitions.
 
 Protocol registration is idempotent. Repeated context activation, preview refresh, or adapter connection must not register duplicate protocol handlers.
 
@@ -236,7 +239,7 @@ Protocol registration is idempotent. Repeated context activation, preview refres
 
 Normal app/editor-preview startup must not initialize the Overture PMTiles source solely because `urban-context-v1` is declared.
 
-Before the first context activation:
+Before the first context activation in online mode:
 
 ```text
 PMTiles library: not loaded
@@ -268,7 +271,7 @@ When the context remains active and a later Scene moves to another geographic ar
 
 Turning context off hides the context layers. It does not destroy the PMTiles source or protocol. Turning it on again reuses the existing source and cache state.
 
-The source is removed only as part of the owning runtime/controller destruction lifecycle.
+The source is removed only as part of the owning runtime/controller destruction lifecycle. Protocol ownership must not remove a globally shared PMTiles protocol while another live MapLibre runtime still depends on it; the implementation plan must use either process-lifetime registration or reference-counted teardown, preferring process-lifetime registration unless the existing MapLibre lifecycle demands otherwise.
 
 ## 10. Shared Route 61-2 adapter boundary
 
@@ -291,43 +294,67 @@ This is a compatibility seam, not a generic adapter configuration framework.
 
 ## 11. Overture building rendering policy
 
-### 11.1 Source layers
+### 11.1 Source layer
 
-Phase C1 renders the Overture `building` vector source layer only.
-
-`building_part` is excluded from C1. It may be added later if real Story visual review demonstrates a need for richer building-part geometry.
-
-### 11.2 Low zoom
-
-At lower zoom, render a subdued flat building footprint context. It must not depend on properties only available in the full high-zoom Overture tag set.
-
-The exact minimum zoom and transition point should be certified against the official tile profile; the design target is a 3D transition around zoom 14, where the full building property set is available.
-
-### 11.3 3D zoom
-
-At the detailed zoom range use MapLibre `fill-extrusion`.
-
-Height evaluation is bounded and declarative:
+Phase C1 renders only the Overture vector source layer named:
 
 ```text
-height
-→ valid Overture height
-→ valid num_floors × bounded storey height
-→ conservative fixed fallback
+building
 ```
 
-Base evaluation:
+The official Overture buildings tile profile preserves the original source-layer name and adds the full property/tag set at zoom 14.
+
+`building_part` is excluded from C1. It may be added later only if real Story visual review demonstrates a need for richer building-part geometry.
+
+### 11.2 Flat context layer
+
+Create one subdued flat fill layer for any `building` features present below the detailed zoom threshold:
 
 ```text
-base
-→ valid min_height
-→ valid min_floor × bounded storey height
-→ 0
+minzoom: 11
+maxzoom: 14
+fill-color: #748a9c
+fill-opacity: 0.14
 ```
 
-Reject or clamp implausible values using bounded MapLibre expressions or trusted expression construction. Do not execute authored expressions and do not add a runtime tile transformation layer solely to recreate `render_height_m`.
+The layer must not filter on high-zoom properties; lower-zoom Overture tiles may retain only larger geometries and may omit full tags.
 
-The online styling should visually harmonize with the current Route 61-2 benchmark but does not need pixel-identical geometry/height because the old local preprocessing applied custom illustrative fallback heights based on footprint area.
+### 11.3 3D context layer
+
+Create one MapLibre `fill-extrusion` layer:
+
+```text
+minzoom: 14
+fill-extrusion-color: #8298aa
+fill-extrusion-opacity: 0.78
+fill-extrusion-vertical-gradient: true
+```
+
+Use a trusted MapLibre expression with the following exact bounded height policy:
+
+```text
+if numeric height > 0 and <= 300 m:
+    height = height
+else if numeric num_floors > 0 and <= 80:
+    height = num_floors * 3.5 m
+else:
+    height = 8.5 m
+```
+
+Use the following exact base policy:
+
+```text
+if numeric min_height >= 0 and min_height < final height:
+    base = min_height
+else if numeric min_floor >= 0 and min_floor <= 80 and min_floor * 3.5 < final height:
+    base = min_floor * 3.5 m
+else:
+    base = 0
+```
+
+All conversion is declarative/trusted; no authored expression is accepted. Do not add a runtime tile transformation layer solely to recreate `render_height_m`.
+
+The online styling visually harmonizes with the current Route 61-2 benchmark but is not required to be pixel-identical because the old local preprocessing applied custom illustrative fallback heights based on footprint area.
 
 ## 12. Local benchmark behavior
 
@@ -339,7 +366,7 @@ data/context/my-phuoc-1-buildings.geojson
 
 Its current collection validation and processed height fields remain valid for benchmark mode.
 
-Local benchmark mode must still report the certified 1,299 features for the existing fixture and preserve the established visual/performance evidence unless a separately reviewed benchmark change is required.
+Local benchmark mode must still report exactly 1,299 features for the existing fixture and preserve the established benchmark semantics.
 
 Online failure must not silently switch to this mode. Source selection is explicit and observable.
 
@@ -347,7 +374,7 @@ Online failure must not silently switch to this mode. Source selection is explic
 
 The existing installed capability Properties surface is extended rather than introducing another panel.
 
-For Route 61-2 `urban-context-v1`, expose a compact author-facing group:
+For Route 61-2 `urban-context-v1`, expose:
 
 ```text
 Urban context
@@ -369,18 +396,18 @@ Building source
 [ Local benchmark ]
 ```
 
-When online mode is selected, Advanced/technical information may display the derived archive endpoint as read-only text. The URL is never editable.
+When online mode is selected, Advanced/technical information displays the derived archive endpoint as read-only text. The URL is never editable.
 
 Do not add an online release-list fetch in C1. Do not mutate settings merely by opening Properties. Changes go through the existing validated capability settings mutation/history path.
 
-Studio status should distinguish at least:
+Studio status distinguishes exactly these user-facing states in C1:
 
 ```text
-not requested
-loading
-available
-unavailable
-local benchmark
+Not requested
+Loading
+Available
+Unavailable
+Local benchmark
 ```
 
 This status is transient UI/runtime state, not serialized project metadata.
@@ -393,12 +420,13 @@ If Overture online data cannot be loaded because of network failure, CORS, range
 - keep routes, stops, text, charts, and other Scene content usable;
 - do not throw an uncaught fatal project-load error merely because optional urban context is unavailable;
 - hide/omit the failed Overture context;
-- expose a clear bounded diagnostic in Studio/development UI;
+- set runtime/Studio status to `Unavailable`;
+- expose a bounded diagnostic including the configured release and failure category;
 - do not switch automatically to synthetic buildings;
 - do not switch automatically to the local benchmark;
 - do not invent a proxy, service worker, alternate provider, or download path.
 
-If the configured pinned release has expired from the official authoring endpoint, the diagnostic must identify the configured release so the author can consciously update it or use a frozen project snapshot.
+If the configured pinned release has expired from the official authoring endpoint, the diagnostic identifies that release so the author can consciously update it or use a frozen project snapshot.
 
 ## 15. Performance and network acceptance
 
@@ -408,46 +436,48 @@ The browser evidence must demonstrate:
 
 1. zero Overture/PMTiles requests before first urban-context activation;
 2. first activation at the current Mỹ Phước Scene renders remote Overture buildings;
-3. official archive access uses bounded HTTP range/tile requests rather than downloading the whole archive;
+3. official archive access uses bounded HTTP range requests rather than downloading the whole archive;
 4. moving to at least one geographically separated area renders buildings from the same configured source without changing project settings;
 5. returning to the first area does not create a duplicate MapLibre source/layer/protocol;
 6. context off/on reuses the installed source;
 7. only one MapLibre instance exists;
-8. no sustained main-thread task/frame gap above 250 ms attributable to application PMTiles integration;
-9. settled Route 61-2 performance remains near the existing ~60 FPS benchmark and does not introduce a material sustained regression;
+8. no application-attributable main-thread task or frame gap exceeds 250 ms during PMTiles activation in the certified browser run;
+9. on the same browser/device and camera, settled online-context average FPS does not regress by more than 10% from the immediately measured local-GeoJSON benchmark;
 10. remote failure leaves the remainder of the Story interactive;
 11. local benchmark mode still renders the current fixture.
 
-Record for at least the initial Mỹ Phước activation and one distant camera jump:
+For the range-request gate, browser network evidence must show at least one request to the configured `buildings.pmtiles` archive carrying a byte `Range` request and/or a `206 Partial Content` response. If the controlled browser surface cannot expose either fact, certification stops rather than inferring range behavior from small transfer size alone.
+
+Record for at least the initial Mỹ Phước activation and one geographically separate camera jump:
 
 - request count;
 - transferred bytes where browser tooling exposes them reliably;
 - archive host/path;
-- whether requests include byte ranges;
-- time to visible building context;
-- worst observed main-thread/frame gap during activation;
+- observed Range/206 evidence;
+- time from context activation to visible building context;
+- worst observed main-thread task/frame gap during activation;
 - settled FPS after the context is loaded.
 
 Do not invent memory or transfer metrics that the controlled browser environment cannot measure reliably.
 
 ## 16. Visual acceptance
 
-A/B the current Mỹ Phước Scene at the established Route 61-2 camera:
+A/B the current Mỹ Phước Scene at the same camera and browser/device:
 
 - local processed benchmark;
 - official online PMTiles source.
 
-The goal is not pixel identity. The online result must instead satisfy product-quality criteria:
+The goal is not pixel identity. The online result must satisfy these product criteria:
 
 - industrial context reads as coherent 3D built form;
 - buildings remain visually subordinate to route/story information;
 - no obvious vertical spikes from malformed heights;
 - no large visual holes caused by incorrect source-layer/filter assumptions;
 - camera transitions do not reveal persistent tile/layer artifacts;
-- flat-to-3D zoom behavior is visually intentional rather than abrupt/noisy;
+- the flat-to-3D transition at zoom 14 is visually intentional rather than noisy;
 - route lines, stops, POIs, labels, and presentation overlays retain their visual hierarchy.
 
-Capture evidence at desktop Story dimensions and at the current 1366×768 compact review size when practical.
+Capture evidence at the current desktop Story review size and at 1366×768. If a visual defect requires changing the locked color/opacity constants, stop and review that bounded visual change rather than silently broadening the renderer vocabulary.
 
 ## 17. Migration sequence
 
@@ -460,9 +490,11 @@ C1 follows this order:
 5. Run real Chromium online certification at Mỹ Phước.
 6. Run the geographically separate camera certification.
 7. Perform visual A/B and performance/network review.
-8. Only after all gates pass, change Route 61-2 `project.json` to `buildingSource: overture-pmtiles` and pin `2026-08-19.0`.
+8. Only after all C1 gates pass, change Route 61-2 `project.json` to `buildingSource: overture-pmtiles` and pin `2026-08-19.0`.
 9. Keep the local benchmark fixture checked in.
 10. Open a Draft PR; do not merge until independent exact-head review.
+
+A C1 Cloudflare/current-release deployment is allowed for authoring and review, but it must be labeled operationally as dependent on the current Overture retention window. Durable publication requires C2.
 
 ## 18. Hard stop gates
 
@@ -471,12 +503,12 @@ Implementation stops for design review instead of expanding scope if any of thes
 - the official Overture S3 PMTiles archive cannot be consumed directly by deployed Chromium because of CORS or byte-range behavior;
 - the official archive requires an application proxy;
 - PMTiles integration requires replacing MapLibre or adding a bundler;
-- the real source-layer/property contract materially contradicts the certified official tile profile;
+- the real source-layer/property contract materially contradicts the official tile profile used by this design;
 - a normal Scene activation causes the browser to download the complete global archive;
 - implementing online rendering requires a generic remote-resource schema change;
 - online PMTiles needs a second MapLibre instance;
-- the application integration creates a sustained >250 ms main-thread/frame stall in the certified scenario;
-- settled performance materially regresses from the existing Route 61-2 benchmark;
+- an application-attributable main-thread task/frame gap exceeds 250 ms during the certified activation scenario;
+- settled online-context FPS regresses by more than 10% from the local benchmark measured immediately before/after on the same browser/device and camera;
 - correct operation requires a custom service worker/cache framework;
 - correct operation requires per-Scene geometry extraction.
 
@@ -510,7 +542,7 @@ tests/route-61-2-project.test.mjs
 
 Browser/network certification may add one focused script/review evidence area. It must not introduce a browser-test framework if the existing browser-control approach is sufficient.
 
-Do not modify unless concrete implementation evidence requires it:
+Do not modify unless a hard stop is explicitly reviewed and the design is amended:
 
 ```text
 data/schemas/story-1.2.schema.json
@@ -523,21 +555,22 @@ src/map/geojson-renderer.js
 
 At the final executable C1 head:
 
-- canonical Route 61-2 Story SHA-256 remains:
-  `29597ee58773b13ff9db6eaf3c328240f6bfa85f9bf7161cdca7b20ad55b373a`;
+- canonical Route 61-2 Story SHA-256 remains `29597ee58773b13ff9db6eaf3c328240f6bfa85f9bf7161cdca7b20ad55b373a`;
 - Story 1.0 behavior remains compatible;
 - Story 1.1 behavior remains compatible;
 - Story 1.2 behavior remains compatible;
 - Story 1.2 schema diff from baseline is empty;
 - Project Manifest schema diff from baseline is empty;
-- production generic GeoJSON renderer diff is empty unless an explicitly reviewed stop-gate decision changes scope;
+- production generic GeoJSON renderer diff from baseline is empty;
 - no second MapLibre map is constructed;
 - Route comparison modes/reveal/POI/simulation behavior remain unchanged;
-- full `npm test` runs once at the final executable head after focused/bounded development tests.
+- focused tests run during development;
+- the bounded C1 regression set runs before browser certification;
+- full `npm test` runs once at the final executable head after all executable changes are complete.
 
 ## 21. Phase C2 publication snapshot contract
 
-C2 is intentionally deferred until C1 proves the runtime seam. Its approved contract is nevertheless fixed here so C1 does not design itself into a dead end.
+C2 is intentionally deferred until C1 proves the runtime seam. Its approved contract is fixed here so C1 does not design itself into a dead end.
 
 A frozen project-area snapshot:
 
@@ -546,13 +579,14 @@ A frozen project-area snapshot:
 - is a PMTiles artifact suitable for HTTP range access;
 - is stored/hosted as a project static asset or equivalent durable object;
 - uses the same MapLibre PMTiles source/layer builder as C1;
-- records provenance and artifact hash;
-- can be generated from the user's already-held Overture regional data pack when that is the authoritative input;
+- records Overture release, source theme, geographic bounds, creation timestamp, and artifact SHA-256;
+- can be generated with the official `pmtiles extract` path while the global release archive is available;
+- can alternatively be generated from the user's already-held Overture regional data pack when that is the authoritative retained input;
 - does not require a long-running tile server;
 - does not change Story Scene semantics;
 - does not require authors to extract data for each slide.
 
-The C2 design must determine the project-area extent from project/story needs and/or an explicit publish extent. It must not silently package an unbounded global dataset.
+The exact publish-extent selection and snapshot generation workflow receives its own C2 design/plan after C1 certification. C1 must therefore expose a PMTiles source seam that can later accept a trusted project-local PMTiles URL without changing the rendering implementation, but C1 must not expose that URL as arbitrary author input.
 
 ## 22. Acceptance outcome
 
@@ -579,12 +613,12 @@ no extraction, no new dataset, no second map
 The long-term C1 + C2 architecture succeeds when authoring convenience and publication durability coexist:
 
 ```text
-AUTHORING
+AUTHORING / CURRENT RELEASE
 official Overture release PMTiles
         ↓
 any camera / any Scene
 
-FREEZE / PUBLISH
+FREEZE / DURABLE PUBLISH
 one project-area PMTiles snapshot
         ↓
 any camera / any Scene
