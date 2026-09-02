@@ -7,6 +7,11 @@ import { selectUrbanContextAdapter } from '../src/capabilities/urban-context-v1.
 import { createRoute612Controls } from '../src/route-61-2/controls.js';
 
 const line = (coordinates) => ({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } }] });
+const zoneFeature = () => ({
+  type: 'Feature',
+  properties: {},
+  geometry: { type: 'Polygon', coordinates: [[[106.59, 11.11], [106.61, 11.11], [106.61, 11.14], [106.59, 11.11]]] }
+});
 
 function context(overrides = {}) {
   return {
@@ -127,6 +132,45 @@ test('urban context configuration is closed and unavailable after adapter destru
     buildingSource: 'local-geojson',
     overtureRelease: '2026-08-19.0'
   }), /destroyed/i);
+});
+
+test('online adapter configuration does not fetch the local benchmark', async () => {
+  let localFetches = 0;
+  const sources = new Map();
+  const layers = new Map();
+  const mapElement = { dataset: {}, setAttribute() {} };
+  const map = {
+    loaded: () => true,
+    getContainer: () => mapElement,
+    getSource: (id) => sources.get(id),
+    addSource(id, source) { sources.set(id, source); },
+    getLayer: (id) => layers.get(id),
+    addLayer(layer) { layers.set(layer.id, layer); },
+    setLayoutProperty(id, property, value) { layers.get(id).layout = { ...layers.get(id).layout, [property]: value }; },
+    setPaintProperty() {},
+    getStyle: () => ({ layers: [...layers.values()] }),
+    isSourceLoaded: () => true,
+    querySourceFeatures: () => [],
+    once() {},
+    on() {},
+    off() {}
+  };
+  const resources = new Map([
+    ['existing-route', { descriptor: { role: 'route.existing' }, value: line([[106.6, 11], [106.61, 11.01]]) }],
+    ['proposed-route', { descriptor: { role: 'route.proposed' }, value: line([[106.6, 11], [106.62, 11.02]]) }],
+    ['industrial-zone', { descriptor: { role: 'context.area' }, value: { type: 'FeatureCollection', features: [zoneFeature()] } }]
+  ]);
+  const adapter = createRoute612RuntimeAdapter({
+    map,
+    resources,
+    documentRef: { getElementById: () => mapElement },
+    trustedFetch: async () => { localFetches += 1; return { ok: true, async json() { return null; } }; }
+  });
+  adapter.configureUrbanContext({ buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0' });
+  await adapter.ready;
+
+  assert.equal(localFetches, 0);
+  assert.equal(sources.has('overture-industrial-buildings'), false);
 });
 
 test('trusted Route controls mount mode, reveal, POI, urban, and simulation behavior into a neutral host', () => {
@@ -262,6 +306,7 @@ test('trusted adapter activates the existing Overture urban-context stack instea
   const adapter = createRoute612RuntimeAdapter({
     map, resources, overtureBuildings, documentRef: { getElementById: () => mapElement }
   });
+  adapter.configureUrbanContext({ buildingSource: 'local-geojson', overtureRelease: '2026-08-19.0' });
   await adapter.ready;
   adapter.setContextMode('industrial-context');
 

@@ -208,7 +208,7 @@ export function createRoute612RuntimeAdapter(context = {}) {
   let mode = 'difference'; let revealActive = false; let poiActive = false; let contextMode = 'off';
   let simulation = Object.freeze({ active: false, speed: 1 });
   let destroyed = false; let controls = null; let poiBeaconController = null; let busSimulation = null; let revealFrameId = null;
-  let urbanContextController = null; let ready = Promise.resolve();
+  let urbanContextController = null; let urbanContextInitialization = null; let ready = Promise.resolve();
   let urbanContextConfig = Object.freeze({
     buildingSource: 'local-geojson',
     overtureRelease: '2026-08-19.0'
@@ -290,6 +290,35 @@ export function createRoute612RuntimeAdapter(context = {}) {
     context.documentRef?.getElementById?.('map')?.setAttribute?.('data-poi-emphasis', String(active));
   }
 
+  function ensureUrbanContextController() {
+    if (destroyed || urbanContextController) return ready;
+    if (urbanContextInitialization) return urbanContextInitialization;
+    const configured = urbanContextConfig;
+    const buildingsPromise = configured.buildingSource === 'local-geojson'
+      ? loadTrustedOvertureBuildings(context)
+      : Promise.resolve(null);
+    urbanContextInitialization = buildingsPromise.then((overtureBuildings) => {
+      if (destroyed || urbanContextController) return;
+      urbanContextController = createUrbanContextController({
+        map,
+        maplibregl: context.maplibregl,
+        zone: polygonFeature(areaResource),
+        overtureBuildings,
+        buildingConfig: configured,
+        routeCoordinates: [routeCoordinates.existing, routeCoordinates.proposed],
+        pois: poiRecords(poiResource),
+        reducedMotion: context.reducedMotion ?? false,
+        beforeLayerId: ids.differenceRemoved,
+        ensureOnlineProtocol: context.ensureOnlineProtocol,
+        createOnlineDefinitions: context.createOnlineDefinitions,
+        onStatus: context.onUrbanContextStatus
+      });
+      applyContext(contextMode);
+    });
+    ready = urbanContextInitialization;
+    return urbanContextInitialization;
+  }
+
   function install() {
     if (destroyed) return;
     installDataset(map, ids.existing, existingResource, {
@@ -362,22 +391,6 @@ export function createRoute612RuntimeAdapter(context = {}) {
       map, maplibregl: context.maplibregl, documentRef: context.documentRef, routeCoordinates,
       requestAnimationFrame: raf, cancelAnimationFrame: caf
     });
-    if (!urbanContextController && polygonFeature(areaResource)) {
-      ready = loadTrustedOvertureBuildings(context).then((overtureBuildings) => {
-        if (destroyed || urbanContextController) return;
-        urbanContextController = createUrbanContextController({
-          map,
-          maplibregl: context.maplibregl,
-          zone: polygonFeature(areaResource),
-          overtureBuildings,
-          routeCoordinates: [routeCoordinates.existing, routeCoordinates.proposed],
-          pois: poiRecords(poiResource),
-          reducedMotion: context.reducedMotion ?? false,
-          beforeLayerId: ids.differenceRemoved
-        });
-        applyContext(contextMode);
-      });
-    }
     applyMode(mode); applyContext(contextMode); applyPoiEmphasis(poiActive); busSimulation?.set(simulation.active, simulation.speed);
   }
 
@@ -414,6 +427,7 @@ export function createRoute612RuntimeAdapter(context = {}) {
         overtureRelease: next.overtureRelease
       });
       urbanContextController?.configureBuildings?.(urbanContextConfig);
+      if (polygonFeature(areaResource)) ensureUrbanContextController();
       return urbanContextConfig;
     },
     setMode(nextMode) {
@@ -435,7 +449,14 @@ export function createRoute612RuntimeAdapter(context = {}) {
     setContextMode(nextMode) {
       if (!['off', 'industrial-context'].includes(nextMode)) throw new TypeError(`Unsupported urban context mode: ${nextMode}.`);
       if (delegates.setContextMode) delegates.setContextMode(nextMode);
-      else applyContext(nextMode);
+      else if (urbanContextController) applyContext(nextMode);
+      else {
+        contextMode = nextMode;
+        const initialization = polygonFeature(areaResource) ? ensureUrbanContextController() : Promise.resolve();
+        initialization.then(() => applyContext(nextMode));
+        return initialization;
+      }
+      return Promise.resolve();
     },
     setSimulation(active, speed = 1) {
       if (!Number.isFinite(speed) || speed <= 0 || speed > 4) throw new TypeError('Simulation speed must be greater than 0 and at most 4.');
