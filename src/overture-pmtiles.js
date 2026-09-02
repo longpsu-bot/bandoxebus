@@ -20,6 +20,7 @@ function freezeExpression(value) {
 }
 
 const NUMBER_FROM_PROPERTY = (name) => ['to-number', ['get', name], 0];
+const OPTIONAL_NUMBER_FROM_PROPERTY = (name) => ['number', ['get', name], -1];
 
 function buildingHeightExpression() {
   return [
@@ -41,8 +42,8 @@ const BASE_EXPRESSION = freezeExpression([
   'finalHeight', buildingHeightExpression(),
   [
     'let',
-    'minHeight', NUMBER_FROM_PROPERTY('min_height'),
-    'minFloor', NUMBER_FROM_PROPERTY('min_floor'),
+    'minHeight', OPTIONAL_NUMBER_FROM_PROPERTY('min_height'),
+    'minFloor', OPTIONAL_NUMBER_FROM_PROPERTY('min_floor'),
     [
       'case',
       ['all', ['>=', ['var', 'minHeight'], 0], ['<', ['var', 'minHeight'], ['var', 'finalHeight']]], ['var', 'minHeight'],

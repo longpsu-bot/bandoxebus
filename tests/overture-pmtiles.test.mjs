@@ -17,6 +17,48 @@ import {
 
 const root = new URL('../', import.meta.url);
 
+function evaluateExpression(expression, properties, scope = new Map()) {
+  if (!Array.isArray(expression)) return expression;
+  const [operator, ...args] = expression;
+  if (operator === 'get') return properties[args[0]] ?? null;
+  if (operator === 'var') return scope.get(args[0]);
+  if (operator === 'to-number') {
+    for (const candidate of args) {
+      const value = evaluateExpression(candidate, properties, scope);
+      const number = Number(value);
+      if (!Number.isNaN(number)) return number;
+    }
+  }
+  if (operator === 'number') {
+    for (const candidate of args) {
+      const value = evaluateExpression(candidate, properties, scope);
+      if (typeof value === 'number') return value;
+    }
+  }
+  if (operator === 'let') {
+    const nextScope = new Map(scope);
+    for (let index = 0; index < args.length - 1; index += 2) {
+      nextScope.set(args[index], evaluateExpression(args[index + 1], properties, nextScope));
+    }
+    return evaluateExpression(args.at(-1), properties, nextScope);
+  }
+  if (operator === 'case') {
+    for (let index = 0; index < args.length - 1; index += 2) {
+      if (evaluateExpression(args[index], properties, scope)) {
+        return evaluateExpression(args[index + 1], properties, scope);
+      }
+    }
+    return evaluateExpression(args.at(-1), properties, scope);
+  }
+  if (operator === 'all') return args.every((value) => evaluateExpression(value, properties, scope));
+  if (operator === '*') return evaluateExpression(args[0], properties, scope) * evaluateExpression(args[1], properties, scope);
+  if (operator === '>') return evaluateExpression(args[0], properties, scope) > evaluateExpression(args[1], properties, scope);
+  if (operator === '>=') return evaluateExpression(args[0], properties, scope) >= evaluateExpression(args[1], properties, scope);
+  if (operator === '<') return evaluateExpression(args[0], properties, scope) < evaluateExpression(args[1], properties, scope);
+  if (operator === '<=') return evaluateExpression(args[0], properties, scope) <= evaluateExpression(args[1], properties, scope);
+  throw new TypeError(`Unsupported test expression operator: ${operator}`);
+}
+
 test('PMTiles 4.5.0 is pinned locally with verified executable and license provenance', async () => {
   const bundle = await readFile(new URL('vendor/pmtiles/4.5.0/pmtiles.js', root));
   const license = await readFile(new URL('vendor/pmtiles/4.5.0/LICENSE', root), 'utf8');
@@ -107,6 +149,7 @@ test('online height expression enforces the bounded height policy', () => {
 test('online base expression computes final height in an enclosing let scope', () => {
   const { extrusion } = createOverturePmtilesLayerDefinitions({ release: '2026-08-19.0' });
   const numeric = (name) => ['to-number', ['get', name], 0];
+  const optionalNumeric = (name) => ['number', ['get', name], -1];
   const finalHeight = [
     'let',
     'height', numeric('height'),
@@ -124,8 +167,8 @@ test('online base expression computes final height in an enclosing let scope', (
     'finalHeight', finalHeight,
     [
       'let',
-      'minHeight', numeric('min_height'),
-      'minFloor', numeric('min_floor'),
+      'minHeight', optionalNumeric('min_height'),
+      'minFloor', optionalNumeric('min_floor'),
       [
         'case',
         ['all', ['>=', ['var', 'minHeight'], 0], ['<', ['var', 'minHeight'], ['var', 'finalHeight']]], ['var', 'minHeight'],
@@ -134,6 +177,15 @@ test('online base expression computes final height in an enclosing let scope', (
       ]
     ]
   ]);
+});
+
+test('online base expression preserves optional-field absence for the min-floor fallback', () => {
+  const { extrusion } = createOverturePmtilesLayerDefinitions({ release: '2026-08-19.0' });
+  const expression = extrusion.paint['fill-extrusion-base'];
+
+  assert.equal(evaluateExpression(expression, { height: 20, min_floor: 2 }), 7);
+  assert.equal(evaluateExpression(expression, { height: 20, min_height: 4, min_floor: 2 }), 4);
+  assert.equal(evaluateExpression(expression, { height: 20 }), 0);
 });
 
 test('browser loader appends one local script and shares its in-flight result', async () => {
