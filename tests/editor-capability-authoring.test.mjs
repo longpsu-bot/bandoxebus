@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createCapabilityRegistry } from '../src/capabilities/capability-registry.js';
+import { URBAN_CONTEXT_V1_DESCRIPTOR } from '../src/capabilities/urban-context-v1.js';
 import { renderEntityInspector } from '../editor/ui/inspectors.js';
 
 function descriptor(id, overrides = {}) {
@@ -46,7 +47,8 @@ function registry() {
       }
     }),
     descriptor('private-base-v1'),
-    descriptor('blocked-addon-v1', { requires: ['private-base-v1'], gui: { addable: true } })
+    descriptor('blocked-addon-v1', { requires: ['private-base-v1'], gui: { addable: true } }),
+    URBAN_CONTEXT_V1_DESCRIPTOR
   ];
   return createCapabilityRegistry(entries.map((value) => ({ descriptor: value, createCapability: () => ({ datasetRoles: {} }) })));
 }
@@ -83,6 +85,31 @@ test('existing non-addable declaration is editable but absent from Add Capabilit
     actions: ['route.set-mode'], targets: [], metrics: ['route-length']
   });
   assert.deepEqual(ui.settingsControls('route-comparison-v1').controls.map(({ path }) => path), ['$.settings.adapter']);
+});
+
+test('installed urban context declaration authors source and release without a URL setting', () => {
+  const { ui, manifest } = harness({ declarations: [{
+    id: 'urban-context-v1',
+    settings: {
+      adapter: 'route-61-2-current',
+      buildingSource: 'local-geojson',
+      overtureRelease: '2026-08-19.0'
+    }
+  }] });
+
+  assert.deepEqual(ui.settingsControls('urban-context-v1').controls.map(({ path }) => path), [
+    '$.settings.adapter',
+    '$.settings.buildingSource',
+    '$.settings.overtureRelease'
+  ]);
+  ui.settingsControl('urban-context-v1', 'buildingSource').set('overture-pmtiles');
+  ui.settingsControl('urban-context-v1', 'overtureRelease').set('2026-09-16.0');
+  assert.deepEqual(manifest.capabilities[0].settings, {
+    adapter: 'route-61-2-current',
+    buildingSource: 'overture-pmtiles',
+    overtureRelease: '2026-09-16.0'
+  });
+  assert.throws(() => ui.settingsControl('urban-context-v1', 'url'), /unsupported capability setting/i);
 });
 
 test('explicitly addable capability creates supported settings and discovers owned public catalogs', () => {

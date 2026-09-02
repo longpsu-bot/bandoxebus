@@ -185,6 +185,39 @@ export function validateDataWorkbenchPreviewCandidate(candidate, {
   return Object.freeze({ ...candidate, value: preflight.value });
 }
 
+const URBAN_CONTEXT_STATUS_LABELS = Object.freeze({
+  'not-requested': 'Not requested',
+  loading: 'Loading',
+  available: 'Available',
+  unavailable: 'Unavailable',
+  'local-benchmark': 'Local benchmark'
+});
+
+export function presentUrbanContextSetting(key, control = {}) {
+  if (key === 'buildingSource') {
+    return {
+      label: 'Building source',
+      options: [
+        { value: 'overture-pmtiles', label: 'Overture online' },
+        { value: 'local-geojson', label: 'Local benchmark' }
+      ]
+    };
+  }
+  return {
+    label: key === 'overtureRelease' ? 'Overture release' : key,
+    options: control.options
+  };
+}
+
+export function resolveUrbanContextStatusText(telemetry, settings = {}) {
+  if (
+    !telemetry
+    || telemetry.source !== settings.buildingSource
+    || telemetry.release !== settings.overtureRelease
+  ) return 'Not requested';
+  return URBAN_CONTEXT_STATUS_LABELS[telemetry.status] ?? 'Not requested';
+}
+
 export function createEditor({
   documentRef = globalThis.document,
   windowRef = globalThis.window
@@ -236,6 +269,7 @@ export function createEditor({
   let navigationIndex = createValidationNavigationIndex();
   let lastSentRevision = -1;
   let previewTelemetry = null;
+  let urbanContextStatus = null;
   let primaryStoryPath = null;
   let activeSection = 'project';
   let storySelection = null;
@@ -1215,10 +1249,22 @@ export function createEditor({
       if (!settings.supported) inspectorPanel.append(node('p', `${settings.code}: ${settings.message}`));
       else if (!settings.controls.length) inspectorPanel.append(node('p', 'No editable settings.'));
       else for (const control of settings.controls.filter(({ readOnly }) => !readOnly)) {
-        scalarControl(inspectorPanel, control.path.replace('$.settings.', ''), `author-capability-setting-${control.path.split('.').at(-1)}`, control.value, (value) => control.set(value), {
+        const key = control.path.split('.').at(-1);
+        const presentation = existing.value === 'urban-context-v1'
+          ? presentUrbanContextSetting(key, control)
+          : { label: control.path.replace('$.settings.', ''), options: control.options };
+        scalarControl(inspectorPanel, presentation.label, `author-capability-setting-${key}`, control.value, (value) => control.set(value), {
           type: control.kind === 'checkbox' ? 'checkbox' : control.kind,
-          options: control.options
+          options: presentation.options
         });
+      }
+      if (existing.value === 'urban-context-v1') {
+        const declaration = draftStore.get('project.json').capabilities.find(({ id }) => id === existing.value);
+        inspectorPanel.append(node(
+          'p',
+          `Status: ${resolveUrbanContextStatusText(urbanContextStatus, declaration?.settings)}`,
+          { id: 'author-capability-urban-status', role: 'status' }
+        ));
       }
       for (const role of ui.roles(existing.value)) {
         const roleSection = node('section', undefined, { className: 'capability-role' });
@@ -1309,6 +1355,13 @@ export function createEditor({
         if (!renderStudioWorkspace() && activeSection === 'project') renderProjectInspector();
       } else if (event.type === 'editor-preview:locate-result' && event.payload.status !== 'located') {
         elements.previewStatus.textContent = event.payload.message;
+      } else if (event.type === 'editor-preview:urban-context-status') {
+        urbanContextStatus = { ...structuredClone(event.payload), revision: event.revision };
+        const statusElement = documentRef.getElementById('author-capability-urban-status');
+        const declaration = draftStore?.get('project.json')?.capabilities?.find(({ id }) => id === 'urban-context-v1');
+        if (statusElement) {
+          statusElement.textContent = `Status: ${resolveUrbanContextStatusText(urbanContextStatus, declaration?.settings)}`;
+        }
       }
     }
   });
@@ -1476,6 +1529,7 @@ export function createEditor({
       if (state.lastValid.revision !== lastSentRevision) {
         lastSentRevision = state.lastValid.revision;
         outputPreviewStatus = null;
+        urbanContextStatus = null;
         bridge.start(state.lastValid);
       }
     }
@@ -1530,6 +1584,7 @@ export function createEditor({
     validation = createValidationCoordinator({ draftStore, onChange: handleValidationChange });
     lastSentRevision = -1;
     previewTelemetry = null;
+    urbanContextStatus = null;
     storySelection = null;
     stateSelection = 0;
     actionPhaseSelection = 'enter';

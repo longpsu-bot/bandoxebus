@@ -40,6 +40,11 @@ test('Route 61-2 loads from project.json and preserves its Story 1.0 contract', 
   assert.deepEqual(project.manifest.capabilities.map(({ id }) => id), [
     'route-comparison-v1', 'urban-context-v1'
   ]);
+  assert.deepEqual(project.manifest.capabilities.find(({ id }) => id === 'urban-context-v1').settings, {
+    adapter: 'route-61-2-current',
+    buildingSource: 'overture-pmtiles',
+    overtureRelease: '2026-08-19.0'
+  });
   assert.equal(project.story.schemaVersion, '1.0');
   assert.equal(project.story.states.length, 7);
   assert.equal(await readFile(STORY_URL, 'utf8'), before);

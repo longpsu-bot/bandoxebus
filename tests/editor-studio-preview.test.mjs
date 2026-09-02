@@ -7,6 +7,10 @@ import {
   resolvePreviewSourceForSnapshot
 } from '../editor/preview/bridge.js';
 import { startEditorPreviewHost } from '../editor/preview/package-resolver.js';
+import {
+  presentUrbanContextSetting,
+  resolveUrbanContextStatusText
+} from '../editor/editor.js';
 
 const encoder = new TextEncoder();
 
@@ -157,6 +161,72 @@ test('preview host dispatches bounded Scene commands to the active generic shell
   ]);
   assert.equal(posted.some(({ type }) => type === 'editor-preview:runtime-error'), false);
   await host.dispose();
+});
+
+test('preview host forwards one active-revision urban context status event and removes its listener', async () => {
+  const windowRef = fakeWindow();
+  const documentListeners = new Map();
+  windowRef.document.addEventListener = (type, listener) => documentListeners.set(type, listener);
+  windowRef.document.removeEventListener = (type, listener) => {
+    if (documentListeners.get(type) === listener) documentListeners.delete(type);
+  };
+  const posted = [];
+  windowRef.parent = { postMessage(message) { posted.push(message); } };
+  const host = startEditorPreviewHost({
+    windowRef,
+    expectedOrigin: windowRef.location.origin,
+    createResolver() {
+      return { manifestUrl: new URL('https://editor.example/project.json'), fetchImpl() {}, resolveAssetUrl() {}, revoke() {} };
+    },
+    async startProductionApplication() { return { map: { loaded: () => true }, destroy() {} }; }
+  });
+
+  await host.start({ revision: 7, entries: [] });
+  const listener = documentListeners.get('map-story:urban-context-status');
+  assert.equal(typeof listener, 'function');
+  listener({ detail: {
+    status: 'loading', source: 'overture-pmtiles', release: '2026-08-19.0', failureCategory: null
+  } });
+  assert.deepEqual(posted.filter(({ type }) => type === 'editor-preview:urban-context-status'), [{
+    protocol: PREVIEW_PROTOCOL_VERSION,
+    type: 'editor-preview:urban-context-status',
+    revision: 7,
+    requestId: null,
+    payload: { status: 'loading', source: 'overture-pmtiles', release: '2026-08-19.0', failureCategory: null }
+  }]);
+
+  await host.dispose();
+  assert.equal(documentListeners.has('map-story:urban-context-status'), false);
+});
+
+test('urban context inspector presentation keeps source/release editable and status transient', () => {
+  assert.deepEqual(presentUrbanContextSetting('buildingSource', {
+    value: 'overture-pmtiles',
+    options: ['overture-pmtiles', 'local-geojson']
+  }), {
+    label: 'Building source',
+    options: [
+      { value: 'overture-pmtiles', label: 'Overture online' },
+      { value: 'local-geojson', label: 'Local benchmark' }
+    ]
+  });
+  assert.deepEqual(presentUrbanContextSetting('overtureRelease', { value: '2026-08-19.0' }), {
+    label: 'Overture release',
+    options: undefined
+  });
+  assert.equal(resolveUrbanContextStatusText(null, {
+    buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0'
+  }), 'Not requested');
+  assert.equal(resolveUrbanContextStatusText({
+    status: 'local-benchmark', source: 'local-geojson', release: '2026-08-19.0', failureCategory: null
+  }, {
+    buildingSource: 'local-geojson', overtureRelease: '2026-08-19.0'
+  }), 'Local benchmark');
+  assert.equal(resolveUrbanContextStatusText({
+    status: 'available', source: 'overture-pmtiles', release: '2026-08-19.0', failureCategory: null
+  }, {
+    buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0'
+  }), 'Available');
 });
 
 test('preview host restores transient selection silently when a Story refresh recreates the adapter', async () => {

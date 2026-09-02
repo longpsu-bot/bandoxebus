@@ -6,6 +6,8 @@ import {
 import {
   validateCapabilityDescriptor
 } from '../src/capabilities/descriptor-schema.js';
+import { URBAN_CONTEXT_V1_DESCRIPTOR } from '../src/capabilities/urban-context-v1.js';
+import { validateSchema } from '../src/contracts/schema-validator.js';
 import {
   fixtureEntry,
   VALID_CAPABILITY_DESCRIPTOR
@@ -151,4 +153,29 @@ test('trusted gui.addable metadata accepts only boolean values', () => {
     '$.gui.addable',
     /boolean/i
   );
+});
+
+test('urban context settings accept only trusted source modes and bounded releases', () => {
+  assert.deepEqual(validateSchema({
+    adapter: 'route-61-2-current',
+    buildingSource: 'local-geojson',
+    overtureRelease: '2026-08-19.0'
+  }, URBAN_CONTEXT_V1_DESCRIPTOR.settingsSchema), []);
+  assert.deepEqual(validateSchema({
+    adapter: 'route-61-2-current',
+    buildingSource: 'overture-pmtiles',
+    overtureRelease: '2026-08-19.0'
+  }, URBAN_CONTEXT_V1_DESCRIPTOR.settingsSchema), []);
+  assert.ok(validateSchema({
+    adapter: 'route-61-2-current',
+    buildingSource: 'remote-url',
+    overtureRelease: 'latest'
+  }, URBAN_CONTEXT_V1_DESCRIPTOR.settingsSchema).length >= 2);
+  assert.ok(validateSchema({
+    adapter: 'route-61-2-current',
+    buildingSource: 'overture-pmtiles',
+    overtureRelease: '2026-08-19.0',
+    url: 'https://example.com/buildings.pmtiles'
+  }, URBAN_CONTEXT_V1_DESCRIPTOR.settingsSchema).some(({ code }) => code === 'ADDITIONAL_PROPERTY'));
+  assert.notEqual(URBAN_CONTEXT_V1_DESCRIPTOR.gui.addable, true);
 });
