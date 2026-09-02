@@ -40,7 +40,9 @@ export const URBAN_CONTEXT_V1_DESCRIPTOR = deepFreeze({
     type: 'object',
     additionalProperties: false,
     properties: {
-      adapter: { type: 'string', enum: ['route-61-2-current'] }
+      adapter: { type: 'string', enum: ['route-61-2-current'] },
+      buildingSource: { type: 'string', enum: ['overture-pmtiles', 'local-geojson'] },
+      overtureRelease: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.0$' }
     }
   },
   gui: { group: 'Urban context' }
@@ -73,7 +75,12 @@ export async function selectUrbanContextAdapter(
 ) {
   if (settings?.adapter !== 'route-61-2-current') return null;
   const module = await loadAdapter();
-  return module.getRoute612RuntimeAdapter(context);
+  const adapter = module.getRoute612RuntimeAdapter(context);
+  adapter.configureUrbanContext({
+    buildingSource: settings.buildingSource ?? 'local-geojson',
+    overtureRelease: settings.overtureRelease ?? '2026-08-19.0'
+  });
+  return adapter;
 }
 
 export function createUrbanContextCapability(context = {}) {

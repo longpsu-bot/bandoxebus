@@ -100,7 +100,11 @@
     },
     {
       "id": "urban-context-v1",
-      "settings": { "adapter": "route-61-2-current" }
+      "settings": {
+        "adapter": "route-61-2-current",
+        "buildingSource": "local-geojson",
+        "overtureRelease": "2026-08-19.0"
+      }
     }
   ],
   "attribution": {

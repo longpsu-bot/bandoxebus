@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createRoute612RuntimeAdapter, installRoute612Styles } from '../src/route-61-2/runtime-adapter.js';
+import { createRoute612RuntimeAdapter, getRoute612RuntimeAdapter, installRoute612Styles } from '../src/route-61-2/runtime-adapter.js';
 import { selectRouteComparisonAdapter } from '../src/capabilities/route-comparison-v1.js';
 import { selectUrbanContextAdapter } from '../src/capabilities/urban-context-v1.js';
 import { createRoute612Controls } from '../src/route-61-2/controls.js';
@@ -69,14 +69,64 @@ test('route and urban capability contexts attach to the same map-owned adapter',
 
 test('trusted installed code loads Route 61-2 adapter only for the explicit setting', async () => {
   const loads = [];
-  const loadAdapter = () => { loads.push('load'); return { getRoute612RuntimeAdapter: () => ({ id: 'adapter' }) }; };
+  const configured = [];
+  const adapter = {
+    id: 'adapter',
+    configureUrbanContext(value) { configured.push(value); }
+  };
+  const loadAdapter = () => { loads.push('load'); return { getRoute612RuntimeAdapter: () => adapter }; };
   assert.equal(await selectRouteComparisonAdapter({}, context(), loadAdapter), null);
   assert.equal(await selectRouteComparisonAdapter({ adapter: 'other' }, context(), loadAdapter), null);
-  assert.deepEqual(await selectRouteComparisonAdapter({ adapter: 'route-61-2-current' }, context(), loadAdapter), { id: 'adapter' });
+  assert.equal(await selectRouteComparisonAdapter({ adapter: 'route-61-2-current' }, context(), loadAdapter), adapter);
   assert.equal(await selectUrbanContextAdapter({}, context(), loadAdapter), null);
   assert.equal(await selectUrbanContextAdapter({ adapter: 'other' }, context(), loadAdapter), null);
-  assert.deepEqual(await selectUrbanContextAdapter({ adapter: 'route-61-2-current' }, context(), loadAdapter), { id: 'adapter' });
+  assert.equal(await selectUrbanContextAdapter({ adapter: 'route-61-2-current' }, context(), loadAdapter), adapter);
   assert.deepEqual(loads, ['load', 'load']);
+  assert.deepEqual(configured, [{ buildingSource: 'local-geojson', overtureRelease: '2026-08-19.0' }]);
+});
+
+test('route-first and urban-first capability connections preserve one configured adapter per map', async () => {
+  const settings = {
+    adapter: 'route-61-2-current',
+    buildingSource: 'overture-pmtiles',
+    overtureRelease: '2026-08-19.0'
+  };
+
+  for (const order of ['route-first', 'urban-first']) {
+    const map = { loaded: () => false, once() {}, getLayer() { return false; } };
+    const routeContext = context({ map, settings: { adapter: 'route-61-2-current' }, setMode() {} });
+    const urbanContext = context({ map, settings, setContextMode() {} });
+    let routeAdapter;
+    let urbanAdapter;
+    if (order === 'route-first') {
+      routeAdapter = await selectRouteComparisonAdapter(routeContext.settings, routeContext);
+      urbanAdapter = await selectUrbanContextAdapter(urbanContext.settings, urbanContext);
+    } else {
+      urbanAdapter = await selectUrbanContextAdapter(urbanContext.settings, urbanContext);
+      routeAdapter = await selectRouteComparisonAdapter(routeContext.settings, routeContext);
+    }
+
+    assert.equal(routeAdapter, urbanAdapter, order);
+    assert.equal(routeAdapter, getRoute612RuntimeAdapter({ map }), order);
+    assert.deepEqual(routeAdapter.state.urbanContextConfig, {
+      buildingSource: 'overture-pmtiles',
+      overtureRelease: '2026-08-19.0'
+    });
+  }
+});
+
+test('urban context configuration is closed and unavailable after adapter destruction', () => {
+  const adapter = createRoute612RuntimeAdapter(context());
+  assert.throws(() => adapter.configureUrbanContext({
+    buildingSource: 'overture-pmtiles',
+    overtureRelease: '2026-08-19.0',
+    url: 'https://example.com/buildings.pmtiles'
+  }), /urban context configuration/i);
+  adapter.destroy();
+  assert.throws(() => adapter.configureUrbanContext({
+    buildingSource: 'local-geojson',
+    overtureRelease: '2026-08-19.0'
+  }), /destroyed/i);
 });
 
 test('trusted Route controls mount mode, reveal, POI, urban, and simulation behavior into a neutral host', () => {

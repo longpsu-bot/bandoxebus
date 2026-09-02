@@ -1,6 +1,7 @@
 import { compareRoutes, compareStops, haversineMeters } from '../comparison.js';
 import { createUrbanContextController } from '../urban-context.js';
 import { OVERTURE_BUILDINGS_DATA_URL } from '../overture-buildings.js';
+import { OVERTURE_PMTILES_RELEASE_PATTERN } from '../overture-pmtiles.js';
 import { createRouteRevealController } from './reveal-controller.js';
 import {
   buildTransportPoiGroundLayers,
@@ -208,6 +209,10 @@ export function createRoute612RuntimeAdapter(context = {}) {
   let simulation = Object.freeze({ active: false, speed: 1 });
   let destroyed = false; let controls = null; let poiBeaconController = null; let busSimulation = null; let revealFrameId = null;
   let urbanContextController = null; let ready = Promise.resolve();
+  let urbanContextConfig = Object.freeze({
+    buildingSource: 'local-geojson',
+    overtureRelease: '2026-08-19.0'
+  });
   const raf = context.requestAnimationFrame ?? globalThis.requestAnimationFrame;
   const caf = context.cancelAnimationFrame ?? globalThis.cancelAnimationFrame;
 
@@ -391,6 +396,26 @@ export function createRoute612RuntimeAdapter(context = {}) {
       for (const key of Object.keys(delegates)) if (typeof next[key] === 'function') delegates[key] = next[key];
       return adapter;
     },
+    configureUrbanContext(next) {
+      if (destroyed) throw new TypeError('Cannot configure a destroyed Route 61-2 adapter.');
+      const keys = next && typeof next === 'object' && !Array.isArray(next) ? Object.keys(next) : [];
+      if (
+        keys.length !== 2
+        || !keys.includes('buildingSource')
+        || !keys.includes('overtureRelease')
+        || !['overture-pmtiles', 'local-geojson'].includes(next.buildingSource)
+        || typeof next.overtureRelease !== 'string'
+        || !OVERTURE_PMTILES_RELEASE_PATTERN.test(next.overtureRelease)
+      ) {
+        throw new TypeError('Invalid urban context configuration.');
+      }
+      urbanContextConfig = Object.freeze({
+        buildingSource: next.buildingSource,
+        overtureRelease: next.overtureRelease
+      });
+      urbanContextController?.configureBuildings?.(urbanContextConfig);
+      return urbanContextConfig;
+    },
     setMode(nextMode) {
       if (!['existing', 'proposed', 'difference', 'compare'].includes(nextMode)) throw new TypeError(`Unsupported route mode: ${nextMode}.`);
       if (delegates.setMode) delegates.setMode(nextMode);
@@ -439,7 +464,9 @@ export function createRoute612RuntimeAdapter(context = {}) {
       },
       reset() { applyMode('difference'); applyContext('off'); }
     }),
-    get state() { return Object.freeze({ mode, revealActive, poiActive, contextMode, simulation }); },
+    get state() {
+      return Object.freeze({ mode, revealActive, poiActive, contextMode, simulation, urbanContextConfig });
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;
