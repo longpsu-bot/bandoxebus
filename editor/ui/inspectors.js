@@ -241,6 +241,12 @@ const RENDER_KEYS = Object.freeze({
   mixed: []
 });
 
+const DEFAULT_RENDER = Object.freeze({
+  line: Object.freeze({ type: 'line', color: '#2BB7FF', width: 4, opacity: 0.9, lineStyle: 'solid' }),
+  point: Object.freeze({ type: 'point', color: '#F59E0B', radius: 6, strokeColor: '#FFFFFF', strokeWidth: 1 }),
+  polygon: Object.freeze({ type: 'fill', color: '#2BB7FF33', opacity: 0.3, outlineColor: '#2BB7FF', outlineWidth: 2 })
+});
+
 function observedTopLevelProperties(collection) {
   const fields = new Set();
   for (const feature of collection.features) {
@@ -268,6 +274,59 @@ export function importNormalizedTable(value, { path = '$' } = {}) {
 
 function assertStableId(id, label) {
   if (!/^[a-z][a-z0-9-]*$/.test(id)) throw new TypeError(`${label} ID must be a stable lowercase ID.`);
+}
+
+export function preflightDatasetCandidate(candidate, {
+  id = candidate?.id,
+  label = candidate?.label,
+  manifest,
+  existingDescriptor,
+  copyValue = true
+} = {}) {
+  if (!candidate || !['spatial', 'table'].includes(candidate.kind)) {
+    throw new TypeError('Dataset candidate must be spatial or table data.');
+  }
+  assertStableId(id, 'Dataset');
+  if (!existingDescriptor && manifest?.datasets?.[id]) throw new TypeError(`Dataset ID already exists: ${id}`);
+
+  let descriptor;
+  if (existingDescriptor) {
+    descriptor = clone(existingDescriptor);
+    const expectedKind = descriptor.type === 'geojson' ? 'spatial'
+      : descriptor.type === 'table-json' ? 'table' : undefined;
+    if (candidate.kind !== expectedKind) {
+      throw new TypeError(`Replacement is incompatible with existing ${descriptor.type} data.`);
+    }
+    if (candidate.kind === 'spatial' && candidate.geometry !== descriptor.geometry) {
+      throw new TypeError(`Replacement is incompatible; expected ${descriptor.geometry} geometry.`);
+    }
+  } else if (candidate.kind === 'spatial') {
+    descriptor = {
+      type: 'geojson', geometry: candidate.geometry, src: `./data/${id}.geojson`, label,
+      render: clone(DEFAULT_RENDER[candidate.geometry])
+    };
+  } else {
+    descriptor = { type: 'table-json', src: `./data/${id}.json`, label };
+  }
+
+  let value;
+  if (candidate.kind === 'spatial') {
+    const validationDescriptor = { ...descriptor, path: `$.datasets.${id}` };
+    if (copyValue) value = importGeoJson(candidate.value, validationDescriptor).value;
+    else {
+      validateGeoJsonResource(candidate.value, validationDescriptor, { path: validationDescriptor.path });
+      value = candidate.value;
+    }
+  } else if (copyValue) value = importNormalizedTable(candidate.value, { path: `$.datasets.${id}` }).value;
+  else {
+    validateTableData(candidate.value, { path: `$.datasets.${id}` });
+    value = candidate.value;
+  }
+  return Object.freeze({
+    descriptor: Object.freeze(descriptor),
+    value: Object.freeze(value),
+    path: descriptor.src.replace(/^\.\//, '')
+  });
 }
 
 function compatibleRoles(roleCatalog, descriptor) {
@@ -380,7 +439,7 @@ function datasetInspector({ manifest, resources = {}, mutate, writeResource, rol
     if (manifest.datasets[id]) throw new TypeError(`Dataset ID already exists: ${id}`);
     const src = type === 'geojson' ? `./data/${id}.geojson` : `./data/${id}.json`;
     const descriptor = type === 'geojson'
-      ? { type, geometry: input.geometry, src, label: input.label }
+      ? { type, geometry: input.geometry, src, label: input.label, ...(input.render ? { render: clone(input.render) } : {}) }
       : { type, src, label: input.label };
     const imported = type === 'geojson'
       ? importGeoJson(input.value, { ...descriptor, path: `$.datasets.${id}` }).value

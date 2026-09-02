@@ -6,7 +6,8 @@ import {
   createValidationNavigationIndex
 } from './core/validation.js';
 import { createPreviewBridge } from './preview/bridge.js';
-import { renderEntityInspector } from './ui/inspectors.js';
+import { preflightDatasetCandidate, renderEntityInspector } from './ui/inspectors.js';
+import { createDataWorkbench } from './ui/data-workbench.js';
 import { createStoryEditor } from './ui/story-editor.js';
 import {
   applyStudioStoryCommand,
@@ -132,6 +133,58 @@ export function resolveProblemsPresentation({ status, diagnostics = [], lastVali
   return Object.freeze({ count, open: status === 'invalid' && count > 0, validity, previewWarning });
 }
 
+export function confirmDataWorkbenchCandidate(candidate, {
+  id = candidate?.id,
+  label = candidate?.label,
+  manifest,
+  datasetInspector,
+  existingDescriptor,
+  story,
+  sceneIndex = 0,
+  mutateStory
+} = {}) {
+  if (!datasetInspector?.command || !datasetInspector?.entity) {
+    throw new TypeError('Data Workbench confirmation requires the production dataset inspector.');
+  }
+  const preflight = preflightDatasetCandidate(candidate, {
+    id, label, manifest, existingDescriptor
+  });
+  const nextStory = !existingDescriptor && candidate.kind === 'spatial' && story
+    ? applyStudioStoryCommand(story, 'add-project-layer', { sceneIndex, datasetId: id })
+    : null;
+  if (nextStory && typeof mutateStory !== 'function') {
+    throw new TypeError('Spatial confirmation requires a Story mutation callback.');
+  }
+
+  if (existingDescriptor) datasetInspector.entity(id).command('replace', preflight.value);
+  else if (candidate.kind === 'spatial') {
+    datasetInspector.command('add-geojson', id, {
+      geometry: candidate.geometry,
+      label,
+      render: preflight.descriptor.render,
+      value: preflight.value
+    });
+  } else {
+    datasetInspector.command('add-table', id, { label, value: preflight.value });
+  }
+  if (nextStory) {
+    mutateStory(nextStory);
+  }
+  return Object.freeze({ ...preflight, story: nextStory });
+}
+
+export function validateDataWorkbenchPreviewCandidate(candidate, {
+  id = candidate?.id,
+  label = candidate?.label,
+  manifest,
+  existingDescriptor
+} = {}) {
+  const preflight = preflightDatasetCandidate(candidate, {
+    id, label, manifest, existingDescriptor, copyValue: false
+  });
+  return Object.freeze({ ...candidate, value: preflight.value });
+}
+
 export function createEditor({
   documentRef = globalThis.document,
   windowRef = globalThis.window
@@ -193,6 +246,7 @@ export function createEditor({
   let viewportPreset = 'desktop';
   let outputPreviewStatus = null;
   let pendingStudioInsert = null;
+  let dataWorkbench = null;
 
   function launchOutputPreview(outputMode) {
     const launch = createOutputPreviewLaunch(validation, outputMode);
@@ -223,7 +277,15 @@ export function createEditor({
     const metricFile = manifest.metrics ? draftStore.get(manifest.metrics.src.replace(/^\.\//, '')) : null;
     const catalogs = {
       tables,
-      datasets: Object.entries(manifest.datasets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
+      datasets: Object.entries(manifest.datasets).map(([id, descriptor]) => {
+        const value = draftStore.get(descriptor.src.replace(/^\.\//, ''));
+        return {
+          id,
+          label: descriptor.label ?? id,
+          geometry: descriptor.geometry,
+          featureCount: descriptor.type === 'geojson' && Array.isArray(value?.features) ? value.features.length : undefined
+        };
+      }),
       assets: Object.entries(manifest.assets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
       metrics: [
         ...Object.entries(metricFile?.metrics ?? {}).map(([id, metric]) => ({ id, label: metric.label, format: metric.format })),
@@ -274,6 +336,64 @@ export function createEditor({
     renderStudioWorkspace();
   }
 
+  function ensureDataWorkbench() {
+    if (dataWorkbench) return dataWorkbench;
+    dataWorkbench = createDataWorkbench({
+      documentRef,
+      windowRef,
+      validateCandidate(candidate, { mode, existingDataset } = {}) {
+        const current = primaryStory();
+        const manifest = current.manifest;
+        const id = mode === 'replace' ? existingDataset.id : candidate.id;
+        return validateDataWorkbenchPreviewCandidate(candidate, {
+          id,
+          label: candidate.label,
+          manifest,
+          existingDescriptor: mode === 'replace' ? manifest.datasets[id] : undefined
+        });
+      },
+      async onConfirm(candidate, { mode, existingDataset } = {}) {
+        const current = primaryStory();
+        const manifest = current.manifest;
+        const id = mode === 'replace' ? existingDataset.id : candidate.id;
+        const existingDescriptor = mode === 'replace' ? manifest.datasets[id] : undefined;
+        confirmDataWorkbenchCandidate(candidate, {
+          id,
+          label: candidate.label,
+          manifest,
+          datasetInspector: inspect('dataset'),
+          existingDescriptor,
+          story: current.story,
+          sceneIndex: stateSelection,
+          mutateStory: current.story ? (next) => draftStore.mutate(current.path, () => next) : undefined
+        });
+        if (!existingDescriptor && candidate.kind === 'spatial') {
+          const entity = inspect('dataset').entity(id);
+          const fields = entity.labelFields();
+          if (fields.length && entity.hasControl('render.label')) {
+            entity.control('render.label').set({ field: fields[0], placement: 'auto' });
+          }
+        }
+        if (candidate.kind === 'table' && completePendingStudioInsert(id)) return;
+        renderDirty();
+        if (!renderStudioWorkspace()) renderDatasetPanel();
+      }
+    });
+    return dataWorkbench;
+  }
+
+  function openDataWorkbench({ mode = 'add', datasetId, files } = {}) {
+    const manifest = draftStore.get('project.json');
+    const descriptor = datasetId ? manifest.datasets[datasetId] : undefined;
+    return ensureDataWorkbench().open({
+      mode,
+      files,
+      usedIds: Object.keys(manifest.datasets),
+      returnFocus: documentRef.activeElement,
+      existingDataset: descriptor ? { id: datasetId, ...structuredClone(descriptor) } : undefined
+    });
+  }
+
   function renderStudioInsertRequest(kind, insert) {
     const catalogs = productionContentCatalogs(primaryStory().manifest).catalogs;
     const plan = planStudioInsert(kind, catalogs);
@@ -289,7 +409,7 @@ export function createEditor({
         pendingStudioInsert = { kind, insert };
         if (kind === 'metric') renderMetricPanel();
         else if (kind === 'image') renderAssetPanel();
-        else renderDatasetPanel();
+        else void openDataWorkbench({ mode: 'add' });
       }));
       panel.append(button('Cancel', `studio-insert-${kind}-cancel`, cancelStudioInsert));
       return;
@@ -350,20 +470,12 @@ export function createEditor({
         renderStudioWorkspace();
       },
       onRequestInsert(kind, insert) { renderStudioInsertRequest(kind, insert); },
+      onAddData() { void openDataWorkbench({ mode: 'add' }); },
+      onReplaceData(datasetId) { void openDataWorkbench({ mode: 'replace', datasetId }); },
       onPreviewCommand(name, payload) { bridge.command(name, payload); },
       onOutputPreview: launchOutputPreview
     });
     return true;
-  }
-
-  function addLayerToPrimaryStory12(datasetId) {
-    const current = primaryStory();
-    if (current.story?.schemaVersion !== '1.2') return;
-    const next = applyStudioStoryCommand(current.story, 'add-project-layer', {
-      sceneIndex: stateSelection,
-      datasetId
-    });
-    draftStore.mutate(current.path, () => next);
   }
 
   function inspect(kind, options = {}) {
@@ -678,44 +790,13 @@ export function createEditor({
         }));
         inspectorPanel.append(tableSection);
       }
-      const replace = node('input', undefined, { type: 'file', id: 'author-dataset-replace' });
-      replace.accept = '.json,.geojson,application/json,application/geo+json';
-      labeled(inspectorPanel, 'Replace resource', replace);
-      inspectorPanel.append(button('Replace dataset resource', 'author-dataset-replace-button', async () => {
-        try {
-          entity.command('replace', JSON.parse(await replace.files[0].text()));
-          refreshPanel(renderDatasetPanel, `Replaced dataset ${existing.value}.`);
-        } catch (error) { setStatus(status, '', error); }
+      inspectorPanel.append(button('Replace data…', 'author-dataset-replace-button', () => {
+        void openDataWorkbench({ mode: 'replace', datasetId: existing.value });
       }));
     }
     existing.addEventListener('change', renderExisting);
-    const id = labeled(panel, 'Stable dataset ID', textInput('author-dataset-id'));
-    const label = labeled(panel, 'Label', textInput('author-dataset-label'));
-    const type = labeled(panel, 'Data type', selectInput('author-dataset-type', [
-      ['line', 'Line GeoJSON'], ['point', 'Point GeoJSON'], ['polygon', 'Polygon GeoJSON'], ['table', 'Normalized table JSON']
-    ]));
-    const color = labeled(panel, 'Renderer color', node('input', undefined, { type: 'color', id: 'author-dataset-color' }));
-    color.value = '#00aaff';
-    const file = labeled(panel, 'Import file', node('input', undefined, { type: 'file', id: 'author-dataset-file' }));
-    file.accept = '.json,.geojson,application/json,application/geo+json';
-    const add = node('button', 'Import dataset', { type: 'button', id: 'author-dataset-add' });
-    add.addEventListener('click', async () => {
-      try {
-        const value = JSON.parse(await file.files[0].text());
-        if (type.value === 'table') ui.command('add-table', id.value, { label: label.value, value });
-        else {
-          ui.command('add-geojson', id.value, { geometry: type.value, label: label.value, value });
-          addLayerToPrimaryStory12(id.value);
-          const entity = ui.entity(id.value);
-          entity.control('render.type').set(type.value === 'polygon' ? 'fill' : type.value);
-          entity.control('render.color').set(color.value.toUpperCase());
-          const fields = entity.labelFields();
-          if (fields.length) entity.control('render.label').set({ field: fields[0], placement: 'auto' });
-        }
-        if (type.value === 'table' && completePendingStudioInsert(id.value)) return;
-        refreshPanel(renderDatasetPanel, `Added dataset ${id.value}.`);
-      } catch (error) { status.textContent = error.message; }
-    });
+    const add = node('button', '+ Add data', { type: 'button', id: 'author-dataset-add' });
+    add.addEventListener('click', () => { void openDataWorkbench({ mode: 'add' }); });
     panel.append(add);
   }
 
@@ -1602,6 +1683,7 @@ export function createEditor({
   elements.mobile.addEventListener('click', () => setViewport('mobile'));
 
   function dispose() {
+    dataWorkbench?.close?.();
     validation?.dispose();
     bridge.dispose();
   }

@@ -1,0 +1,247 @@
+import { reprojectFeatureCollection } from './crs.js';
+import { createImportId, friendlyLabel } from './import-identifiers.js';
+import { normalizeSpatialSource } from './spatial-normalizer.js';
+import { normalizeRecordArray, normalizeTableGrid } from './table-normalizer.js';
+import { validateTableData } from '../../src/project/resource-schemas.js';
+
+const decoder = new TextDecoder('utf-8', { fatal: true });
+
+function clone(value) {
+  return structuredClone(value);
+}
+
+function tableCandidate(value, { label, id, sourceFormat, warnings = [] }) {
+  validateTableData(value);
+  return Object.freeze({
+    kind: 'table',
+    label,
+    id,
+    value,
+    rowCount: value.rows.length,
+    columns: value.columns.map(({ id: columnId, label: columnLabel, type }) => ({ id: columnId, label: columnLabel, type })),
+    warnings: [...warnings],
+    sourceFormat
+  });
+}
+
+function oneItem(label, id) {
+  return Object.freeze([{ id, label }]);
+}
+
+function checkedItem(sourceItems, itemId) {
+  const item = sourceItems.find(({ id }) => id === itemId);
+  if (!item) throw new TypeError(`Unknown source item: ${itemId}.`);
+  return item;
+}
+
+function trimPapaTrailingBlankRows(grid) {
+  while (grid.length > 1 && grid.at(-1).every((value) => value === '')) grid.pop();
+  return grid;
+}
+
+function papaErrors(errors) {
+  return (errors ?? []).filter(({ code }) => code !== 'UndetectableDelimiter').slice(0, 5);
+}
+
+function exactColumnIndex(headings, configured, axis) {
+  const value = String(configured ?? '').trim().toLowerCase();
+  const index = headings.findIndex((heading) => String(heading ?? '').trim().toLowerCase() === value);
+  if (index < 0) throw new TypeError(`${axis} column ${configured || '(blank)'} is missing.`);
+  return index;
+}
+
+function numericCoordinate(value, rowNumber, axis) {
+  if (value === null || value === undefined || String(value).trim() === '') return undefined;
+  const result = Number(String(value).trim());
+  if (!Number.isFinite(result)) throw new TypeError(`${axis} coordinate at CSV row ${rowNumber} is not a finite number.`);
+  return result;
+}
+
+async function parseCsv(file, papa, onProgress) {
+  const canStreamFile = typeof globalThis.FileReaderSync === 'function' || typeof globalThis.FileReader === 'function';
+  const input = canStreamFile
+    ? file
+    : decoder.decode(new Uint8Array(await file.arrayBuffer())).replace(/^\uFEFF/, '');
+  return new Promise((resolve, reject) => {
+    const grid = [];
+    const errors = [];
+    let delimiter;
+    try {
+      papa.parse(input, {
+        dynamicTyping: false,
+        skipEmptyLines: 'greedy',
+        delimitersToGuess: [',', '\t', '|', ';'],
+        chunk(results) {
+          if (Array.isArray(results?.data)) {
+            for (const row of results.data) grid.push(row);
+          }
+          if (Array.isArray(results?.errors) && errors.length < 5) {
+            for (const error of results.errors) {
+              if (error?.code !== 'UndetectableDelimiter') errors.push(error);
+              if (errors.length >= 5) break;
+            }
+          }
+          delimiter = results?.meta?.delimiter ?? delimiter;
+          onProgress({ completed: grid.length, unit: 'rows' });
+        },
+        complete() { resolve({ data: grid, errors, meta: { delimiter } }); },
+        error(error) { reject(new TypeError(`CSV parse failed: ${error?.message || error}`)); }
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+export async function openCsvSource(file, { papa, usedIds = [], onProgress = () => {} } = {}) {
+  if (!papa || typeof papa.parse !== 'function') throw new TypeError('PapaParse is required for CSV import.');
+  async function readGrid() {
+    const parsed = await parseCsv(file, papa, onProgress);
+    const errors = papaErrors(parsed.errors);
+    if (errors.length) {
+      const detail = errors.map(({ row, message }) => `row ${Number(row) + 1}: ${message}`).join('; ');
+      throw new TypeError(`CSV parse failed: ${detail}`);
+    }
+    return trimPapaTrailingBlankRows(parsed.data);
+  }
+  let grid = await readGrid();
+  if (!grid.length) throw new TypeError('CSV contains no rows.');
+  const label = friendlyLabel(file.name);
+  const id = createImportId(label, usedIds);
+  const sourceItems = Object.freeze([Object.freeze({
+    id,
+    label,
+    headings: [...(grid[0] ?? [])],
+    suggestedXColumn: (grid[0] ?? []).find((heading) => /^(?:x|lon|lng|longitude|easting)$/i.test(String(heading).trim())),
+    suggestedYColumn: (grid[0] ?? []).find((heading) => /^(?:y|lat|latitude|northing)$/i.test(String(heading).trim())),
+    defaultSourceCrs: (grid[0] ?? []).some((heading) => /^(?:lon|lng|longitude|lat|latitude)$/i.test(String(heading).trim())) ? 'EPSG:4326' : undefined
+  })]);
+  return Object.freeze({
+    sourceItems,
+    async prepare(itemId, {
+      mode = 'table', headerRow = 0, xColumn, yColumn, zColumn, sourceCrs = 'EPSG:4326', proj4
+    } = {}) {
+      checkedItem(sourceItems, itemId);
+      if (!grid) grid = await readGrid();
+      if (mode === 'table') {
+        return tableCandidate(normalizeTableGrid(grid, { headerRow }), { label, id, sourceFormat: 'CSV' });
+      }
+      if (mode !== 'points') throw new TypeError(`Unsupported CSV import mode: ${mode}.`);
+      if (!Number.isInteger(headerRow) || headerRow < 0 || headerRow >= grid.length) throw new TypeError('CSV point import requires a valid header row.');
+      const headings = grid[headerRow];
+      const xIndex = exactColumnIndex(headings, xColumn, 'X');
+      const yIndex = exactColumnIndex(headings, yColumn, 'Y');
+      const zIndex = zColumn ? exactColumnIndex(headings, zColumn, 'Z') : -1;
+      const features = [];
+      let blankCoordinateRows = 0;
+      for (let rowIndex = headerRow + 1; rowIndex < grid.length; rowIndex += 1) {
+        const row = grid[rowIndex];
+        const rowNumber = rowIndex + 1;
+        const x = numericCoordinate(row[xIndex], rowNumber, 'X');
+        const y = numericCoordinate(row[yIndex], rowNumber, 'Y');
+        if (x === undefined || y === undefined) {
+          blankCoordinateRows += 1;
+          continue;
+        }
+        const z = zIndex < 0 ? undefined : numericCoordinate(row[zIndex], rowNumber, 'Z');
+        const coordinates = z === undefined ? [x, y] : [x, y, z];
+        features.push({
+          type: 'Feature',
+          properties: Object.fromEntries(headings.map((heading, index) => [String(heading || `Column ${index + 1}`), row[index] === '' || row[index] === undefined ? null : row[index]])),
+          geometry: { type: 'Point', coordinates }
+        });
+      }
+      if (!features.length) throw new TypeError('CSV point import has no rows with complete coordinates.');
+      const projected = reprojectFeatureCollection({ type: 'FeatureCollection', features }, { sourceCrs, proj4 });
+      const candidates = normalizeSpatialSource(projected, { label, id, sourceFormat: 'CSV', sourceCrs, usedIds });
+      if (!blankCoordinateRows) return candidates;
+      return candidates.map((candidate) => Object.freeze({
+        ...candidate,
+        warnings: [...candidate.warnings, `${blankCoordinateRows} CSV ${blankCoordinateRows === 1 ? 'row had' : 'rows had'} blank coordinates and will not be imported.`]
+      }));
+    },
+    releasePrepared() { grid = undefined; },
+    dispose() { grid = undefined; }
+  });
+}
+
+export async function openJsonTableSource(detection, { usedIds = [] } = {}) {
+  if (!detection || detection.format !== 'json' || !['normalized-table', 'records'].includes(detection.jsonKind)) {
+    throw new TypeError('JSON source is not a supported table shape.');
+  }
+  const file = detection.files[0];
+  const label = friendlyLabel(file.name);
+  const id = createImportId(label, usedIds);
+  const sourceItems = oneItem(label, id);
+  return Object.freeze({
+    sourceItems,
+    async prepare(itemId) {
+      checkedItem(sourceItems, itemId);
+      const value = detection.jsonKind === 'records' ? normalizeRecordArray(detection.value) : clone(detection.value);
+      return tableCandidate(value, { label, id, sourceFormat: 'JSON' });
+    },
+    dispose() {}
+  });
+}
+
+function sheetGrid(sheet, sheetJs, { maxRows } = {}) {
+  if (!sheet?.['!ref']) return [];
+  const range = sheetJs.utils.decode_range(sheet['!ref']);
+  range.s.r = 0;
+  range.s.c = 0;
+  if (Number.isInteger(maxRows) && maxRows > 0) range.e.r = Math.min(range.e.r, maxRows - 1);
+  return sheetJs.utils.sheet_to_json(sheet, {
+    header: 1,
+    raw: true,
+    defval: null,
+    blankrows: true,
+    range
+  });
+}
+
+function suggestedHeader(grid) {
+  const limit = Math.min(50, grid.length);
+  for (let index = 0; index < limit; index += 1) {
+    if (grid[index].some((value) => value !== null && value !== undefined && String(value).trim() !== '')) return index;
+  }
+  return 0;
+}
+
+export async function openXlsxSource(bytes, { sheetJs, usedIds = [] } = {}) {
+  if (!sheetJs?.read || !sheetJs?.utils) throw new TypeError('SheetJS is required for XLSX import.');
+  const workbook = sheetJs.read(bytes, {
+    type: 'array',
+    cellDates: true,
+    cellFormula: false,
+    cellHTML: false,
+    cellNF: false,
+    cellStyles: false,
+    dense: false
+  });
+  const occupied = [...usedIds];
+  const sourceItems = workbook.SheetNames.map((label, index) => {
+    const id = createImportId(label, occupied, { prefix: 'sheet' });
+    occupied.push(id);
+    const headerSample = sheetGrid(workbook.Sheets[label], sheetJs, { maxRows: 50 });
+    return Object.freeze({ id, label, sheetName: label, sheetIndex: index, suggestedHeaderRow: suggestedHeader(headerSample) });
+  });
+  if (!sourceItems.length) throw new TypeError('XLSX workbook contains no sheets.');
+  return Object.freeze({
+    sourceItems,
+    async prepare(itemId, { headerRow } = {}) {
+      const item = checkedItem(sourceItems, itemId);
+      const grid = sheetGrid(workbook.Sheets[item.sheetName], sheetJs);
+      const chosen = headerRow ?? item.suggestedHeaderRow;
+      if (!Number.isInteger(chosen) || chosen < 0 || chosen >= Math.min(50, grid.length)) {
+        throw new TypeError('Choose a header row from the first 50 rows of the selected sheet.');
+      }
+      return tableCandidate(normalizeTableGrid(grid, { headerRow: chosen }), {
+        label: item.label,
+        id: item.id,
+        sourceFormat: 'XLSX'
+      });
+    },
+    releasePrepared() {},
+    dispose() {}
+  });
+}

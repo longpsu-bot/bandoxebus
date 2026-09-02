@@ -1,10 +1,8 @@
 import { collectDeclaredPackageEntries, normalizePackagePath } from '../core/package-store.js';
-import { Unzip, UnzipInflate, zipSync } from '../../vendor/fflate/0.8.3/fflate.esm.js';
+import { PROJECT_ZIP_LIMITS, readSafeZipEntries } from '../core/safe-zip.js';
+import { zipSync } from '../../vendor/fflate/0.8.3/fflate.esm.js';
 
 const decoder = new TextDecoder();
-const ZIP_MAX_ENTRIES = 2048;
-const ZIP_MAX_ENTRY_BYTES = 64 * 1024 * 1024;
-const ZIP_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 
 // Vendored from the official fflate@0.8.3 npm package (esm/browser.js, MIT).
 export const FFLATE_VENDOR_VERSION = '0.8.3';
@@ -165,59 +163,11 @@ export function createFolderStorageAdapter({
 
 export const FolderStorageAdapter = createFolderStorageAdapter;
 
-function concatChunks(chunks, length) {
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return bytes;
-}
-
 async function zipInputBytes(value) {
   if (value instanceof Uint8Array) return value.slice();
   if (value instanceof ArrayBuffer) return new Uint8Array(value.slice(0));
   if (value?.arrayBuffer) return new Uint8Array(await value.arrayBuffer());
   throw new TypeError('ZIP input must be a Uint8Array, ArrayBuffer, or Blob.');
-}
-
-function readZipEntries(archiveBytes) {
-  const staged = [];
-  const seen = new Set();
-  let entryCount = 0;
-  let totalBytes = 0;
-  const unzip = new Unzip((file) => {
-    entryCount += 1;
-    if (entryCount > ZIP_MAX_ENTRIES) {
-      throw new TypeError(`ZIP package exceeds the security ceiling of ${ZIP_MAX_ENTRIES} entries.`);
-    }
-    const path = normalizePackagePath(file.name);
-    if (seen.has(path)) throw new TypeError(`Duplicate normalized package path: ${path}`);
-    seen.add(path);
-    if (file.originalSize > ZIP_MAX_ENTRY_BYTES) {
-      throw new TypeError(`ZIP entry exceeds the 64 MiB decompressed ceiling: ${path}`);
-    }
-    const chunks = [];
-    let entryBytes = 0;
-    file.ondata = (error, chunk, final) => {
-      if (error) throw error;
-      entryBytes += chunk.length;
-      totalBytes += chunk.length;
-      if (entryBytes > ZIP_MAX_ENTRY_BYTES) {
-        throw new TypeError(`ZIP entry exceeds the 64 MiB decompressed ceiling: ${path}`);
-      }
-      if (totalBytes > ZIP_MAX_TOTAL_BYTES) {
-        throw new TypeError('ZIP package exceeds the 256 MiB total decompressed ceiling.');
-      }
-      chunks.push(chunk.slice());
-      if (final) staged.push({ path, bytes: concatChunks(chunks, entryBytes) });
-    };
-    file.start();
-  });
-  unzip.register(UnzipInflate);
-  unzip.push(archiveBytes, true);
-  return staged;
 }
 
 function classifyZipEntries(staged) {
@@ -267,7 +217,10 @@ export function createZipStorageAdapter({ zipBytes, label = 'Project ZIP' } = {}
     origin,
     capabilities,
     async open() {
-      const entries = classifyZipEntries(readZipEntries(await zipInputBytes(zipBytes)));
+      const entries = classifyZipEntries(readSafeZipEntries(await zipInputBytes(zipBytes), {
+        limits: PROJECT_ZIP_LIMITS,
+        caseInsensitivePaths: false
+      }));
       return { origin: { ...origin }, capabilities, entries };
     },
     async export(packageStore) {

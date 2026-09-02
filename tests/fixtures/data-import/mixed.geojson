@@ -1,0 +1,1 @@
+{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"Stop A"},"geometry":{"type":"Point","coordinates":[106.7,10.8]}},{"type":"Feature","properties":{"name":"Route A"},"geometry":{"type":"LineString","coordinates":[[106.7,10.8],[106.72,10.82]]}}]}
