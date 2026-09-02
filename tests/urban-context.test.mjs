@@ -133,6 +133,35 @@ test('online protocol failure is bounded and never installs local or synthetic f
   assert.equal(controller.getDiagnostics().status, 'unavailable');
 });
 
+test('online layer rejection remains unavailable after the source becomes idle', async () => {
+  const map = createMap();
+  const statuses = [];
+  const addLayer = map.addLayer.bind(map);
+  map.addLayer = (layer) => {
+    if (layer.id === 'overture-industrial-buildings-3d') {
+      map.emit('error', {
+        error: new TypeError(`layers.${layer.id}.paint.fill-extrusion-base: unknown variable "height"`)
+      });
+      return;
+    }
+    addLayer(layer);
+  };
+  const controller = createController({
+    map,
+    buildingConfig: { buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0' },
+    ensureOnlineProtocol: async () => {},
+    createOnlineDefinitions: createOverturePmtilesLayerDefinitions,
+    onStatus: (status) => statuses.push(status)
+  });
+
+  await controller.setMode('industrial-context');
+  map.emit('idle');
+
+  assert.equal(statuses.at(-1).status, 'unavailable');
+  assert.equal(map.layers.has('overture-industrial-buildings-3d'), false);
+  assert.equal(map.layers.has('synthetic-industrial-infill'), false);
+});
+
 test('local benchmark installs the checked-in 1,299-building collection explicitly', async () => {
   const map = createMap();
   const statuses = [];

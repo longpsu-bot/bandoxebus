@@ -227,6 +227,11 @@ export function createUrbanContextController({
         const beforeId = map.getLayer(beforeLayerId) ? beforeLayerId : undefined;
         if (!map.getLayer(OVERTURE_PMTILES_FLAT_LAYER_ID)) map.addLayer(definitions.flat, beforeId);
         if (!map.getLayer(OVERTURE_BUILDING_LAYER_ID)) map.addLayer(definitions.extrusion, beforeId);
+        const missingLayerIds = [OVERTURE_PMTILES_FLAT_LAYER_ID, OVERTURE_BUILDING_LAYER_ID]
+          .filter((layerId) => !map.getLayer(layerId));
+        if (missingLayerIds.length > 0) {
+          throw new TypeError(`MapLibre rejected Overture layer installation: ${missingLayerIds.join(', ')}`);
+        }
         prepared = true;
         provider = 'overture';
         setContextVisible(desiredMode === INDUSTRIAL_CONTEXT_MODE);
