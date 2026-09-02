@@ -20,30 +20,35 @@ function freezeExpression(value) {
 }
 
 const NUMBER_FROM_PROPERTY = (name) => ['to-number', ['get', name], 0];
-const FINAL_HEIGHT_EXPRESSION = [
-  'case',
-  ['all', ['>', ['var', 'height'], 0], ['<=', ['var', 'height'], 300]], ['var', 'height'],
-  ['all', ['>', ['var', 'floors'], 0], ['<=', ['var', 'floors'], 80]], ['*', ['var', 'floors'], 3.5],
-  8.5
-];
-const HEIGHT_EXPRESSION = freezeExpression([
-  'let',
-  'height', NUMBER_FROM_PROPERTY('height'),
-  'floors', NUMBER_FROM_PROPERTY('num_floors'),
-  FINAL_HEIGHT_EXPRESSION
-]);
+
+function buildingHeightExpression() {
+  return [
+    'let',
+    'height', NUMBER_FROM_PROPERTY('height'),
+    'floors', NUMBER_FROM_PROPERTY('num_floors'),
+    [
+      'case',
+      ['all', ['>', ['var', 'height'], 0], ['<=', ['var', 'height'], 300]], ['var', 'height'],
+      ['all', ['>', ['var', 'floors'], 0], ['<=', ['var', 'floors'], 80]], ['*', ['var', 'floors'], 3.5],
+      8.5
+    ]
+  ];
+}
+
+const HEIGHT_EXPRESSION = freezeExpression(buildingHeightExpression());
 const BASE_EXPRESSION = freezeExpression([
   'let',
-  'height', NUMBER_FROM_PROPERTY('height'),
-  'floors', NUMBER_FROM_PROPERTY('num_floors'),
-  'finalHeight', FINAL_HEIGHT_EXPRESSION,
-  'minHeight', NUMBER_FROM_PROPERTY('min_height'),
-  'minFloor', NUMBER_FROM_PROPERTY('min_floor'),
+  'finalHeight', buildingHeightExpression(),
   [
-    'case',
-    ['all', ['>=', ['var', 'minHeight'], 0], ['<', ['var', 'minHeight'], ['var', 'finalHeight']]], ['var', 'minHeight'],
-    ['all', ['>=', ['var', 'minFloor'], 0], ['<=', ['var', 'minFloor'], 80], ['<', ['*', ['var', 'minFloor'], 3.5], ['var', 'finalHeight']]], ['*', ['var', 'minFloor'], 3.5],
-    0
+    'let',
+    'minHeight', NUMBER_FROM_PROPERTY('min_height'),
+    'minFloor', NUMBER_FROM_PROPERTY('min_floor'),
+    [
+      'case',
+      ['all', ['>=', ['var', 'minHeight'], 0], ['<', ['var', 'minHeight'], ['var', 'finalHeight']]], ['var', 'minHeight'],
+      ['all', ['>=', ['var', 'minFloor'], 0], ['<=', ['var', 'minFloor'], 80], ['<', ['*', ['var', 'minFloor'], 3.5], ['var', 'finalHeight']]], ['*', ['var', 'minFloor'], 3.5],
+      0
+    ]
   ]
 ]);
 

@@ -86,7 +86,7 @@ test('online definitions use one vector source and the locked building layers', 
   assert.equal(definitions.extrusion.paint['fill-extrusion-vertical-gradient'], true);
 });
 
-test('online extrusion expressions enforce bounded height and base policies', () => {
+test('online height expression enforces the bounded height policy', () => {
   const { extrusion } = createOverturePmtilesLayerDefinitions({ release: '2026-08-19.0' });
   const numeric = (name) => ['to-number', ['get', name], 0];
   const finalHeight = [
@@ -102,18 +102,36 @@ test('online extrusion expressions enforce bounded height and base policies', ()
     'floors', numeric('num_floors'),
     finalHeight
   ]);
-  assert.deepEqual(extrusion.paint['fill-extrusion-base'], [
+});
+
+test('online base expression computes final height in an enclosing let scope', () => {
+  const { extrusion } = createOverturePmtilesLayerDefinitions({ release: '2026-08-19.0' });
+  const numeric = (name) => ['to-number', ['get', name], 0];
+  const finalHeight = [
     'let',
     'height', numeric('height'),
     'floors', numeric('num_floors'),
-    'finalHeight', finalHeight,
-    'minHeight', numeric('min_height'),
-    'minFloor', numeric('min_floor'),
     [
       'case',
-      ['all', ['>=', ['var', 'minHeight'], 0], ['<', ['var', 'minHeight'], ['var', 'finalHeight']]], ['var', 'minHeight'],
-      ['all', ['>=', ['var', 'minFloor'], 0], ['<=', ['var', 'minFloor'], 80], ['<', ['*', ['var', 'minFloor'], 3.5], ['var', 'finalHeight']]], ['*', ['var', 'minFloor'], 3.5],
-      0
+      ['all', ['>', ['var', 'height'], 0], ['<=', ['var', 'height'], 300]], ['var', 'height'],
+      ['all', ['>', ['var', 'floors'], 0], ['<=', ['var', 'floors'], 80]], ['*', ['var', 'floors'], 3.5],
+      8.5
+    ]
+  ];
+
+  assert.deepEqual(extrusion.paint['fill-extrusion-base'], [
+    'let',
+    'finalHeight', finalHeight,
+    [
+      'let',
+      'minHeight', numeric('min_height'),
+      'minFloor', numeric('min_floor'),
+      [
+        'case',
+        ['all', ['>=', ['var', 'minHeight'], 0], ['<', ['var', 'minHeight'], ['var', 'finalHeight']]], ['var', 'minHeight'],
+        ['all', ['>=', ['var', 'minFloor'], 0], ['<=', ['var', 'minFloor'], 80], ['<', ['*', ['var', 'minFloor'], 3.5], ['var', 'finalHeight']]], ['*', ['var', 'minFloor'], 3.5],
+        0
+      ]
     ]
   ]);
 });
