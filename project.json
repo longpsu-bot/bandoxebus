@@ -102,7 +102,7 @@
       "id": "urban-context-v1",
       "settings": {
         "adapter": "route-61-2-current",
-        "buildingSource": "local-geojson",
+        "buildingSource": "overture-pmtiles",
         "overtureRelease": "2026-08-19.0"
       }
     }

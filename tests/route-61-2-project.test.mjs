@@ -42,7 +42,7 @@ test('Route 61-2 loads from project.json and preserves its Story 1.0 contract', 
   ]);
   assert.deepEqual(project.manifest.capabilities.find(({ id }) => id === 'urban-context-v1').settings, {
     adapter: 'route-61-2-current',
-    buildingSource: 'local-geojson',
+    buildingSource: 'overture-pmtiles',
     overtureRelease: '2026-08-19.0'
   });
   assert.equal(project.story.schemaVersion, '1.0');
