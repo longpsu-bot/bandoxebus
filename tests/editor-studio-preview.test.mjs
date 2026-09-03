@@ -17,6 +17,8 @@ import { unzipSync } from '../vendor/fflate/0.8.3/fflate.esm.js';
 import { createStoryRuntime } from '../src/story-runtime.js';
 import { createGenericStoryExperience } from '../src/runtime/generic-shell.js';
 import { createSceneStateController } from '../src/scene/scene-state-controller.js';
+import { createStoryActionRunner } from '../src/story-action-runner.js';
+import { createCoreMapCapability } from '../src/capabilities/core-map-v1.js';
 
 const encoder = new TextEncoder();
 
@@ -456,6 +458,98 @@ test('capture replays real production lifecycle for already-selected panned and 
     assert.equal(mode, 'industrial-context');
     if (variant === 'inherited') assert.deepEqual(calls.slice(0, 2), ['resize', ['focus', 1920]]);
     await host.dispose();
+  }
+});
+
+function animatedFocusCaptureHarness({ automaticMotion = true } = {}) {
+  const windowRef = fakeWindow();
+  const posted = [];
+  const events = new Set();
+  const focuses = [];
+  const initialView = { center: [0, 0], zoom: 3, pitch: 0, bearing: 0 };
+  let camera = structuredClone(initialView);
+  let destination = null;
+  let timer = null;
+  const settle = () => {
+    clearTimeout(timer); timer = null;
+    if (destination) camera = destination;
+    destination = null;
+    for (const listener of [...events]) listener();
+  };
+  const map = {
+    loaded: () => true, resize() {}, isMoving: () => destination !== null,
+    jumpTo(value) { clearTimeout(timer); timer = null; destination = null; camera = { ...camera, ...value }; },
+    easeTo(value) {
+      focuses.push(structuredClone(value));
+      clearTimeout(timer);
+      destination = { ...camera, ...value };
+      if (automaticMotion) timer = setTimeout(settle, 10);
+    },
+    getCenter: () => ({ lng: camera.center[0], lat: camera.center[1] }), getZoom: () => camera.zoom,
+    getPitch: () => camera.pitch, getBearing: () => camera.bearing,
+    getBounds: () => ({ getSouthWest: () => ({ lng: 1, lat: 1 }),
+      getNorthEast: () => camera.pitch === 50 && camera.bearing === 30 ? ({ lng: 3, lat: 4 }) : ({ lng: 2, lat: 2 }) }),
+    on(type, listener) { if (type === 'moveend') events.add(listener); },
+    off(type, listener) { events.delete(listener); }
+  };
+  const definition = { schemaVersion: '1.1', states: [
+    { id: 'a', map: { enter: [{ type: 'map.focus', target: 'a', camera: { pitch: 50, bearing: 30 } }], exit: [] } },
+    { id: 'b', map: { enter: [{ type: 'map.focus', target: 'b' }], exit: [] } }
+  ] };
+  const project = { story: definition, map: { initialView }, manifest: { capabilities: [] }, focusTargets: {
+    a: { type: 'coordinate', center: [1, 1], zoom: 10 }, b: { type: 'coordinate', center: [2, 2], zoom: 11 }
+  } };
+  const capability = createCoreMapCapability({ map, project });
+  const runtime = createStoryRuntime({ definition, actionRunner: createStoryActionRunner(capability.handlers) });
+  const shell = createGenericStoryExperience({ runtime });
+  windowRef.parent = { postMessage(message) { posted.push(message); } };
+  const host = startEditorPreviewHost({ windowRef,
+    createResolver() { return { manifestUrl: new URL('https://editor.example/project.json'), fetchImpl() {}, revoke() {} }; },
+    async startProductionApplication() { return { map, project, shell, storyRuntime: runtime,
+      destroy() { clearTimeout(timer); timer = null; destination = null; } }; }
+  });
+  const capture = () => windowRef.emit('message', { source: windowRef.parent, origin: windowRef.location.origin,
+    data: envelope('command', 1, { name: 'capture-scene-camera', payload: { index: 1 } }, 'animated-focus-capture') });
+  return { host, runtime, shell, map, posted, events, focuses, settle, capture };
+}
+
+test('Freeze replay waits for real core-map focus motion so omitted pitch and bearing inherit settled predecessors', async (t) => {
+  const harness = animatedFocusCaptureHarness();
+  t.after(() => harness.host.dispose());
+  harness.shell.activateScene(0, { animate: false });
+  await until(() => !harness.map.isMoving());
+  harness.shell.activateScene(1, { animate: false });
+  await until(() => !harness.map.isMoving());
+  assert.equal(harness.map.getPitch(), 50);
+  assert.equal(harness.map.getBearing(), 30);
+  assert.equal(harness.focuses[0].duration, 900, 'the installed focus handler remains animated despite animate:false');
+  await harness.host.start({ revision: 1, entries: [] });
+  harness.capture();
+  await until(() => harness.posted.some(({ type }) => type === 'editor-preview:freeze-camera'));
+  const result = harness.posted.find(({ type }) => type === 'editor-preview:freeze-camera');
+  assert.equal(result.payload.pitch, 50);
+  assert.equal(result.payload.bearing, 30);
+  assert.deepEqual(result.payload.bounds, [[1, 1], [3, 4]]);
+  assert.equal(harness.events.size, 1, 'only normal camera telemetry remains after both settlement listeners are removed');
+});
+
+test('replacement and disposal abort predecessor settlement without replaying later Scenes', async (t) => {
+  for (const replacement of [true, false]) {
+    const harness = animatedFocusCaptureHarness({ automaticMotion: false });
+    t.after(() => harness.host.dispose());
+    await harness.host.start({ revision: 1, entries: [] });
+    harness.capture();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(harness.runtime.currentIndex, 0, 'Scene B cannot begin while Scene A is moving');
+    const lateListeners = [...harness.events];
+    if (replacement) await harness.host.start({ revision: 2, entries: [] });
+    else await harness.host.dispose();
+    for (const listener of lateListeners) listener();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(harness.focuses.map(({ center }) => center), [[1, 1]]);
+    assert.equal(harness.posted.some(({ type, requestId }) => type === 'editor-preview:runtime-error' && requestId === 'animated-focus-capture'), true);
+    assert.equal(harness.posted.some(({ type }) => type === 'editor-preview:freeze-camera'), false);
+    assert.equal(harness.events.size, replacement ? 1 : 0);
   }
 });
 

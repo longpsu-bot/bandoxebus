@@ -57,7 +57,32 @@ test('pending camera captures reject promptly on replacement reset load disposal
 
 test('camera capture without a reply times out instead of leaving the Freeze UI busy', async () => {
   const { bridge } = captureHarness({ cameraCaptureTimeoutMs: 5 });
-  await assert.rejects(bridge.captureSceneCamera(4), /timed out/i);
+  await assert.rejects(bridge.captureSceneCamera(0), /timed out/i);
+  bridge.dispose();
+});
+
+test('camera response deadline budgets bounded settlement of every predecessor plus readiness margin', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { bridge } = captureHarness();
+  t.after(() => bridge.dispose());
+  let status = 'pending';
+  const promise = bridge.captureSceneCamera(4).then(() => { status = 'resolved'; }, (error) => { status = error.message; });
+  t.mock.timers.tick(15000);
+  await Promise.resolve();
+  assert.equal(status, 'pending', 'four settled predecessors must not consume the old fixed response deadline');
+  t.mock.timers.tick(39999);
+  await Promise.resolve();
+  assert.equal(status, 'pending');
+  t.mock.timers.tick(1);
+  await promise;
+  assert.match(status, /timed out/i);
+});
+
+test('capture rejects indices whose replay deadline would overflow platform timers', async () => {
+  const { bridge } = captureHarness();
+  for (const index of [Number.MAX_SAFE_INTEGER + 1, Number.MAX_SAFE_INTEGER, 214749]) {
+    await assert.rejects(bridge.captureSceneCamera(index), /index|deadline/i);
+  }
   bridge.dispose();
 });
 

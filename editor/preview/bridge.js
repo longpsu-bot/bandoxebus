@@ -1,4 +1,5 @@
 export const PREVIEW_PROTOCOL_VERSION = 1;
+export const PREVIEW_CAMERA_SETTLEMENT_TIMEOUT_MS = 10000;
 export const PREVIEW_PACKAGE_MAX_BYTES = 256 * 1024 * 1024;
 export const PREVIEW_OUTPUT_MODES = Object.freeze(['explore', 'scroll', 'presentation']);
 
@@ -400,7 +401,13 @@ export function createPreviewBridge({
     captureSceneCamera(index) {
       if (disposed || currentRevision < 0) return Promise.reject(new Error('Camera capture requires an active preview.'));
       const payload = { name: 'capture-scene-camera', payload: { index } };
-      if (!validCommandPayload(payload)) return Promise.reject(new TypeError('Invalid camera capture Scene index.'));
+      if (!validCommandPayload(payload) || !Number.isSafeInteger(index)) return Promise.reject(new TypeError('Invalid camera capture Scene index.'));
+      // The base deadline includes the target Scene and readiness margin; every predecessor
+      // can also require a full production settlement before inherited camera fields are safe.
+      const timeoutMs = cameraCaptureTimeoutMs + index * PREVIEW_CAMERA_SETTLEMENT_TIMEOUT_MS;
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2147483647) {
+        return Promise.reject(new TypeError('Camera capture index exceeds the supported replay deadline.'));
+      }
       const requestId = `request-${++requestNumber}`;
       return new Promise((resolve, reject) => {
         const finish = (callback, value) => {
@@ -408,7 +415,7 @@ export function createPreviewBridge({
           pendingCameraCaptures.delete(requestId);
           callback(value);
         };
-        const timer = setTimeout(() => finish(reject, new Error('Preview camera capture timed out.')), cameraCaptureTimeoutMs);
+        const timer = setTimeout(() => finish(reject, new Error('Preview camera capture timed out.')), timeoutMs);
         pendingCameraCaptures.set(requestId, {
           index, message: envelope('editor-preview:command', currentRevision, requestId, payload), sent: false,
           resolve: (value) => finish(resolve, value), reject: (error) => finish(reject, error)

@@ -1,4 +1,4 @@
-import { PREVIEW_PROTOCOL_VERSION, validatePreviewSnapshot } from './bridge.js';
+import { PREVIEW_PROTOCOL_VERSION, PREVIEW_CAMERA_SETTLEMENT_TIMEOUT_MS, validatePreviewSnapshot } from './bridge.js';
 import { createSceneAuthoringAdapter } from '../../src/scene/scene-authoring-adapter.js';
 import { geoJsonBounds } from '../../src/map/focus-registry.js';
 
@@ -191,6 +191,27 @@ export function startEditorPreviewHost({
     for (const controller of cameraCaptures) controller.abort(new Error('Preview replaced or disposed during camera capture.'));
   }
 
+  async function settleCamera(map, signal) {
+    await Promise.resolve();
+    signal.throwIfAborted();
+    if (map.isMoving?.()) {
+      await new Promise((resolve, reject) => {
+        const finish = (error) => {
+          clearTimeout(timer);
+          map.off('moveend', moved);
+          signal.removeEventListener('abort', aborted);
+          if (error) reject(error); else resolve();
+        };
+        const moved = () => finish();
+        const aborted = () => finish(signal.reason);
+        const timer = setTimeout(() => finish(new Error('Production camera settlement timed out.')), PREVIEW_CAMERA_SETTLEMENT_TIMEOUT_MS);
+        map.on('moveend', moved);
+        signal.addEventListener('abort', aborted, { once: true });
+      });
+    }
+    signal.throwIfAborted();
+  }
+
   async function captureSceneCamera(data) {
     const controller = new AbortController();
     cameraCaptures.add(controller);
@@ -210,27 +231,17 @@ export function startEditorPreviewHost({
         // from its authored initial camera so working pans and inherited actions cannot leak in.
         runtime.storyRuntime.deactivate();
         if (runtime.project?.map?.initialView) map.jumpTo(runtime.project.map.initialView);
-        for (let step = 0; step <= index; step += 1) runtime.shell.activateScene(step, { animate: false });
+        for (let step = 0; step <= index; step += 1) {
+          signal.throwIfAborted();
+          runtime.shell.activateScene(step, { animate: false });
+          if (step === index) map.resize();
+          // Legacy map.focus can still animate and inherit omitted fields from its predecessor.
+          await settleCamera(map, signal);
+        }
       } else {
         runtime.shell.activateScene(data.payload.payload.index, { animate: false });
-      }
-      map.resize();
-      await Promise.resolve();
-      signal.throwIfAborted();
-      if (map.isMoving?.()) {
-        await new Promise((resolve, reject) => {
-          const finish = (error) => {
-            clearTimeout(timer);
-            map.off('moveend', moved);
-            signal.removeEventListener('abort', aborted);
-            if (error) reject(error); else resolve();
-          };
-          const moved = () => finish();
-          const aborted = () => finish(signal.reason);
-          const timer = setTimeout(() => finish(new Error('Production camera settlement timed out.')), 10000);
-          map.on('moveend', moved);
-          signal.addEventListener('abort', aborted, { once: true });
-        });
+        map.resize();
+        await settleCamera(map, signal);
       }
       signal.throwIfAborted();
       const center = map.getCenter();
