@@ -98,12 +98,12 @@ test('C1 continuation keeps every network and fallback gate blocking when the un
   const evidence={
     preActivation:{requestCount:0}, startup:{status:'not-requested',sourcePresent:false,flatPresent:false,extrusionPresent:false,protocolAdds:0},
     myPhuoc:{rangeOr206:true,renderedFeatures:3,sourceFeatures:3,mapErrors:[],arrival:{targetDistanceM:0,zoom:15}}, thuDauMot:{rangeOr206:true,renderedFeatures:2,sourceFeatures:2,mapErrors:[],arrival:{targetDistanceM:0,zoom:15}},
-    cardinality:{mapsConstructed:1,mapCanvases:1,protocolAdds:1,sources:1,flatLayers:1,extrusionLayers:1},
-    reuse:{mapsConstructed:1,mapCanvases:1,protocolAdds:1,sources:1,flatLayers:1,extrusionLayers:1},
+    cardinality:{mapsConstructed:1,mapCanvases:1,protocolAdds:1,sources:1,flatLayers:1,extrusionLayers:1,sourceAdds:1,flatAdds:1,extrusionAdds:1,sourceRemoves:0,layerRemoves:0},
+    reuse:{mapsConstructed:1,mapCanvases:1,protocolAdds:1,sources:1,flatLayers:1,extrusionLayers:1,sourceAdds:1,flatAdds:1,extrusionAdds:1,sourceRemoves:0,layerRemoves:0},
     remoteFailure:{status:'unavailable',syntheticLayer:false,sourceType:'vector',routeLayer:true,storyAdvanced:true,maps:1,mapCanvases:1}, consoleIssues:[]
   };
   assert.equal(harness.assessC1FunctionalEvidence(evidence).functional,'PASS');
-  for(const change of [e=>e.preActivation.requestCount=1,e=>e.myPhuoc.rangeOr206=false,e=>e.thuDauMot.renderedFeatures=0,e=>e.thuDauMot.arrival.targetDistanceM=101,e=>e.reuse.protocolAdds=2,e=>e.remoteFailure.syntheticLayer=true,e=>e.remoteFailure.storyAdvanced=false]) {
+  for(const change of [e=>e.preActivation.requestCount=1,e=>e.myPhuoc.rangeOr206=false,e=>e.thuDauMot.renderedFeatures=0,e=>e.thuDauMot.arrival.targetDistanceM=101,e=>e.reuse.protocolAdds=2,e=>{e.reuse.sourceRemoves=1;e.reuse.sourceAdds=2;},e=>e.remoteFailure.syntheticLayer=true,e=>e.remoteFailure.storyAdvanced=false]) {
     const invalid=structuredClone(evidence); change(invalid);
     assert.equal(harness.assessC1FunctionalEvidence(invalid).functional,'FAIL');
   }
@@ -127,6 +127,18 @@ test('ZIP import success accepts exactly Valid and rejects Invalid', () => {
   assert.equal(harness.isValidZipImportStatus('Valid'),true);
   assert.equal(harness.isValidZipImportStatus('Invalid'),false);
   assert.equal(harness.isValidZipImportStatus('Valid production project'),false);
+});
+
+test('only the deliberately injected C1 archive failure is excluded from console evidence', () => {
+  assert.equal(typeof harness.isExpectedInjectedArchiveFailure, 'function');
+  const archive='https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles';
+  const expected={kind:'log',url:archive,text:'Failed to load resource: net::ERR_FAILED'};
+  const failure={url:archive,requestId:'network-7',fetchRequestId:'fetch-7',phase:'remote-failure-injection',networkErrorText:'net::ERR_FAILED'};
+  assert.equal(harness.isExpectedInjectedArchiveFailure(expected,failure),true);
+  for(const change of [(issue)=>issue.url='https://other.example/failure',(issue)=>issue.kind='runtime',(issue)=>issue.text='Uncaught Error: map failure',(_issue,record)=>record.phase='normal',(_issue,record)=>record.networkErrorText='net::ERR_CONNECTION_RESET']) {
+    const issue={...expected}; const record={...failure}; change(issue,record);
+    assert.equal(harness.isExpectedInjectedArchiveFailure(issue,record),false);
+  }
 });
 
 test('duplicate deletion requires exact owned targets and equal artifact bytes, preserving the retained output', async () => {

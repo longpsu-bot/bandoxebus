@@ -102,7 +102,9 @@ export function assessC1FunctionalEvidence(e) {
     'C1 did not arrive at the Thủ Dầu Một target camera');
   for(const counts of [e.cardinality,e.reuse]) {
     check(counts?.mapsConstructed===1 && counts?.mapCanvases===1 && counts?.protocolAdds===1
-      && counts?.sources===1 && counts?.flatLayers===1 && counts?.extrusionLayers===1,'C1 one-map/source/layer/protocol invariant failed');
+      && counts?.sources===1 && counts?.flatLayers===1 && counts?.extrusionLayers===1
+      && counts?.sourceAdds===1 && counts?.flatAdds===1 && counts?.extrusionAdds===1
+      && counts?.sourceRemoves===0 && counts?.layerRemoves===0,'C1 one-map/source/layer/protocol invariant failed');
   }
   check(JSON.stringify(e.cardinality)===JSON.stringify(e.reuse),'C1 source/layer/protocol reinstall detected');
   check(e.remoteFailure?.status==='unavailable' && !e.remoteFailure?.syntheticLayer && e.remoteFailure?.sourceType!=='geojson'
@@ -113,6 +115,14 @@ export function assessC1FunctionalEvidence(e) {
 }
 
 export function isValidZipImportStatus(status) { return status==='Valid'; }
+
+// A Fetch failure is expected only while the C1 continuation deliberately fails
+// this precise archive, and only after CDP confirms its corresponding network error.
+export function isExpectedInjectedArchiveFailure(issue, failure) {
+  return issue?.kind==='log' && issue?.text==='Failed to load resource: net::ERR_FAILED'
+    && issue?.url===failure?.url && failure?.phase==='remote-failure-injection'
+    && failure?.networkErrorText==='net::ERR_FAILED';
+}
 
 // Only observes real constructors, mutations and reads; no camera/source behavior is replaced.
 export function browserInstrumentation() {
@@ -267,8 +277,8 @@ export async function certifyC1Functional({url}) {
   const target=targets.find(item=>item.type==='page' && item.url.startsWith(new URL(url).origin));
   requireGate(target,'No localhost page for C1 functional continuation.');
   const client=await new CdpClient(target.webSocketDebuggerUrl).open();
-  const evidence={startedAt:new Date().toISOString(),kind:'C1 functional/network continuation; unchanged C1 timing remains separate diagnostic',consoleIssues:[]};
-  const records=new Map(); let sourceMode='overture-pmtiles',failArchive=false,asyncError=null;
+  const evidence={startedAt:new Date().toISOString(),kind:'C1 functional/network continuation; unchanged C1 timing remains separate diagnostic',consoleIssues:[],consoleObservations:[],injectedArchiveFailures:[],expectedInjectedArchiveFailures:[]};
+  const records=new Map(); const injectedFailuresByRequestId=new Map(); let sourceMode='overture-pmtiles',failArchive=false,asyncError=null,instrumentationId=null;
   const headerRange=headers=>Object.entries(headers??{}).find(([name])=>name.toLowerCase()==='range')?.[1]??null;
   const evaluate=expression=>client.evaluate(expression);
   const wait=async(expression,label)=>{
@@ -276,8 +286,8 @@ export async function certifyC1Functional({url}) {
     if(asyncError)throw asyncError;
     return value;
   };
-  const instrumentation=`(()=>{window.__C1F_MAPS__=[];window.__C1F_PROTOCOL_ADDS__=0;window.__C1F_MAP_ERRORS__=[];let assigned;Object.defineProperty(window,'maplibregl',{configurable:true,get:()=>assigned,set(value){if(value?.Map&&!value.Map.__c1fWrapped){const Original=value.Map;value.Map=class extends Original{static __c1fWrapped=true;constructor(...args){super(...args);window.__C1F_MAPS__.push(this);this.on('error',event=>window.__C1F_MAP_ERRORS__.push(String(event.error?.message??event.message??'map error')));}};}if(typeof value?.addProtocol==='function'&&!value.addProtocol.__c1fWrapped){const add=value.addProtocol.bind(value);value.addProtocol=function(name,handler){if(name==='pmtiles')window.__C1F_PROTOCOL_ADDS__++;return add(name,handler);};value.addProtocol.__c1fWrapped=true;}assigned=value;}});})()`;
-  const counts=()=>evaluate(`(()=>{const map=window.__C1F_MAPS__[0],style=map.getStyle();return{mapsConstructed:window.__C1F_MAPS__.length,mapCanvases:document.querySelectorAll('.maplibregl-canvas').length,protocolAdds:window.__C1F_PROTOCOL_ADDS__,sources:Object.keys(style.sources).filter(id=>id==='${SOURCE}').length,flatLayers:style.layers.filter(layer=>layer.id==='${FLAT}').length,extrusionLayers:style.layers.filter(layer=>layer.id==='${EXTRUSION}').length};})()`);
+  const instrumentation=`(()=>{window.__C1F_MAPS__=[];window.__C1F_PROTOCOL_ADDS__=0;window.__C1F_MAP_ERRORS__=[];window.__C1F_SOURCE_ADDS__=0;window.__C1F_FLAT_ADDS__=0;window.__C1F_EXTRUSION_ADDS__=0;window.__C1F_SOURCE_REMOVES__=0;window.__C1F_LAYER_REMOVES__=0;let assigned;Object.defineProperty(window,'maplibregl',{configurable:true,get:()=>assigned,set(value){if(value?.Map&&!value.Map.__c1fWrapped){const Original=value.Map;value.Map=class extends Original{static __c1fWrapped=true;constructor(...args){super(...args);window.__C1F_MAPS__.push(this);this.on('error',event=>window.__C1F_MAP_ERRORS__.push(String(event.error?.message??event.message??'map error')));const wrap=(method,observe)=>{const original=this[method].bind(this);this[method]=(...params)=>{observe(params[0]?.id??params[0]);return original(...params);};};wrap('addSource',id=>{if(id==='${SOURCE}')window.__C1F_SOURCE_ADDS__++;});wrap('addLayer',id=>{if(id==='${FLAT}')window.__C1F_FLAT_ADDS__++;if(id==='${EXTRUSION}')window.__C1F_EXTRUSION_ADDS__++;});wrap('removeSource',id=>{if(id==='${SOURCE}')window.__C1F_SOURCE_REMOVES__++;});wrap('removeLayer',id=>{if(id==='${FLAT}'||id==='${EXTRUSION}')window.__C1F_LAYER_REMOVES__++;});}};}if(typeof value?.addProtocol==='function'&&!value.addProtocol.__c1fWrapped){const add=value.addProtocol.bind(value);value.addProtocol=function(name,handler){if(name==='pmtiles')window.__C1F_PROTOCOL_ADDS__++;return add(name,handler);};value.addProtocol.__c1fWrapped=true;}assigned=value;}});})()`;
+  const counts=()=>evaluate(`(()=>{const map=window.__C1F_MAPS__[0],style=map.getStyle();return{mapsConstructed:window.__C1F_MAPS__.length,mapCanvases:document.querySelectorAll('.maplibregl-canvas').length,protocolAdds:window.__C1F_PROTOCOL_ADDS__,sources:Object.keys(style.sources).filter(id=>id==='${SOURCE}').length,flatLayers:style.layers.filter(layer=>layer.id==='${FLAT}').length,extrusionLayers:style.layers.filter(layer=>layer.id==='${EXTRUSION}').length,sourceAdds:window.__C1F_SOURCE_ADDS__,flatAdds:window.__C1F_FLAT_ADDS__,extrusionAdds:window.__C1F_EXTRUSION_ADDS__,sourceRemoves:window.__C1F_SOURCE_REMOVES__,layerRemoves:window.__C1F_LAYER_REMOVES__};})()`);
   const advanceBefore=()=>evaluate(`(()=>{const next=[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next');if(!next)throw Error('Next navigation is unavailable');next.click();next.click();next.click();return true;})()`);
   const activate=()=>evaluate(`(()=>{const next=[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next');next.click();return true;})()`);
   const setCamera=camera=>evaluate(`window.__C1F_MAPS__[0].jumpTo(${JSON.stringify(camera)})&&true`);
@@ -288,15 +298,24 @@ export async function certifyC1Functional({url}) {
     await client.send('Page.navigate',{url});
     await wait(`(()=>{const map=window.__C1F_MAPS__?.[0],status=document.getElementById('runtime-status')?.textContent??'';return document.readyState==='complete'&&window.__C1F_MAPS__?.length===1&&/Scene 1 of 7/.test(status)&&map?.loaded?.()?true:false;})()`,'C1 application startup');
   };
-  client.on('Runtime.exceptionThrown',({exceptionDetails})=>evidence.consoleIssues.push(exceptionDetails.exception?.description??exceptionDetails.text));
-  client.on('Log.entryAdded',({entry})=>{if(entry.level==='error'&&!/favicon\.ico/i.test(`${entry.url??''} ${entry.text}`))evidence.consoleIssues.push(entry.text);});
+  const finalizeConsoleIssues=()=>{
+    evidence.consoleIssues=[]; evidence.expectedInjectedArchiveFailures=[];
+    for(const issue of evidence.consoleObservations) {
+      const failure=evidence.injectedArchiveFailures.find(candidate=>isExpectedInjectedArchiveFailure(issue,candidate));
+      if(failure)evidence.expectedInjectedArchiveFailures.push({...failure,text:issue.text,consoleUrl:issue.url});
+      else evidence.consoleIssues.push(issue);
+    }
+  };
+  client.on('Runtime.exceptionThrown',({exceptionDetails})=>evidence.consoleObservations.push({kind:'runtime',url:null,text:exceptionDetails.exception?.description??exceptionDetails.text,phase:failArchive?'remote-failure':'normal'}));
+  client.on('Log.entryAdded',({entry})=>{if(entry.level==='error'&&!/favicon\.ico/i.test(`${entry.url??''} ${entry.text}`))evidence.consoleObservations.push({kind:'log',url:entry.url??null,text:entry.text??'',phase:failArchive?'remote-failure':'normal'});});
   client.on('Network.requestWillBeSent',({requestId,request})=>{if(request.url===C1_ARCHIVE)records.set(requestId,{range:headerRange(request.headers),status:null});});
   client.on('Network.responseReceived',({requestId,response})=>{const record=records.get(requestId);if(record)record.status=response.status;});
-  client.on('Fetch.requestPaused',params=>{void (async()=>{if(params.request.url.endsWith('/project.json')){const manifest=await fetch(params.request.url).then(response=>response.json());manifest.capabilities.find(item=>item.id==='urban-context-v1').settings={adapter:'route-61-2-current',buildingSource:sourceMode,overtureRelease:'2026-08-19.0'};const body=Buffer.from(`${JSON.stringify(manifest)}\n`);await client.send('Fetch.fulfillRequest',{requestId:params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'},{name:'Content-Length',value:String(body.length)}],body:body.toString('base64')});}else if(params.request.url===C1_ARCHIVE&&failArchive)await client.send('Fetch.failRequest',{requestId:params.requestId,errorReason:'Failed'});else await client.send('Fetch.continueRequest',{requestId:params.requestId});})().catch(error=>{asyncError=error;});});
+  client.on('Network.loadingFailed',({requestId,errorText})=>{const failure=injectedFailuresByRequestId.get(requestId);if(failure)failure.networkErrorText=errorText;});
+  client.on('Fetch.requestPaused',params=>{void (async()=>{if(params.request.url.endsWith('/project.json')){const manifest=await fetch(params.request.url).then(response=>response.json());manifest.capabilities.find(item=>item.id==='urban-context-v1').settings={adapter:'route-61-2-current',buildingSource:sourceMode,overtureRelease:'2026-08-19.0'};const body=Buffer.from(`${JSON.stringify(manifest)}\n`);await client.send('Fetch.fulfillRequest',{requestId:params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'},{name:'Content-Length',value:String(body.length)}],body:body.toString('base64')});}else if(params.request.url===C1_ARCHIVE&&failArchive){const failure={url:params.request.url,requestId:params.networkId??null,fetchRequestId:params.requestId,phase:'remote-failure-injection',networkErrorText:null};evidence.injectedArchiveFailures.push(failure);if(params.networkId)injectedFailuresByRequestId.set(params.networkId,failure);await client.send('Fetch.failRequest',{requestId:params.requestId,errorReason:'Failed'});}else await client.send('Fetch.continueRequest',{requestId:params.requestId});})().catch(error=>{asyncError=error;});});
   try {
     await Promise.all(['Runtime.enable','Log.enable','Page.enable','Network.enable'].map(method=>client.send(method)));
     await client.send('Fetch.enable',{patterns:[{urlPattern:'*project.json',requestStage:'Request'},{urlPattern:C1_ARCHIVE,requestStage:'Request'}]});
-    await client.send('Page.addScriptToEvaluateOnNewDocument',{source:instrumentation});
+    instrumentationId=(await client.send('Page.addScriptToEvaluateOnNewDocument',{source:instrumentation})).identifier;
     await client.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
     await reload('overture-pmtiles');
     evidence.preActivation=c1NetworkSummary(records);
@@ -308,9 +327,10 @@ export async function certifyC1Functional({url}) {
     await evaluate(`(()=>{[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Previous').click();return true;})()`);await wait(`window.__C1F_MAPS__[0].getContainer().dataset.urbanContext==='industrial-context'`,'C1 context on'); evidence.reuse=await counts();
     await reload('overture-pmtiles',true); await advanceBefore(); await activate();
     evidence.remoteFailure=await wait(`(()=>{const map=window.__C1F_MAPS__[0],root=map.getContainer();if(root.dataset.urbanContextStatus!=='unavailable')return null;[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next').click();const style=map.getStyle();return{status:root.dataset.urbanContextStatus,syntheticLayer:Boolean(map.getLayer('synthetic-industrial-infill')),sourceType:style.sources['${SOURCE}']?.type??null,routeLayer:Boolean(map.getLayer('route-61-2-proposed')),storyAdvanced:/Scene 6 of 7/.test(document.getElementById('runtime-status')?.textContent??''),maps:window.__C1F_MAPS__.length,mapCanvases:document.querySelectorAll('.maplibregl-canvas').length};})()`,'C1 remote failure');
+    finalizeConsoleIssues();
     evidence.assessment=assessC1FunctionalEvidence(evidence); return evidence;
-  } catch(error) { evidence.error=error.stack??String(error); evidence.assessment=assessC1FunctionalEvidence(evidence); return evidence; }
-  finally { evidence.finishedAt=new Date().toISOString(); client.close(); }
+  } catch(error) { evidence.error=error.stack??String(error); finalizeConsoleIssues(); evidence.assessment=assessC1FunctionalEvidence(evidence); return evidence; }
+  finally { evidence.finishedAt=new Date().toISOString(); if(instrumentationId)await client.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:instrumentationId}).catch(()=>{}); client.close(); }
 }
 
 async function closeBrowser(client) {
