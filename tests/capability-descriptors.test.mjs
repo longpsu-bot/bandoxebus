@@ -166,6 +166,21 @@ test('urban context settings accept only trusted source modes and bounded releas
     buildingSource: 'overture-pmtiles',
     overtureRelease: '2026-08-19.0'
   }, URBAN_CONTEXT_V1_DESCRIPTOR.settingsSchema), []);
+  assert.deepEqual(validateSchema({
+    adapter: 'route-61-2-current',
+    buildingSource: 'project-snapshot',
+    overtureRelease: '2026-08-19.0',
+    snapshot: {
+      asset: 'overture-buildings-snapshot',
+      theme: 'buildings',
+      bounds: [106.58, 11.10, 106.62, 11.15],
+      sha256: 'a'.repeat(64),
+      byteLength: 12_345_678,
+      generator: 'go-pmtiles',
+      generatorVersion: '1.31.2',
+      generatedAt: '2026-09-03T02:00:00Z'
+    }
+  }, URBAN_CONTEXT_V1_DESCRIPTOR.settingsSchema), []);
   assert.ok(validateSchema({
     adapter: 'route-61-2-current',
     buildingSource: 'remote-url',
