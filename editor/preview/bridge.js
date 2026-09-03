@@ -122,7 +122,7 @@ function validEventPayload(data) {
 export function isPreviewPackageWithinLimit(entries, maxBytes = PREVIEW_PACKAGE_MAX_BYTES) {
   let total = 0;
   for (const entry of entries ?? []) {
-    const length = entry?.bytes?.byteLength;
+    const length = entry?.bytes?.byteLength ?? entry?.file?.size;
     if (!Number.isSafeInteger(length) || length < 0) return false;
     total += length;
     if (total > maxBytes) return false;
@@ -135,9 +135,11 @@ export function validatePreviewSnapshot(snapshot) {
     || !Number.isInteger(snapshot.revision) || snapshot.revision < 0
     || !Array.isArray(snapshot.entries)
     || !snapshot.entries.every((entry) => (
-      hasExactKeys(entry, ['path', 'bytes', 'mediaType', 'kind'])
+      ((hasExactKeys(entry, ['path', 'bytes', 'mediaType', 'kind']) && entry.bytes instanceof Uint8Array)
+        || (hasExactKeys(entry, ['path', 'file', 'mediaType', 'kind'])
+          && entry.file instanceof File && Number.isFinite(entry.file.size)
+          && entry.kind === 'asset' && entry.mediaType === 'application/vnd.pmtiles'))
       && typeof entry.path === 'string'
-      && entry.bytes instanceof Uint8Array
       && typeof entry.mediaType === 'string'
       && typeof entry.kind === 'string'
     ))

@@ -11,7 +11,7 @@ export function createPackageFetch(snapshot, {
   const packageBase = new URL(baseUrl);
   const entries = new Map(snapshot.entries.map((entry) => [entry.path, {
     ...entry,
-    bytes: entry.bytes.slice()
+    bytes: entry.bytes?.slice()
   }]));
   const manifestUrl = new URL('project.json', packageBase);
 
@@ -27,7 +27,7 @@ export function createPackageFetch(snapshot, {
     const path = decodeURIComponent(url.pathname.slice(basePath.length));
     const entry = entries.get(path);
     if (!entry) return new Response('Not found', { status: 404 });
-    return new Response(entry.bytes.slice(), {
+    return new Response(entry.bytes?.slice() ?? entry.file, {
       status: 200,
       headers: { 'content-type': entry.mediaType }
     });
@@ -51,7 +51,7 @@ export function createPreviewPackageResolver(snapshot, {
 } = {}) {
   const transport = createPackageFetch(snapshot, baseUrl === undefined ? {} : { baseUrl });
   const packageBase = new URL('.', transport.manifestUrl);
-  const entries = new Map(snapshot.entries.map((entry) => [entry.path, entry]));
+  const entries = new Map(snapshot.entries.map((entry) => [entry.path, { ...entry, bytes: entry.bytes?.slice() }]));
   const objectUrls = new Map();
   let revoked = false;
 
@@ -80,6 +80,25 @@ export function createPreviewPackageResolver(snapshot, {
     return objectUrl;
   }
 
+  function resolvePmtilesAssetFile(url, { id, descriptor } = {}) {
+    if (revoked) throw new Error('Preview PMTiles File resolver has been revoked.');
+    const resolved = new URL(url, transport.manifestUrl);
+    if (resolved.origin !== packageBase.origin || !resolved.pathname.startsWith(packageBase.pathname)) {
+      throw new TypeError(`Asset ${id ?? ''} is outside the preview package.`);
+    }
+    const path = decodeURIComponent(resolved.pathname.slice(packageBase.pathname.length));
+    const entry = entries.get(path);
+    if (!entry) throw new TypeError(`Asset ${id ?? path} is absent from the preview package.`);
+    if (entry.kind !== 'asset' || descriptor?.type !== 'pmtiles'
+      || entry.mediaType !== 'application/vnd.pmtiles') {
+      throw new TypeError(`Preview asset ${id ?? path} must be a declared PMTiles asset.`);
+    }
+    if (descriptor.mediaType !== entry.mediaType) {
+      throw new TypeError(`Preview asset ${id ?? path} media type does not match its declared media type.`);
+    }
+    return entry.file ?? new File([entry.bytes], path.split('/').at(-1), { type: entry.mediaType });
+  }
+
   function revoke() {
     if (revoked) return;
     revoked = true;
@@ -87,7 +106,7 @@ export function createPreviewPackageResolver(snapshot, {
     objectUrls.clear();
   }
 
-  return { ...transport, resolveAssetUrl, revoke };
+  return { ...transport, resolveAssetUrl, resolvePmtilesAssetFile, revoke };
 }
 
 function boundedText(value, fallback, maxLength) {
@@ -211,7 +230,13 @@ export function startEditorPreviewHost({
       const runtime = await startProductionApplication({
         manifestUrl: resolver.manifestUrl,
         fetchImpl: resolver.fetchImpl,
-        resolveAssetUrl: resolver.resolveAssetUrl,
+        resolveAssetUrl(url, context) {
+          // Keep archive URLs package-relative; runtime reads them through the File seam.
+          if (context?.descriptor?.type === 'pmtiles'
+            && context.descriptor.mediaType === 'application/vnd.pmtiles') return url;
+          return resolver.resolveAssetUrl(url, context);
+        },
+        resolvePmtilesAssetFile: resolver.resolvePmtilesAssetFile,
         owner,
         replaceExisting: true
       });
