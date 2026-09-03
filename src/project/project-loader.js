@@ -90,7 +90,7 @@ function resolvedResources(manifest, urls, values, resolveAssetUrl) {
       id,
       kind: 'asset',
       descriptor,
-      url: resolveAssetUrl(urls.assets[id], { id, descriptor })
+      url: resolveAssetUrl(urls.assets[id], { id, descriptor, manifest })
     }));
   }
   if (manifest.metrics && values.has('metrics')) {

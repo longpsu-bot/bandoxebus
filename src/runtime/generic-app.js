@@ -2,6 +2,7 @@ import { startApplication } from '../application.js';
 import { prepareBasemapStyle, stripOpenFreeMapDarkStyle } from '../basemap-style.js';
 import { INSTALLED_CAPABILITY_REGISTRY } from '../capabilities/installed-capabilities.js';
 import { renderProjectLoadError } from '../project/bootstrap.js';
+import { createContentAddressedPmtilesResolver } from '../project/hosted-asset-resolver.js';
 import { bindGenericStoryExperience, resolveGenericOutputMode } from './generic-shell.js';
 import { COMPACT_ATTRIBUTION_OPTIONS, startCompactAttributionCollapsed } from '../map/compact-attribution.js';
 
@@ -21,6 +22,11 @@ async function createGenericMap({ project, maplibregl, cooperativeScroll = false
   }));
 }
 
+export function resolveHostedPmtilesOrigin(documentRef = globalThis.document) {
+  const value = documentRef?.querySelector?.('meta[name="map-story-pmtiles-origin"]')?.content?.trim() ?? '';
+  return value || null;
+}
+
 export function createGenericApplicationOptions({
   manifestUrl = new URL('../../project.json', import.meta.url).href,
   fetchImpl = fetch,
@@ -37,10 +43,15 @@ export function createGenericApplicationOptions({
 } = {}) {
   const reducedMotion = windowRef?.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   const selectedOutputMode = resolveGenericOutputMode(outputMode, windowRef?.location?.search ?? '');
+  const hostedPmtilesOrigin = resolveHostedPmtilesOrigin(documentRef);
+  const effectiveResolveAssetUrl = resolveAssetUrl
+    ?? (hostedPmtilesOrigin
+      ? createContentAddressedPmtilesResolver({ pmtilesOrigin: hostedPmtilesOrigin })
+      : undefined);
   return {
     manifestUrl,
     fetchImpl,
-    resolveAssetUrl,
+    resolveAssetUrl: effectiveResolveAssetUrl,
     resolvePmtilesAssetFile,
     signal,
     owner,

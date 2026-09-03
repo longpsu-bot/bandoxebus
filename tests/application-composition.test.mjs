@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createGenericApplicationOptions } from '../src/runtime/generic-app.js';
+import { createGenericApplicationOptions, resolveHostedPmtilesOrigin } from '../src/runtime/generic-app.js';
 import { startApplication } from '../src/application.js';
 import { createPreviewPackageResolver, startEditorPreviewHost } from '../editor/preview/package-resolver.js';
 import { createNewProjectEntries, createPackageStore } from '../editor/core/package-store.js';
@@ -30,6 +30,42 @@ test('generic application carries the optional PMTiles File resolver to bootstra
     bootstrapImpl: async (context) => context.resolvePmtilesAssetFile()
   });
   assert.equal(result, file);
+});
+
+function documentWithPmtilesOrigin(content) {
+  return {
+    querySelector(selector) {
+      assert.equal(selector, 'meta[name="map-story-pmtiles-origin"]');
+      return { content };
+    }
+  };
+}
+
+test('empty deployment meta leaves generic asset resolution unchanged', () => {
+  const documentRef = documentWithPmtilesOrigin('  ');
+  assert.equal(resolveHostedPmtilesOrigin(documentRef), null);
+  assert.equal(createGenericApplicationOptions({ documentRef }).resolveAssetUrl, undefined);
+});
+
+test('HTTPS deployment meta installs the content-addressed PMTiles resolver', () => {
+  const options = createGenericApplicationOptions({ documentRef: documentWithPmtilesOrigin('https://maps.example.test/') });
+  assert.equal(typeof options.resolveAssetUrl, 'function');
+  assert.equal(options.resolveAssetUrl(new URL('https://pages.example.test/assets/photo.png'), {
+    id: 'photo', descriptor: { type: 'image', mediaType: 'image/png' }, manifest: { id: 'route-61-2', capabilities: [] }
+  }).href, 'https://pages.example.test/assets/photo.png');
+});
+
+test('an explicit asset resolver overrides deployment metadata', () => {
+  const explicit = () => 'blob:preview/photo';
+  assert.equal(createGenericApplicationOptions({
+    documentRef: documentWithPmtilesOrigin('https://maps.example.test/'), resolveAssetUrl: explicit
+  }).resolveAssetUrl, explicit);
+});
+
+test('invalid deployment PMTiles origins fail loudly', () => {
+  for (const value of ['http://maps.example.test/', 'not a URL']) {
+    assert.throws(() => createGenericApplicationOptions({ documentRef: documentWithPmtilesOrigin(value) }), /HTTPS/i);
+  }
 });
 
 test('preview host threads its PMTiles resolver through shared generic options into bootstrap', async () => {

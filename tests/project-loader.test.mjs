@@ -120,7 +120,7 @@ test('asset URL hook receives validated URLs and changes only asset resource rec
 
   assert.deepEqual(calls, [{
     url: 'https://host/demo/assets/photo.png',
-    context: { id: 'photo', descriptor: manifest.assets.photo }
+    context: { id: 'photo', descriptor: manifest.assets.photo, manifest }
   }]);
   assert.equal(project.resources.get('photo').url, 'blob:preview/photo');
   assert.equal(project.resources.get('route').url.href, 'https://host/demo/data/route.geojson');
@@ -139,6 +139,35 @@ test('omitting the asset URL hook preserves the existing production URL exactly'
   });
 
   assert.equal(project.resources.get('photo').url.href, 'https://host/demo/assets/photo.png');
+});
+
+test('asset URL hook receives the frozen manifest context without loading a PMTiles archive', async () => {
+  const manifest = structuredClone(MANIFEST);
+  manifest.assets['overture-buildings-snapshot'] = {
+    type: 'pmtiles', src: './assets/overture-buildings.pmtiles', mediaType: 'application/vnd.pmtiles'
+  };
+  manifest.capabilities.push({
+    id: 'urban-context-v1', settings: {
+      adapter: 'route-61-2-current', buildingSource: 'project-snapshot', overtureRelease: '2026-08-19.0',
+      snapshot: {
+        asset: 'overture-buildings-snapshot', theme: 'buildings', bounds: [106.59, 11.11, 106.61, 11.14],
+        sha256: 'a'.repeat(64), byteLength: 128, generator: 'go-pmtiles', generatorVersion: '1.31.2',
+        generatedAt: '2026-09-03T00:00:00Z', sourceContentLength: 1024
+      }
+    }
+  });
+  let receivedManifest;
+  const project = await loadProject('https://host/demo/project.json', {
+    fetchImpl: fixtureFetch({ 'https://host/demo/project.json': manifest }),
+    capabilityRegistry: INSTALLED_CAPABILITY_REGISTRY,
+    resolveAssetUrl(url, context) {
+      receivedManifest = context.manifest;
+      return url;
+    }
+  });
+  assert.equal(receivedManifest, project.manifest);
+  assert.equal(Object.isFrozen(receivedManifest), true);
+  assert.equal(project.resources.get('overture-buildings-snapshot').url.href, 'https://host/demo/assets/overture-buildings.pmtiles');
 });
 
 test('loaded frozen PMTiles resources bind to the runtime without fetching the archive', async () => {
