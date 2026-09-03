@@ -15,6 +15,7 @@ const BOUNDS = [106.58, 11.1, 106.62, 11.15];
 const SOURCE = 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles';
 const METADATA = { name: 'Overture buildings', vector_layers: [{ id: 'building', fields: {} }, { id: 'building_part', fields: {} }] };
 const HEADER = { tile_compression: 'gzip', tile_type: 'mvt', minzoom: 0, maxzoom: 14, bounds: BOUNDS, center: [106.6, 11.125, 11] };
+const REGIONAL_HEADER = { ...HEADER, minzoom: 11 };
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const SNAPSHOT_PATH = 'assets/context/overture-buildings.pmtiles';
 
@@ -73,7 +74,7 @@ function nativeBoundary(f, options = {}) {
     }
     if (args[0] === 'verify') return { code: options.verifyFails ? 1 : 0, stdout: '', stderr: options.verifyDiagnostic ?? '' };
     if (args[0] === 'show' && args[2] === '--header-json') {
-      const header = args[1] === (options.source ?? SOURCE) ? options.sourceHeader ?? HEADER : options.header ?? HEADER;
+      const header = args[1] === (options.source ?? SOURCE) ? options.sourceHeader ?? HEADER : options.header ?? REGIONAL_HEADER;
       return { code: 0, stdout: JSON.stringify(header), stderr: '' };
     }
     if (args[0] === 'show' && args[2] === '--metadata') {
@@ -189,8 +190,8 @@ test('freeze writes a production-valid declared-only Folder and preserves author
   assert.deepEqual((await fs.readdir(f.outputDir)).sort(), ['assets', 'data', 'project.json', 'stories']);
   const temp = native.calls[0][2];
   assert.deepEqual(native.calls.slice(0, 5), [
-    ['extract', SOURCE, temp, '--bbox=106.58,11.1,106.62,11.15', '--download-threads=4', '--overfetch=0.05', '--dry-run'],
-    ['extract', SOURCE, temp, '--bbox=106.58,11.1,106.62,11.15', '--download-threads=4', '--overfetch=0.05'],
+    ['extract', SOURCE, temp, '--bbox=106.58,11.1,106.62,11.15', '--minzoom=11', '--download-threads=4', '--overfetch=0.05', '--dry-run'],
+    ['extract', SOURCE, temp, '--bbox=106.58,11.1,106.62,11.15', '--minzoom=11', '--download-threads=4', '--overfetch=0.05'],
     ['verify', temp], ['show', temp, '--header-json'], ['show', temp, '--metadata']
   ]);
   assert.ok(native.calls.some((args) => args.join('|') === `show|${temp}`));
@@ -239,12 +240,12 @@ for (const [name, options, pattern] of [
   ['extract failure', { extractFails: true }, /extract/i],
   ['verify failure', { verifyFails: true }, /verify/i],
   ['zero-exit native Invalid diagnostic', { verifyDiagnostic: '2026/09/03 Invalid: directory offset' }, /verify|invalid/i],
-  ['non-MVT archive', { header: { ...HEADER, tile_type: 'png' } }, /MVT|tile/i],
+  ['non-MVT archive', { header: { ...REGIONAL_HEADER, tile_type: 'png' } }, /MVT|tile/i],
   ['unclustered archive', { clustered: false }, /cluster/i],
-  ['inexact bounds', { header: { ...HEADER, bounds: [106.57, 11.1, 106.62, 11.15] } }, /bounds/i],
-  ['source zoom not preserved', { sourceHeader: { ...HEADER, minzoom: 1 } }, /zoom/i],
-  ['insufficient minimum zoom', { header: { ...HEADER, minzoom: 12 } }, /zoom/i],
-  ['insufficient maximum zoom', { header: { ...HEADER, maxzoom: 13 } }, /zoom/i],
+  ['inexact bounds', { header: { ...REGIONAL_HEADER, bounds: [106.57, 11.1, 106.62, 11.15] } }, /bounds/i],
+  ['source maximum zoom not preserved', { sourceHeader: { ...HEADER, maxzoom: 13 } }, /zoom/i],
+  ['insufficient minimum zoom', { header: { ...REGIONAL_HEADER, minzoom: 12 } }, /zoom/i],
+  ['insufficient maximum zoom', { header: { ...REGIONAL_HEADER, maxzoom: 13 } }, /zoom/i],
   ['missing building layer', { metadata: { vector_layers: [{ id: 'building_part' }] } }, /building/i],
   ['changed source metadata', { sourceMetadata: { ...METADATA, name: 'different' } }, /metadata/i],
   ['unavailable source metadata', { sourceMetadataFails: true }, /metadata/i],
@@ -256,6 +257,14 @@ for (const [name, options, pattern] of [
   await assert.rejects(freeze.freezeProject({ ...f, ...native }), pattern);
   if (name === 'predicted oversize') assert.equal(native.calls.filter(([command]) => command === 'extract').length, 1);
   await assertPreserved(f);
+});
+
+test('regional extraction keeps the C1 z11 floor without requiring the global source minimum', async (t) => {
+  const f = await fixture(t);
+  const regionalHeader = { ...REGIONAL_HEADER, maxzoom: 14 };
+  const sourceHeader = { ...HEADER, minzoom: 0, maxzoom: 14 };
+  const result = await freeze.freezeProject({ ...f, ...nativeBoundary(f, { header: regionalHeader, sourceHeader }) });
+  assert.equal(result.snapshotBytes, 23);
 });
 
 for (const [predicted, actualBytes, warning] of [
@@ -586,7 +595,7 @@ test('metadata object key order and absent vector_layers preserve native equalit
 
 test('output bbox accepts native E7 truncation inside the explicit tolerance', async (t) => {
   const f = await fixture(t);
-  await freeze.freezeProject({ ...f, ...nativeBoundary(f, { header: { ...HEADER,
+  await freeze.freezeProject({ ...f, ...nativeBoundary(f, { header: { ...REGIONAL_HEADER,
     bounds: [106.58000005, 11.10000005, 106.62000005, 11.15000005] } }) });
   assert.ok(await fs.stat(path.join(f.outputDir, 'project.json')));
 });

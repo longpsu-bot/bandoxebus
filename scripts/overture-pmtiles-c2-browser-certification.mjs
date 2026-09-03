@@ -82,6 +82,34 @@ export function assessBrowserEvidence(e) {
   return { functional: failures.length ? 'FAIL' : 'PASS', failures, performance: performance ? 'PASS' : 'FAIL', physicalGpu: 'NOT_MEASURED' };
 }
 
+export function renderedBuildingFeatures(map, layerIds = [FLAT, EXTRUSION]) {
+  return layerIds.reduce((count, layer) => count + (map.getLayer(layer)
+    ? map.queryRenderedFeatures(undefined, { layers: [layer] }).length : 0), 0);
+}
+
+export function assessC1FunctionalEvidence(e) {
+  const failures=[];
+  const check=(value,message)=>{if(!value)failures.push(message);};
+  check(e.preActivation?.requestCount===0,'C1 requested PMTiles before activation');
+  check(e.startup?.status==='not-requested' && !e.startup?.sourcePresent && !e.startup?.flatPresent
+    && !e.startup?.extrusionPresent && e.startup?.protocolAdds===0,'C1 startup was not lazy');
+  for(const location of ['myPhuoc','thuDauMot']) {
+    check(e[location]?.rangeOr206,'C1 missing Range/206 evidence');
+    check(e[location]?.renderedFeatures>0 && e[location]?.sourceFeatures>0,'C1 did not render official buildings');
+    check(Array.isArray(e[location]?.mapErrors) && e[location].mapErrors.length===0,'C1 MapLibre error');
+  }
+  for(const counts of [e.cardinality,e.reuse]) {
+    check(counts?.mapsConstructed===1 && counts?.mapCanvases===1 && counts?.protocolAdds===1
+      && counts?.sources===1 && counts?.flatLayers===1 && counts?.extrusionLayers===1,'C1 one-map/source/layer/protocol invariant failed');
+  }
+  check(JSON.stringify(e.cardinality)===JSON.stringify(e.reuse),'C1 source/layer/protocol reinstall detected');
+  check(e.remoteFailure?.status==='unavailable' && !e.remoteFailure?.syntheticLayer && e.remoteFailure?.sourceType!=='geojson'
+    && e.remoteFailure?.routeLayer && e.remoteFailure?.storyAdvanced && e.remoteFailure?.maps===1 && e.remoteFailure?.mapCanvases===1,
+  'C1 remote failure installed fallback or disabled the Story');
+  check(Array.isArray(e.consoleIssues) && e.consoleIssues.length===0,'C1 unexpected console error');
+  return {functional:failures.length?'FAIL':'PASS',failures,performance:'NOT_MEASURED'};
+}
+
 // Only observes real constructors, mutations and reads; no camera/source behavior is replaced.
 export function browserInstrumentation() {
   const state = window.__C2 = { maps: [], protocols: 0, fileSources: 0, fullReads: 0, slices: 0, bytes: 0,
@@ -221,6 +249,64 @@ export async function prepareUnchangedC1Page(url) {
   } finally {client.close();}
 }
 
+const C1_ARCHIVE = 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles';
+const C1_MY_PHUOC = Object.freeze({center:[106.59576775,11.12942985],zoom:15,pitch:52,bearing:-10});
+const C1_THU_DAU_MOT = Object.freeze({center:[106.65,10.98],zoom:15,pitch:48,bearing:-12});
+const c1NetworkSummary=records=>({requestCount:records.size,rangeOr206:[...records.values()].some(record=>Boolean(record.range)||record.status===206)});
+
+// This continuation intentionally does not import or change the unchanged C1 harness.
+// It replays all of its functional/network gates when that harness exits early on a
+// software-rendered timing threshold, leaving timing evidence diagnostic-only.
+export async function certifyC1Functional({url}) {
+  const targets=await fetch(`http://127.0.0.1:${Number(process.env.CDP_PORT||9222)}/json/list`).then(response=>response.json());
+  const target=targets.find(item=>item.type==='page' && item.url.startsWith(new URL(url).origin));
+  requireGate(target,'No localhost page for C1 functional continuation.');
+  const client=await new CdpClient(target.webSocketDebuggerUrl).open();
+  const evidence={startedAt:new Date().toISOString(),kind:'C1 functional/network continuation; unchanged C1 timing remains separate diagnostic',consoleIssues:[]};
+  const records=new Map(); let sourceMode='overture-pmtiles',failArchive=false,asyncError=null;
+  const headerRange=headers=>Object.entries(headers??{}).find(([name])=>name.toLowerCase()==='range')?.[1]??null;
+  const evaluate=expression=>client.evaluate(expression);
+  const wait=async(expression,label)=>{
+    const value=await waitFor(client,expression,label);
+    if(asyncError)throw asyncError;
+    return value;
+  };
+  const instrumentation=`(()=>{window.__C1F_MAPS__=[];window.__C1F_PROTOCOL_ADDS__=0;window.__C1F_MAP_ERRORS__=[];let assigned;Object.defineProperty(window,'maplibregl',{configurable:true,get:()=>assigned,set(value){if(value?.Map&&!value.Map.__c1fWrapped){const Original=value.Map;value.Map=class extends Original{static __c1fWrapped=true;constructor(...args){super(...args);window.__C1F_MAPS__.push(this);this.on('error',event=>window.__C1F_MAP_ERRORS__.push(String(event.error?.message??event.message??'map error')));}};}if(typeof value?.addProtocol==='function'&&!value.addProtocol.__c1fWrapped){const add=value.addProtocol.bind(value);value.addProtocol=function(name,handler){if(name==='pmtiles')window.__C1F_PROTOCOL_ADDS__++;return add(name,handler);};value.addProtocol.__c1fWrapped=true;}assigned=value;}});})()`;
+  const counts=()=>evaluate(`(()=>{const map=window.__C1F_MAPS__[0],style=map.getStyle();return{mapsConstructed:window.__C1F_MAPS__.length,mapCanvases:document.querySelectorAll('.maplibregl-canvas').length,protocolAdds:window.__C1F_PROTOCOL_ADDS__,sources:Object.keys(style.sources).filter(id=>id==='${SOURCE}').length,flatLayers:style.layers.filter(layer=>layer.id==='${FLAT}').length,extrusionLayers:style.layers.filter(layer=>layer.id==='${EXTRUSION}').length};})()`);
+  const advanceBefore=()=>evaluate(`(()=>{const next=[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next');if(!next)throw Error('Next navigation is unavailable');next.click();next.click();next.click();return true;})()`);
+  const activate=()=>evaluate(`(()=>{const next=[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next');next.click();return true;})()`);
+  const setCamera=camera=>evaluate(`window.__C1F_MAPS__[0].jumpTo(${JSON.stringify(camera)})&&true`);
+  const visible=()=>wait(`(()=>{const map=window.__C1F_MAPS__[0],root=map.getContainer(),rendered=(${renderedBuildingFeatures.toString()})(map,${JSON.stringify([FLAT,EXTRUSION])}),sourceFeatures=map.querySourceFeatures('${SOURCE}',{sourceLayer:'building'}).length;return root.dataset.urbanContextStatus==='available'&&map.isSourceLoaded('${SOURCE}')&&rendered>0&&sourceFeatures>0?{renderedFeatures:rendered,sourceFeatures}:null;})()`,'C1 official buildings');
+  const reload=async(mode,failure=false)=>{
+    sourceMode=mode;failArchive=failure;asyncError=null;records.clear();
+    await client.send('Page.navigate',{url});
+    await wait(`(()=>{const map=window.__C1F_MAPS__?.[0],status=document.getElementById('runtime-status')?.textContent??'';return document.readyState==='complete'&&window.__C1F_MAPS__?.length===1&&/Scene 1 of 7/.test(status)&&map?.loaded?.()?true:false;})()`,'C1 application startup');
+  };
+  client.on('Runtime.exceptionThrown',({exceptionDetails})=>evidence.consoleIssues.push(exceptionDetails.exception?.description??exceptionDetails.text));
+  client.on('Log.entryAdded',({entry})=>{if(entry.level==='error'&&!/favicon\.ico/i.test(`${entry.url??''} ${entry.text}`))evidence.consoleIssues.push(entry.text);});
+  client.on('Network.requestWillBeSent',({requestId,request})=>{if(request.url===C1_ARCHIVE)records.set(requestId,{range:headerRange(request.headers),status:null});});
+  client.on('Network.responseReceived',({requestId,response})=>{const record=records.get(requestId);if(record)record.status=response.status;});
+  client.on('Fetch.requestPaused',params=>{void (async()=>{if(params.request.url.endsWith('/project.json')){const manifest=await fetch(params.request.url).then(response=>response.json());manifest.capabilities.find(item=>item.id==='urban-context-v1').settings={adapter:'route-61-2-current',buildingSource:sourceMode,overtureRelease:'2026-08-19.0'};const body=Buffer.from(`${JSON.stringify(manifest)}\n`);await client.send('Fetch.fulfillRequest',{requestId:params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'},{name:'Content-Length',value:String(body.length)}],body:body.toString('base64')});}else if(params.request.url===C1_ARCHIVE&&failArchive)await client.send('Fetch.failRequest',{requestId:params.requestId,errorReason:'Failed'});else await client.send('Fetch.continueRequest',{requestId:params.requestId});})().catch(error=>{asyncError=error;});});
+  try {
+    await Promise.all(['Runtime.enable','Log.enable','Page.enable','Network.enable'].map(method=>client.send(method)));
+    await client.send('Fetch.enable',{patterns:[{urlPattern:'*project.json',requestStage:'Request'},{urlPattern:C1_ARCHIVE,requestStage:'Request'}]});
+    await client.send('Page.addScriptToEvaluateOnNewDocument',{source:instrumentation});
+    await client.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+    await reload('overture-pmtiles');
+    evidence.preActivation=c1NetworkSummary(records);
+    evidence.startup=await evaluate(`(()=>{const map=window.__C1F_MAPS__[0],root=map.getContainer();return{status:root.dataset.urbanContextStatus,sourcePresent:Boolean(map.getSource('${SOURCE}')),flatPresent:Boolean(map.getLayer('${FLAT}')),extrusionPresent:Boolean(map.getLayer('${EXTRUSION}')),protocolAdds:window.__C1F_PROTOCOL_ADDS__};})()`);
+    await advanceBefore();await activate();await setCamera(C1_MY_PHUOC);evidence.myPhuoc={...await visible(),...c1NetworkSummary(records),mapErrors:await evaluate('window.__C1F_MAP_ERRORS__.slice()')};
+    evidence.cardinality=await counts(); await setCamera(C1_THU_DAU_MOT); evidence.thuDauMot={...await visible(),...c1NetworkSummary(records),mapErrors:await evaluate('window.__C1F_MAP_ERRORS__.slice()')};
+    await setCamera(C1_MY_PHUOC);await wait(`(${renderedBuildingFeatures.toString()})(window.__C1F_MAPS__[0],${JSON.stringify([FLAT,EXTRUSION])})>0`,'C1 return camera');
+    await evaluate(`(()=>{[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next').click();return true;})()`);await wait(`window.__C1F_MAPS__[0].getContainer().dataset.urbanContext==='off'`,'C1 context off');
+    await evaluate(`(()=>{[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Previous').click();return true;})()`);await wait(`window.__C1F_MAPS__[0].getContainer().dataset.urbanContext==='industrial-context'`,'C1 context on'); evidence.reuse=await counts();
+    await reload('overture-pmtiles',true); await advanceBefore(); await activate();
+    evidence.remoteFailure=await wait(`(()=>{const map=window.__C1F_MAPS__[0],root=map.getContainer();if(root.dataset.urbanContextStatus!=='unavailable')return null;[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next').click();const style=map.getStyle();return{status:root.dataset.urbanContextStatus,syntheticLayer:Boolean(map.getLayer('synthetic-industrial-infill')),sourceType:style.sources['${SOURCE}']?.type??null,routeLayer:Boolean(map.getLayer('route-61-2-proposed')),storyAdvanced:/Scene 6 of 7/.test(document.getElementById('runtime-status')?.textContent??''),maps:window.__C1F_MAPS__.length,mapCanvases:document.querySelectorAll('.maplibregl-canvas').length};})()`,'C1 remote failure');
+    evidence.assessment=assessC1FunctionalEvidence(evidence); return evidence;
+  } catch(error) { evidence.error=error.stack??String(error); evidence.assessment=assessC1FunctionalEvidence(evidence); return evidence; }
+  finally { evidence.finishedAt=new Date().toISOString(); client.close(); }
+}
+
 async function closeBrowser(client) {
   try { await client.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:client.instrumentationId}); }
   finally { client.close(); }
@@ -276,7 +362,7 @@ export async function captureFreezePlan({url,projectDir,planPath}) {
 
 const inPreview = expression => `(() => { const w=document.getElementById('production-preview').contentWindow, s=w.__C2, m=s.maps.at(-1); return (${expression}); })()`;
 const countsExpression = `({maps:s.maps.length,canvases:w.document.querySelectorAll('.maplibregl-canvas').length,protocols:s.protocols,fileSources:s.fileSources,sources:Number(Boolean(m.getSource('${SOURCE}'))),flat:Number(Boolean(m.getLayer('${FLAT}'))),extrusion:Number(Boolean(m.getLayer('${EXTRUSION}'))),sourceAdds:s.sourceAdds,flatAdds:s.flatAdds,extrusionAdds:s.extrusionAdds,sourceRemoves:s.sourceRemoves,layerRemoves:s.layerRemoves})`;
-const featuresExpression = `m.getLayer('${EXTRUSION}') ? m.queryRenderedFeatures(undefined,{layers:['${EXTRUSION}']}).length : 0`;
+const featuresExpression = `(${renderedBuildingFeatures.toString()})(m,${JSON.stringify([FLAT,EXTRUSION])})`;
 
 async function setMeasuredViewport(client) {
   await client.evaluate(`(()=>{const frame=document.getElementById('preview-frame');frame.classList.add('is-freeze-capture');frame.style.width='1440px';frame.style.height='900px';return true;})()`);
@@ -386,6 +472,10 @@ export async function certifyBrowser({url,snapshot,manifest}) {
       return{zipBytes:bytes.length,snapshotBytes:snapshot.bytes.length,sha256,status:document.getElementById('validation-status').textContent};
     })()`);
     requireGate(evidence.zip.sha256===identity.sha256 && evidence.zip.snapshotBytes===identity.bytes,'ZIP changed snapshot bytes.');
+    await waitFor(client,inPreview(`Boolean(m?.loaded?.())`),'imported ZIP production preview');
+    await client.evaluate(inPreview(`(()=>{const next=[...w.document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next');next.click();next.click();next.click();next.click();return true;})()`));
+    evidence.zip.importedRender=await waitFor(client,inPreview(`(()=>{const rendered=(${renderedBuildingFeatures.toString()})(m,${JSON.stringify([FLAT,EXTRUSION])});return m.getContainer().dataset.urbanContextStatus==='available'&&m.isSourceLoaded('${SOURCE}')&&rendered>0?{renderedFeatures:rendered,status:parent.document.getElementById('validation-status').textContent}:null;})()`),'imported ZIP rendered buildings');
+    requireGate(/valid/i.test(evidence.zip.importedRender.status),'Imported ZIP did not remain valid.');
     evidence.assessment=assessBrowserEvidence(evidence);
     return evidence;
   } catch(error) {

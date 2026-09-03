@@ -9,7 +9,7 @@ import { ensurePmtilesTool } from './lib/pmtiles-tool.mjs';
 import { parsePmtilesDryRun } from './lib/freeze-project.mjs';
 import { deriveOvertureBuildingsPmtilesUrl } from '../src/overture-pmtiles.js';
 import toolLock from './tools/go-pmtiles-1.31.2.json' with {type:'json'};
-import { captureFreezePlan, certifyBrowser, hashFile, verifySnapshot, measureOfficialDiagnostics, prepareUnchangedC1Page } from './overture-pmtiles-c2-browser-certification.mjs';
+import { captureFreezePlan, certifyBrowser, certifyC1Functional, hashFile, verifySnapshot, measureOfficialDiagnostics, prepareUnchangedC1Page } from './overture-pmtiles-c2-browser-certification.mjs';
 
 const ROOT = fileURLToPath(new URL('..',import.meta.url));
 const BASE = '88e6c4c88088b8170d8c592aab004e275b1b8fc2';
@@ -25,10 +25,17 @@ export function storyByteEvidence(bytes) {
     convention:'Raw checkout bytes are copied unchanged; canonical CRLF digest is computed only, matching tests/editor-certification.test.mjs.' };
 }
 
-export function classifyRun({c1ExitCode,c2}) {
-  const passed = c1ExitCode===0 && !c2?.error && c2?.assessment?.functional==='PASS' && c2?.assessment?.performance==='PASS';
+export function classifyRun({c1ExitCode,c1Functional,c2}) {
+  const c1FunctionalCovered = !c1Functional?.error && c1Functional?.assessment?.functional==='PASS'
+    && c1Functional?.preActivation?.requestCount===0 && c1Functional?.myPhuoc?.rangeOr206===true
+    && c1Functional?.thuDauMot?.rangeOr206===true && c1Functional?.myPhuoc?.renderedFeatures>0
+    && c1Functional?.thuDauMot?.renderedFeatures>0 && c1Functional?.cardinality?.mapsConstructed===1
+    && c1Functional?.reuse?.mapsConstructed===1 && c1Functional?.remoteFailure?.status==='unavailable';
+  const passed = c1FunctionalCovered
+    && !c2?.error && c2?.assessment?.functional==='PASS';
   return { result:passed?'FUNCTIONAL_CI_PASS_EXTERNAL_AND_HARDWARE_PENDING':'FAILED_AVAILABLE_GATES',
-    r2:'PENDING_EXTERNAL_ENDPOINT', physicalGpu:'NOT_MEASURED' };
+    c1UnchangedHarness:c1ExitCode===0?'PASS':'PERFORMANCE_OR_OTHER_DIAGNOSTIC_RECORDED',
+    performanceAuthority:'SOFTWARE_RENDERED_DIAGNOSTIC_ONLY', r2:'PENDING_EXTERNAL_ENDPOINT', physicalGpu:'NOT_MEASURED' };
 }
 
 async function inventory(root) {
@@ -111,7 +118,7 @@ export async function runCertification() {
   const artifactRoot=path.join(await realpath(process.env.RUNNER_TEMP),'map-story-c2-evidence');
   await mkdir(artifactRoot,{recursive:true});
   const work=await mkdtemp(path.join(artifactRoot,'run-'));
-  const result={startedAt:new Date().toISOString(),expectedHead:process.env.EXPECTED_C2_HEAD,actionsRunId:process.env.GITHUB_RUN_ID,actionsRunAttempt:process.env.GITHUB_RUN_ATTEMPT,work,errors:[],c1ExitCode:null,c2:null};
+  const result={startedAt:new Date().toISOString(),expectedHead:process.env.EXPECTED_C2_HEAD,actionsRunId:process.env.GITHUB_RUN_ID,actionsRunAttempt:process.env.GITHUB_RUN_ATTEMPT,work,errors:[],c1ExitCode:null,c1Functional:null,c2:null};
   const save=()=>writeFile(path.join(work,'result.json'),JSON.stringify(result,null,2)+'\n');
   let frozen;
   try {
@@ -135,7 +142,7 @@ export async function runCertification() {
     const lockedArchive=toolLock.artifacts[`${process.platform}-${process.arch}`];
     result.toolArchive={name:lockedArchive.name,sha256:await hashFile(path.join(path.dirname(tool),lockedArchive.name))};
     check(result.toolArchive.sha256===lockedArchive.sha256,'Pinned tool archive identity mismatch.');
-    const dry=await command(tool,['extract',deriveOvertureBuildingsPmtilesUrl(result.capture.plan.overtureRelease),path.join(work,'dry-run-unused.pmtiles'),`--bbox=${result.capture.plan.finalBounds.join(',')}`,'--download-threads=4','--overfetch=0.05','--dry-run'],{logPrefix:path.join(work,'separate-native-dry-run')});
+    const dry=await command(tool,['extract',deriveOvertureBuildingsPmtilesUrl(result.capture.plan.overtureRelease),path.join(work,'dry-run-unused.pmtiles'),`--bbox=${result.capture.plan.finalBounds.join(',')}`,'--minzoom=11','--download-threads=4','--overfetch=0.05','--dry-run'],{logPrefix:path.join(work,'separate-native-dry-run')});
     check(dry.code===0,'Evidence dry-run failed.');
     result.separateDryRun=parsePmtilesDryRun(`${dry.stdout}\n${dry.stderr}`);
     result.duplicate=await verifyDuplicateAndRemove(work,path.join(work,'frozen-1'),path.join(work,'frozen-2'));
@@ -151,6 +158,10 @@ export async function runCertification() {
     result.c1ExitCode=c1.code;
     if(c1.code===0) result.c1=JSON.parse(c1.stdout.slice(0,c1.stdout.lastIndexOf('\nOVERTURE_PMTILES_C1_BROWSER_RESULT:')));
   } catch(error) { result.errors.push(error.stack ?? String(error)); }
+  try {
+    result.c1Functional=await certifyC1Functional({url:'http://127.0.0.1:8080/'});
+    await writeFile(path.join(work,'c1-functional.json'),JSON.stringify(result.c1Functional,null,2)+'\n');
+  } catch(error) { result.c1Functional={error:error.stack??String(error),assessment:{functional:'FAIL',performance:'NOT_MEASURED'}}; result.errors.push(error.stack ?? String(error)); }
   if(frozen) {
     try {
       result.officialDiagnostic=await measureOfficialDiagnostics({url:'http://127.0.0.1:8080/',projectDir:path.join(work,'authoring')});

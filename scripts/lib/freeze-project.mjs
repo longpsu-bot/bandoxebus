@@ -17,6 +17,9 @@ const HEALTHY_MAX = 32 * 1024 * 1024;
 const HARD_MAX = 64 * 1024 * 1024;
 const SNAPSHOT_ID = 'overture-buildings-snapshot';
 const SNAPSHOT_PATH = 'assets/context/overture-buildings.pmtiles';
+// The production flat building layer begins at z11; retain that floor in every
+// regional subset so the extractor writes a truthful, verifiable minimum zoom.
+const C1_MIN_ZOOM = 11;
 const BYTE_UNITS = { B: 1, kB: 1000, MB: 1000 ** 2, GB: 1000 ** 3, TB: 1000 ** 4,
   KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 };
 
@@ -322,7 +325,7 @@ export async function freezeProject({ projectDir, planPath, outputDir, sourceArc
   try {
     workDir = await fs.mkdtemp(path.join(parent, `.${path.basename(outputDir)}.freeze-`));
     const temporaryArchive = path.join(workDir, 'snapshot.pmtiles');
-    const extractArgs = ['extract', sourceInfo.source, temporaryArchive, `--bbox=${plan.finalBounds.join(',')}`,
+    const extractArgs = ['extract', sourceInfo.source, temporaryArchive, `--bbox=${plan.finalBounds.join(',')}`, `--minzoom=${C1_MIN_ZOOM}`,
       '--download-threads=4', '--overfetch=0.05'];
     const dryRun = await checked([...extractArgs, '--dry-run']);
     const predicted = parsePmtilesDryRun(`${dryRun.stdout}\n${dryRun.stderr}`).archiveBytes;
@@ -342,7 +345,8 @@ export async function freezeProject({ projectDir, planPath, outputDir, sourceArc
       || !metadata.vector_layers.some((layer) => layer?.id === 'building'))) throw new Error('Snapshot vector_layers must include building.');
     const sourceHeader = await json(['show', sourceInfo.source, '--header-json']);
     validateHeader(sourceHeader, 'Source');
-    if (sourceHeader.minzoom !== header.minzoom || sourceHeader.maxzoom !== header.maxzoom) throw new Error('Snapshot must preserve the exact source min/max zoom range.');
+    if (header.minzoom !== C1_MIN_ZOOM) throw new Error('Snapshot minimum zoom must preserve the C1 flat-layer z11 floor.');
+    if (sourceHeader.maxzoom !== header.maxzoom) throw new Error('Snapshot must preserve the exact source maximum zoom.');
     const sourceMetadata = await json(['show', sourceInfo.source, '--metadata']);
     if (!isDeepStrictEqual(metadata, sourceMetadata)) throw new Error('Snapshot metadata differs from source metadata.');
     const snapshotSha256 = await sha256File(fs, temporaryArchive);

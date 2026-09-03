@@ -77,16 +77,36 @@ test('Linux Story evidence preserves raw bytes while checking the explicit canon
   assert.equal(runner.storyByteEvidence(Buffer.from('first\r\nsecond\r\n')).canonicalCrlfSha256,evidence.canonicalCrlfSha256);
 });
 
-test('same-runner classification preserves failed C1 gates even when C2 functional checks pass', () => {
+test('same-runner classification blocks C1 functional failures but retains software timing as diagnostics', () => {
   assert.equal(typeof runner.classifyRun, 'function');
   const c2={assessment:{functional:'PASS',performance:'PASS'}};
-  assert.equal(runner.classifyRun({c1ExitCode:1,c2}).result,'FAILED_AVAILABLE_GATES');
-  assert.equal(runner.classifyRun({c1ExitCode:0,c2:{assessment:{functional:'FAIL',performance:'PASS'}}}).result,'FAILED_AVAILABLE_GATES');
-  assert.equal(runner.classifyRun({c1ExitCode:0,c2:{...c2,error:'late ZIP failure'}}).result,'FAILED_AVAILABLE_GATES');
-  const clean=runner.classifyRun({c1ExitCode:0,c2});
+  const c1Functional={assessment:{functional:'PASS'},preActivation:{requestCount:0},myPhuoc:{rangeOr206:true,renderedFeatures:1},thuDauMot:{rangeOr206:true,renderedFeatures:1},cardinality:{mapsConstructed:1},reuse:{mapsConstructed:1},remoteFailure:{status:'unavailable'}};
+  assert.equal(runner.classifyRun({c1Functional:{assessment:{functional:'FAIL'}},c2}).result,'FAILED_AVAILABLE_GATES');
+  assert.equal(runner.classifyRun({c1Functional:{assessment:{functional:'PASS'}},c2}).result,'FAILED_AVAILABLE_GATES');
+  assert.equal(runner.classifyRun({c1Functional,c2:{assessment:{functional:'FAIL',performance:'PASS'}}}).result,'FAILED_AVAILABLE_GATES');
+  assert.equal(runner.classifyRun({c1Functional,c2:{...c2,error:'late ZIP failure'}}).result,'FAILED_AVAILABLE_GATES');
+  const clean=runner.classifyRun({c1ExitCode:1,c1Functional,c2});
   assert.equal(clean.result,'FUNCTIONAL_CI_PASS_EXTERNAL_AND_HARDWARE_PENDING');
+  assert.equal(clean.c1UnchangedHarness,'PERFORMANCE_OR_OTHER_DIAGNOSTIC_RECORDED');
+  assert.equal(clean.performanceAuthority,'SOFTWARE_RENDERED_DIAGNOSTIC_ONLY');
   assert.equal(clean.r2,'PENDING_EXTERNAL_ENDPOINT');
   assert.equal(clean.physicalGpu,'NOT_MEASURED');
+});
+
+test('C1 continuation keeps every network and fallback gate blocking when the unchanged timing harness aborts early', () => {
+  assert.equal(typeof harness.assessC1FunctionalEvidence, 'function');
+  const evidence={
+    preActivation:{requestCount:0}, startup:{status:'not-requested',sourcePresent:false,flatPresent:false,extrusionPresent:false,protocolAdds:0},
+    myPhuoc:{rangeOr206:true,renderedFeatures:3,sourceFeatures:3,mapErrors:[]}, thuDauMot:{rangeOr206:true,renderedFeatures:2,sourceFeatures:2,mapErrors:[]},
+    cardinality:{mapsConstructed:1,mapCanvases:1,protocolAdds:1,sources:1,flatLayers:1,extrusionLayers:1},
+    reuse:{mapsConstructed:1,mapCanvases:1,protocolAdds:1,sources:1,flatLayers:1,extrusionLayers:1},
+    remoteFailure:{status:'unavailable',syntheticLayer:false,sourceType:'vector',routeLayer:true,storyAdvanced:true,maps:1,mapCanvases:1}, consoleIssues:[]
+  };
+  assert.equal(harness.assessC1FunctionalEvidence(evidence).functional,'PASS');
+  for(const change of [e=>e.preActivation.requestCount=1,e=>e.myPhuoc.rangeOr206=false,e=>e.thuDauMot.renderedFeatures=0,e=>e.reuse.protocolAdds=2,e=>e.remoteFailure.syntheticLayer=true,e=>e.remoteFailure.storyAdvanced=false]) {
+    const invalid=structuredClone(evidence); change(invalid);
+    assert.equal(harness.assessC1FunctionalEvidence(invalid).functional,'FAIL');
+  }
 });
 
 test('duplicate deletion requires exact owned targets and equal artifact bytes, preserving the retained output', async () => {
@@ -148,6 +168,17 @@ test('C2 performance failures stay distinct from functional success and never be
   assert.equal(result.physicalGpu, 'NOT_MEASURED');
   delete e.fps;
   assert.equal(harness.assessBrowserEvidence(e).performance, 'FAIL');
+});
+
+test('rendered building count includes the flat layer at the captured z13.6 camera', () => {
+  assert.equal(typeof harness.renderedBuildingFeatures, 'function');
+  const queried=[];
+  const map={
+    getLayer(id) { return id === 'overture-industrial-buildings-flat' ? { id } : null; },
+    queryRenderedFeatures(_bounds,{layers}) { queried.push(layers); return [{id:1},{id:2}]; }
+  };
+  assert.equal(harness.renderedBuildingFeatures(map),2);
+  assert.deepEqual(queried,[['overture-industrial-buildings-flat']]);
 });
 test('snapshot identity rejects incorrect manifest hash and length before browser activation', async () => {
   assert.equal(typeof harness.verifySnapshot, 'function');
