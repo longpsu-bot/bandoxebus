@@ -202,11 +202,12 @@ test('preview host forwards one active-revision urban context status event and r
 test('urban context inspector presentation keeps source/release editable and status transient', () => {
   assert.deepEqual(presentUrbanContextSetting('buildingSource', {
     value: 'overture-pmtiles',
-    options: ['overture-pmtiles', 'local-geojson']
+    options: ['overture-pmtiles', 'project-snapshot', 'local-geojson']
   }), {
     label: 'Building source',
     options: [
       { value: 'overture-pmtiles', label: 'Overture online' },
+      { value: 'project-snapshot', label: 'Project snapshot' },
       { value: 'local-geojson', label: 'Local benchmark' }
     ]
   });

@@ -213,6 +213,45 @@ function malformedEntries(path, text) {
   ));
 }
 
+test('Studio image insertion lists only images from a mixed image and PMTiles project', async (t) => {
+  const harness = editorHarness();
+  t.after(() => harness.editor.dispose());
+  const entries = createNewProjectEntries().map((entry) => {
+    if (entry.path !== 'project.json') return entry;
+    const manifest = JSON.parse(decoder.decode(entry.bytes));
+    manifest.assets = {
+      'overture-buildings-snapshot': {
+        type: 'pmtiles', src: './assets/context/overture-buildings.pmtiles',
+        mediaType: 'application/vnd.pmtiles', required: true, attribution: []
+      },
+      'site-photo': {
+        type: 'image', src: './assets/site.svg', label: 'Site photo',
+        mediaType: 'image/svg+xml', required: true, attribution: []
+      },
+      'route-photo': {
+        type: 'image', src: './assets/route.svg',
+        mediaType: 'image/svg+xml', required: true, attribution: []
+      }
+    };
+    return { ...entry, bytes: encoder.encode(JSON.stringify(manifest)) };
+  });
+  entries.push(
+    { path: 'assets/context/overture-buildings.pmtiles', bytes: new Uint8Array([1, 2, 3]), mediaType: 'application/vnd.pmtiles', kind: 'asset' },
+    ...['site', 'route'].map((name) => ({
+      path: `assets/${name}.svg`, bytes: encoder.encode('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+      mediaType: 'image/svg+xml', kind: 'asset'
+    }))
+  );
+  await harness.editor.openEntries(entries);
+  findButton(harness.documentRef, 'Image').click();
+  const chooser = harness.documentRef.getElementById('studio-insert-image-resource');
+  assert.equal(chooser.tagName, 'SELECT');
+  assert.deepEqual(chooser.children.map(({ value, textContent }) => [value, textContent]), [
+    ['site-photo', 'Site photo'],
+    ['route-photo', 'route-photo']
+  ]);
+});
+
 for (const [label, path] of [
   ['project manifest', 'project.json'],
   ['primary Story', 'stories/main.story.json']

@@ -199,6 +199,7 @@ export function presentUrbanContextSetting(key, control = {}) {
       label: 'Building source',
       options: [
         { value: 'overture-pmtiles', label: 'Overture online' },
+        { value: 'project-snapshot', label: 'Project snapshot' },
         { value: 'local-geojson', label: 'Local benchmark' }
       ]
     };
@@ -320,7 +321,9 @@ export function createEditor({
           featureCount: descriptor.type === 'geojson' && Array.isArray(value?.features) ? value.features.length : undefined
         };
       }),
-      assets: Object.entries(manifest.assets).map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
+      assets: Object.entries(manifest.assets)
+        .filter(([, descriptor]) => descriptor.type === 'image')
+        .map(([id, descriptor]) => ({ id, label: descriptor.label ?? id })),
       metrics: [
         ...Object.entries(metricFile?.metrics ?? {}).map(([id, metric]) => ({ id, label: metric.label, format: metric.format })),
         ...selectedDescriptors.flatMap(({ metrics }) => metrics)

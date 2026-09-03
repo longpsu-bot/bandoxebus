@@ -220,3 +220,71 @@ test('resolved-reference boundary defers fetched payload and capability semantic
     capabilities: { future: 'unchecked' }
   }), true);
 });
+
+test('snapshot generatedAt accepts canonical UTC instants and rejects calendar normalization', async () => {
+  for (const generatedAt of [
+    '2026-09-03T02:00:00Z',
+    '2026-09-03T02:00:00.000Z',
+    '2026-09-03T02:00:00.123Z'
+  ]) {
+    const manifest = await snapshotManifest();
+    manifest.capabilities.at(-1).settings.snapshot.generatedAt = generatedAt;
+    assert.equal(validateManifestReferences(manifest), manifest);
+  }
+  for (const generatedAt of [
+    '2026-02-30T02:00:00Z',
+    '2026-09-03T24:00:00Z',
+    '2026-09-03T02:00:00+00:00',
+    '2026-09-03T09:00:00+07:00',
+    '2026-09-03T02:00:00',
+    '2026-09-03'
+  ]) {
+    const manifest = await snapshotManifest();
+    manifest.capabilities.at(-1).settings.snapshot.generatedAt = generatedAt;
+    assertReferenceIssue(manifest, `$.capabilities[${manifest.capabilities.length - 1}].settings.snapshot.generatedAt`, /ISO instant/i);
+  }
+});
+
+test('snapshot bounds require finite coordinates and strict order on both axes', async () => {
+  for (const bounds of [
+    [10, 20, 10, 30],
+    [10, 20, 30, 20],
+    [10, 30, 20, 20],
+    [10, 20, 181, 30],
+    [10, 20, 30, 91],
+    [10, 20, 30, 40, 50],
+    [10, 20, 30, Number.POSITIVE_INFINITY],
+    [10, '20', 30, 40]
+  ]) {
+    const manifest = await snapshotManifest();
+    manifest.capabilities.at(-1).settings.snapshot.bounds = bounds;
+    assertReferenceIssue(manifest, `$.capabilities[${manifest.capabilities.length - 1}].settings.snapshot.bounds`);
+  }
+  const manifest = await snapshotManifest();
+  manifest.capabilities.at(-1).settings.snapshot.bounds = [-180, -90, 180, 90];
+  assert.equal(validateManifestReferences(manifest), manifest);
+});
+
+test('snapshot references require every logical field and enforce byte and provenance bounds', async () => {
+  for (const field of ['asset', 'theme', 'bounds', 'sha256', 'byteLength', 'generator', 'generatorVersion', 'generatedAt']) {
+    const manifest = await snapshotManifest();
+    delete manifest.capabilities.at(-1).settings.snapshot[field];
+    assertReferenceIssue(manifest, `$.capabilities[${manifest.capabilities.length - 1}].settings.snapshot.${field}`);
+  }
+  for (const [field, value] of [
+    ['byteLength', -1], ['byteLength', 1.5],
+    ['sha256', 'A'.repeat(64)], ['sha256', 'a'.repeat(63)], ['sha256', 'a'.repeat(65)],
+    ['sourceContentLength', -1], ['sourceContentLength', 1.5], ['sourceEtag', 123]
+  ]) {
+    const manifest = await snapshotManifest();
+    manifest.capabilities.at(-1).settings.snapshot[field] = value;
+    assertReferenceIssue(manifest, `$.capabilities[${manifest.capabilities.length - 1}].settings.snapshot.${field}`);
+  }
+  for (const byteLength of [1, 67_108_864]) {
+    const manifest = await snapshotManifest();
+    Object.assign(manifest.capabilities.at(-1).settings.snapshot, {
+      byteLength, sourceContentLength: 0, sourceEtag: '"source-version"'
+    });
+    assert.equal(validateManifestReferences(manifest), manifest);
+  }
+});
