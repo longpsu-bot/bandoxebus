@@ -51,7 +51,8 @@ jobs:
             --disable-dev-shm-usage \
             --enable-webgl \
             --ignore-gpu-blocklist \
-            --use-gl=swiftshader \
+            --use-gl=angle \
+            --use-angle=swiftshader \
             --remote-debugging-address=127.0.0.1 \
             --remote-debugging-port=9222 \
             --remote-allow-origins='*' \
