@@ -53,10 +53,23 @@ function failureCategory(error) {
   return 'remote';
 }
 
-async function waitForSettledCamera(map) {
+async function waitForSettledCamera(map, setCancellation) {
   await Promise.resolve();
   if (!map.isMoving?.()) return;
-  await new Promise((resolve) => map.once('moveend', resolve));
+  await new Promise((resolve) => {
+    let settled = false;
+    let onMoveEnd;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      map.off?.('moveend', onMoveEnd);
+      setCancellation(null);
+      resolve();
+    };
+    onMoveEnd = settle;
+    setCancellation(settle);
+    map.once('moveend', onMoveEnd);
+  });
 }
 
 export function createUrbanContextController({
@@ -89,6 +102,7 @@ export function createUrbanContextController({
   let pmtilesInstallPromise = null;
   let pmtilesErrorHandler = null;
   let pmtilesSourceHandler = null;
+  let cancelSettledCameraWait = null;
   const overtureInspection = inspectOvertureCollection(overtureBuildings);
   let provider = buildingConfig.buildingSource !== 'local-geojson'
     ? 'overture'
@@ -220,7 +234,7 @@ export function createUrbanContextController({
       try {
         const { archiveUrl } = await ensureArchive(maplibregl, buildingConfig.archiveBinding);
         if (destroyed) return;
-        await waitForSettledCamera(map);
+        await waitForSettledCamera(map, (cancel) => { cancelSettledCameraWait = cancel; });
         if (destroyed) return;
         const definitions = createPmtilesDefinitions({
           release: buildingConfig.overtureRelease, archiveUrl, bounds: buildingConfig.archiveBinding.bounds
@@ -385,6 +399,8 @@ export function createUrbanContextController({
     destroy({ removeLayer = true } = {}) {
       if (destroyed) return;
       destroyed = true;
+      cancelSettledCameraWait?.();
+      cancelSettledCameraWait = null;
       if (idleHandler) map.off('idle', idleHandler);
       detachPmtilesListeners();
       if (removeLayer) {

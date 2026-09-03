@@ -54,6 +54,7 @@ function createMap({ moving = false } = {}) {
     isSourceLoaded: (id) => sources.has(id),
     isMoving: () => moving,
     setMoving(value) { moving = value; },
+    listenerCount(type) { return (listeners.get(type) ?? []).length; },
     querySourceFeatures: () => [],
     once(type, listener) { addListener(type, listener, true); },
     on(type, listener) { addListener(type, listener, false); },
@@ -144,6 +145,35 @@ test('first PMTiles activation waits for a moving camera before installing sourc
   assert.equal(map.addLayerCalls.length, 2);
   assert.equal(map.addLayerCalls[0].id, 'overture-industrial-buildings-flat');
   assert.equal(map.addLayerCalls[1].id, 'overture-industrial-buildings-3d');
+});
+
+test('destroying a moving PMTiles activation settles it and removes its camera listener', async () => {
+  const map = createMap({ moving: true });
+  let resolveArchive;
+  const controller = createController({
+    map,
+    buildingConfig: { buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0' },
+    ensureArchive: () => new Promise((resolve) => { resolveArchive = resolve; })
+  });
+  map.addSourceCalls.length = 0;
+  map.addLayerCalls.length = 0;
+
+  const activation = controller.setMode('industrial-context');
+  let activationSettled = false;
+  activation.then(() => { activationSettled = true; });
+  await Promise.resolve();
+  resolveArchive({ archiveUrl: 'https://example.test/buildings.pmtiles' });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(map.listenerCount('moveend'), 1);
+
+  controller.destroy();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(activationSettled, true);
+  assert.equal(map.listenerCount('moveend'), 0);
+  assert.equal(map.addSourceCalls.length, 0);
+  assert.equal(map.addLayerCalls.length, 0);
 });
 
 test('first PMTiles activation installs without waiting when the camera is settled', async () => {
