@@ -97,16 +97,36 @@ test('C1 continuation keeps every network and fallback gate blocking when the un
   assert.equal(typeof harness.assessC1FunctionalEvidence, 'function');
   const evidence={
     preActivation:{requestCount:0}, startup:{status:'not-requested',sourcePresent:false,flatPresent:false,extrusionPresent:false,protocolAdds:0},
-    myPhuoc:{rangeOr206:true,renderedFeatures:3,sourceFeatures:3,mapErrors:[]}, thuDauMot:{rangeOr206:true,renderedFeatures:2,sourceFeatures:2,mapErrors:[]},
+    myPhuoc:{rangeOr206:true,renderedFeatures:3,sourceFeatures:3,mapErrors:[],arrival:{targetDistanceM:0,zoom:15}}, thuDauMot:{rangeOr206:true,renderedFeatures:2,sourceFeatures:2,mapErrors:[],arrival:{targetDistanceM:0,zoom:15}},
     cardinality:{mapsConstructed:1,mapCanvases:1,protocolAdds:1,sources:1,flatLayers:1,extrusionLayers:1},
     reuse:{mapsConstructed:1,mapCanvases:1,protocolAdds:1,sources:1,flatLayers:1,extrusionLayers:1},
     remoteFailure:{status:'unavailable',syntheticLayer:false,sourceType:'vector',routeLayer:true,storyAdvanced:true,maps:1,mapCanvases:1}, consoleIssues:[]
   };
   assert.equal(harness.assessC1FunctionalEvidence(evidence).functional,'PASS');
-  for(const change of [e=>e.preActivation.requestCount=1,e=>e.myPhuoc.rangeOr206=false,e=>e.thuDauMot.renderedFeatures=0,e=>e.reuse.protocolAdds=2,e=>e.remoteFailure.syntheticLayer=true,e=>e.remoteFailure.storyAdvanced=false]) {
+  for(const change of [e=>e.preActivation.requestCount=1,e=>e.myPhuoc.rangeOr206=false,e=>e.thuDauMot.renderedFeatures=0,e=>e.thuDauMot.arrival.targetDistanceM=101,e=>e.reuse.protocolAdds=2,e=>e.remoteFailure.syntheticLayer=true,e=>e.remoteFailure.storyAdvanced=false]) {
     const invalid=structuredClone(evidence); change(invalid);
     assert.equal(harness.assessC1FunctionalEvidence(invalid).functional,'FAIL');
   }
+});
+
+test('C1 distant Range/206 evidence excludes requests made before the target-camera move', () => {
+  assert.equal(typeof harness.c1RecordsSince, 'function');
+  assert.equal(typeof harness.c1NetworkSummary, 'function');
+  const records=new Map([
+    ['my-phuoc',{range:'bytes=0-16383',status:206}],
+    ['thu-dau-mot',{range:null,status:200}]
+  ]);
+  const beforeMove=new Set(['my-phuoc']);
+  const distant=harness.c1NetworkSummary(harness.c1RecordsSince(records,beforeMove));
+  assert.equal(distant.requestCount,1);
+  assert.equal(distant.rangeOr206,false);
+});
+
+test('ZIP import success accepts exactly Valid and rejects Invalid', () => {
+  assert.equal(typeof harness.isValidZipImportStatus, 'function');
+  assert.equal(harness.isValidZipImportStatus('Valid'),true);
+  assert.equal(harness.isValidZipImportStatus('Invalid'),false);
+  assert.equal(harness.isValidZipImportStatus('Valid production project'),false);
 });
 
 test('duplicate deletion requires exact owned targets and equal artifact bytes, preserving the retained output', async () => {

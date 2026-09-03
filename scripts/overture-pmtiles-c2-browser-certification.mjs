@@ -98,6 +98,8 @@ export function assessC1FunctionalEvidence(e) {
     check(e[location]?.renderedFeatures>0 && e[location]?.sourceFeatures>0,'C1 did not render official buildings');
     check(Array.isArray(e[location]?.mapErrors) && e[location].mapErrors.length===0,'C1 MapLibre error');
   }
+  check(Number.isFinite(e.thuDauMot?.arrival?.targetDistanceM) && e.thuDauMot.arrival.targetDistanceM<100,
+    'C1 did not arrive at the Thủ Dầu Một target camera');
   for(const counts of [e.cardinality,e.reuse]) {
     check(counts?.mapsConstructed===1 && counts?.mapCanvases===1 && counts?.protocolAdds===1
       && counts?.sources===1 && counts?.flatLayers===1 && counts?.extrusionLayers===1,'C1 one-map/source/layer/protocol invariant failed');
@@ -109,6 +111,8 @@ export function assessC1FunctionalEvidence(e) {
   check(Array.isArray(e.consoleIssues) && e.consoleIssues.length===0,'C1 unexpected console error');
   return {functional:failures.length?'FAIL':'PASS',failures,performance:'NOT_MEASURED'};
 }
+
+export function isValidZipImportStatus(status) { return status==='Valid'; }
 
 // Only observes real constructors, mutations and reads; no camera/source behavior is replaced.
 export function browserInstrumentation() {
@@ -252,7 +256,8 @@ export async function prepareUnchangedC1Page(url) {
 const C1_ARCHIVE = 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles';
 const C1_MY_PHUOC = Object.freeze({center:[106.59576775,11.12942985],zoom:15,pitch:52,bearing:-10});
 const C1_THU_DAU_MOT = Object.freeze({center:[106.65,10.98],zoom:15,pitch:48,bearing:-12});
-const c1NetworkSummary=records=>({requestCount:records.size,rangeOr206:[...records.values()].some(record=>Boolean(record.range)||record.status===206)});
+export const c1NetworkSummary=records=>({requestCount:records.size,rangeOr206:[...records.values()].some(record=>Boolean(record.range)||record.status===206)});
+export const c1RecordsSince=(records,previousIds)=>new Map([...records].filter(([requestId])=>!previousIds.has(requestId)));
 
 // This continuation intentionally does not import or change the unchanged C1 harness.
 // It replays all of its functional/network gates when that harness exits early on a
@@ -276,6 +281,7 @@ export async function certifyC1Functional({url}) {
   const advanceBefore=()=>evaluate(`(()=>{const next=[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next');if(!next)throw Error('Next navigation is unavailable');next.click();next.click();next.click();return true;})()`);
   const activate=()=>evaluate(`(()=>{const next=[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next');next.click();return true;})()`);
   const setCamera=camera=>evaluate(`window.__C1F_MAPS__[0].jumpTo(${JSON.stringify(camera)})&&true`);
+  const targetArrival=camera=>wait(`(()=>{const map=window.__C1F_MAPS__[0],target=${JSON.stringify(camera)},center=map.getCenter(),radians=Math.PI/180,dLat=(target.center[1]-center.lat)*radians,dLon=(target.center[0]-center.lng)*radians,a=Math.sin(dLat/2)**2+Math.cos(center.lat*radians)*Math.cos(target.center[1]*radians)*Math.sin(dLon/2)**2,distanceM=6371008.8*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));return Number.isFinite(distanceM)&&distanceM<100?{targetDistanceM:distanceM,center:center.toArray(),zoom:map.getZoom(),pitch:map.getPitch(),bearing:map.getBearing()}:null;})()`,'C1 Thủ Dầu Một target camera');
   const visible=()=>wait(`(()=>{const map=window.__C1F_MAPS__[0],root=map.getContainer(),rendered=(${renderedBuildingFeatures.toString()})(map,${JSON.stringify([FLAT,EXTRUSION])}),sourceFeatures=map.querySourceFeatures('${SOURCE}',{sourceLayer:'building'}).length;return root.dataset.urbanContextStatus==='available'&&map.isSourceLoaded('${SOURCE}')&&rendered>0&&sourceFeatures>0?{renderedFeatures:rendered,sourceFeatures}:null;})()`,'C1 official buildings');
   const reload=async(mode,failure=false)=>{
     sourceMode=mode;failArchive=failure;asyncError=null;records.clear();
@@ -296,7 +302,7 @@ export async function certifyC1Functional({url}) {
     evidence.preActivation=c1NetworkSummary(records);
     evidence.startup=await evaluate(`(()=>{const map=window.__C1F_MAPS__[0],root=map.getContainer();return{status:root.dataset.urbanContextStatus,sourcePresent:Boolean(map.getSource('${SOURCE}')),flatPresent:Boolean(map.getLayer('${FLAT}')),extrusionPresent:Boolean(map.getLayer('${EXTRUSION}')),protocolAdds:window.__C1F_PROTOCOL_ADDS__};})()`);
     await advanceBefore();await activate();await setCamera(C1_MY_PHUOC);evidence.myPhuoc={...await visible(),...c1NetworkSummary(records),mapErrors:await evaluate('window.__C1F_MAP_ERRORS__.slice()')};
-    evidence.cardinality=await counts(); await setCamera(C1_THU_DAU_MOT); evidence.thuDauMot={...await visible(),...c1NetworkSummary(records),mapErrors:await evaluate('window.__C1F_MAP_ERRORS__.slice()')};
+    evidence.cardinality=await counts(); const beforeThuDauMot=new Set(records.keys()); await setCamera(C1_THU_DAU_MOT); evidence.thuDauMot={...await visible(),...c1NetworkSummary(c1RecordsSince(records,beforeThuDauMot)),arrival:await targetArrival(C1_THU_DAU_MOT),mapErrors:await evaluate('window.__C1F_MAP_ERRORS__.slice()')};
     await setCamera(C1_MY_PHUOC);await wait(`(${renderedBuildingFeatures.toString()})(window.__C1F_MAPS__[0],${JSON.stringify([FLAT,EXTRUSION])})>0`,'C1 return camera');
     await evaluate(`(()=>{[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next').click();return true;})()`);await wait(`window.__C1F_MAPS__[0].getContainer().dataset.urbanContext==='off'`,'C1 context off');
     await evaluate(`(()=>{[...document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Previous').click();return true;})()`);await wait(`window.__C1F_MAPS__[0].getContainer().dataset.urbanContext==='industrial-context'`,'C1 context on'); evidence.reuse=await counts();
@@ -474,8 +480,8 @@ export async function certifyBrowser({url,snapshot,manifest}) {
     requireGate(evidence.zip.sha256===identity.sha256 && evidence.zip.snapshotBytes===identity.bytes,'ZIP changed snapshot bytes.');
     await waitFor(client,inPreview(`Boolean(m?.loaded?.())`),'imported ZIP production preview');
     await client.evaluate(inPreview(`(()=>{const next=[...w.document.querySelectorAll('#runtime-navigation button')].find(button=>button.textContent.trim()==='Next');next.click();next.click();next.click();next.click();return true;})()`));
-    evidence.zip.importedRender=await waitFor(client,inPreview(`(()=>{const rendered=(${renderedBuildingFeatures.toString()})(m,${JSON.stringify([FLAT,EXTRUSION])});return m.getContainer().dataset.urbanContextStatus==='available'&&m.isSourceLoaded('${SOURCE}')&&rendered>0?{renderedFeatures:rendered,status:parent.document.getElementById('validation-status').textContent}:null;})()`),'imported ZIP rendered buildings');
-    requireGate(/valid/i.test(evidence.zip.importedRender.status),'Imported ZIP did not remain valid.');
+    evidence.zip.importedRender=await waitFor(client,inPreview(`(()=>{const rendered=(${renderedBuildingFeatures.toString()})(m,${JSON.stringify([FLAT,EXTRUSION])});return m.getContainer().dataset.urbanContextStatus==='available'&&m.isSourceLoaded('${SOURCE}')&&rendered>0?{renderedFeatures:rendered,status:parent.document.getElementById('validity-status').textContent}:null;})()`),'imported ZIP rendered buildings');
+    requireGate(isValidZipImportStatus(evidence.zip.importedRender.status),'Imported ZIP did not remain valid.');
     evidence.assessment=assessBrowserEvidence(evidence);
     return evidence;
   } catch(error) {
