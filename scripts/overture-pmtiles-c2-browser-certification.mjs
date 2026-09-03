@@ -10,6 +10,7 @@ const FLAT = `${SOURCE}-flat`;
 const EXTRUSION = `${SOURCE}-3d`;
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const requireGate = (value, message) => { if (!value) throw new Error(message); };
+const isLazy = counters => counters?.fullReads === 0 && counters?.slices === 0 && counters?.protocols === 0 && counters?.sources === 0;
 
 export function parseArgs(args) {
   const values = {};
@@ -65,7 +66,8 @@ export function verifyCapture(plan, captures) {
 export function assessBrowserEvidence(e) {
   const failures = [];
   const check = (value, message) => { if (!value) failures.push(message); };
-  check(e.before?.fullReads === 0 && e.before?.slices === 0 && e.before?.protocols === 0 && e.before?.sources === 0, 'startup not lazy');
+  check(isLazy(e.before), 'startup not lazy');
+  check(isLazy(e.preActivation), 'context-off navigation not lazy or immediate pre-activation measurement missing');
   check(e.firstActivation?.fullReads === 0 && e.firstActivation?.slices > 0 && e.firstActivation?.bytes > 0, 'missing bounded FileSource reads');
   check(e.officialRequests === 0, 'official Overture request in snapshot mode');
   for (const key of ['maps','canvases','protocols','sources','flat','extrusion','sourceAdds','flatAdds','extrusionAdds','fileSources']) {
@@ -112,8 +114,13 @@ export function browserInstrumentation() {
   observedGlobal('pmtiles', value => {
     if (!value?.FileSource) return value;
     const Original = value.FileSource;
-    value.FileSource = class extends Original { constructor(...args) { super(...args); state.fileSources++; } };
-    return value;
+    const TrackedFileSource = class extends Original { constructor(...args) { super(...args); state.fileSources++; } };
+    // The vendored bundle uses non-configurable getter-only exports. Observe through
+    // a separate facade instead of mutating the upstream object or its prototypes.
+    return Object.defineProperties(Object.create(Object.getPrototypeOf(value)), {
+      ...Object.getOwnPropertyDescriptors(value),
+      FileSource: { value:TrackedFileSource, enumerable:Object.getOwnPropertyDescriptor(value,'FileSource').enumerable }
+    });
   });
   const slice = File.prototype.slice;
   File.prototype.slice = function(start = 0, end = this.size, ...rest) {
@@ -320,6 +327,8 @@ export async function certifyBrowser({url,snapshot,manifest}) {
     evidence.before = await client.evaluate(inPreview(`({fullReads:s.fullReads+parent.__C2.fullReads,slices:s.slices+parent.__C2.slices,protocols:s.protocols,sources:Number(Boolean(m.getSource('${SOURCE}')))})`));
     await client.evaluate(inPreview(`(()=>{const next=[...w.document.querySelectorAll('#runtime-navigation button')].find(b=>b.textContent.trim()==='Next'); next.click();next.click();next.click();return true;})()`));
     await waitFor(client,inPreview(`/Scene 4 of 7/.test(w.document.getElementById('runtime-status').textContent) && !m.isMoving()`),'pre-activation Scene');
+    evidence.preActivation = await client.evaluate(inPreview(`({fullReads:s.fullReads+parent.__C2.fullReads,slices:s.slices+parent.__C2.slices,protocols:s.protocols,sources:Number(Boolean(m.getSource('${SOURCE}')))})`));
+    requireGate(isLazy(evidence.before) && isLazy(evidence.preActivation), 'PMTiles activity observed before first context activation.');
     await client.evaluate(inPreview(`(()=>{s.startTiming();[...w.document.querySelectorAll('#runtime-navigation button')].find(b=>b.textContent.trim()==='Next').click();return true;})()`));
     await waitFor(client,inPreview(`m.getContainer().dataset.urbanContextStatus==='available' && m.isSourceLoaded('${SOURCE}') && (${featuresExpression})>0`),'rendered frozen buildings');
     evidence.activation = await client.evaluate(inPreview('s.stopTiming()'));

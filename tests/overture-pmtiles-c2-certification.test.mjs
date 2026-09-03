@@ -38,6 +38,29 @@ test('real instrumentation records reinstalls and native File reads without chan
   assert.deepEqual([window.__C2.sourceAdds,window.__C2.sourceRemoves,window.__C2.protocols,window.__C2.fileSources,window.__C2.slices,window.__C2.bytes,window.__C2.fullReads],[2,1,1,1,1,3,1]);
 });
 
+test('FileSource observation supports actual immutable PMTiles 4.5.0 exports and preserves native byte reads', async () => {
+  const bundle=await readFile(new URL('../vendor/pmtiles/4.5.0/pmtiles.js',import.meta.url),'utf8');
+  const original=vm.runInNewContext(`${bundle}\npmtiles`,{TextDecoder});
+  const descriptor=Object.getOwnPropertyDescriptor(original,'FileSource');
+  assert.equal(descriptor.set,undefined);
+  assert.equal(descriptor.configurable,false);
+  const window={addEventListener(){}};
+  class NativeTestFile extends File {}
+  const context={window,File:NativeTestFile,URL:{createObjectURL(){return'blob:test';}},performance,PerformanceObserver:{supportedEntryTypes:[]},requestAnimationFrame(){}};
+  vm.runInNewContext(`(${harness.browserInstrumentation.toString()})()`,context);
+  window.pmtiles=original;
+  const file=new NativeTestFile(['abcdef'],'immutable-export.pmtiles');
+  const source=new window.pmtiles.FileSource(file);
+  assert.equal(window.__C2.fileSources,1,'actual vendor constructor must be observed');
+  assert.ok(source instanceof original.FileSource);
+  assert.equal(source.getKey(),'immutable-export.pmtiles');
+  assert.equal(Buffer.from((await source.getBytes(1,3)).data).toString(),'bcd');
+  assert.deepEqual([window.__C2.slices,window.__C2.bytes,window.__C2.fullReads],[1,3,0]);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(original,'FileSource'),descriptor,'original export remains untouched');
+  assert.deepEqual(Reflect.ownKeys(window.pmtiles),Reflect.ownKeys(original));
+  for(const key of Reflect.ownKeys(original).filter(key=>key!=='FileSource')) assert.equal(window.pmtiles[key],original[key]);
+});
+
 test('runner fails before filesystem/browser work outside approved Actions environment', () => {
   const execution=spawnSync(process.execPath,['scripts/overture-pmtiles-c2-runner.mjs'],{encoding:'utf8',env:{...process.env,GITHUB_ACTIONS:'false'}});
   assert.equal(execution.status,1);
@@ -97,7 +120,17 @@ test('profile certification rejects assigned styles without actual preview and m
 });
 
 const counts = () => ({ maps: 1, canvases: 1, protocols: 1, sources: 1, flat: 1, extrusion: 1, sourceAdds: 1, flatAdds: 1, extrusionAdds: 1, sourceRemoves: 0, layerRemoves: 0, fileSources: 1 });
-const measured = () => ({ before: { fullReads: 0, slices: 0, protocols: 0, sources: 0 }, firstActivation: { fullReads: 0, slices: 4, bytes: 35000 }, officialRequests: 0, countsBefore: counts(), countsAfter: counts(), renderedFeatures: 200, phases: ['bearing-360','pitch-0-target-0','pan-away-back'], fps: { averageFps: 60 }, activation: { worstFrameOrTaskGapMs: 25 }, errors: [] });
+const measured = () => ({ before: { fullReads: 0, slices: 0, protocols: 0, sources: 0 }, preActivation: { fullReads: 0, slices: 0, protocols: 0, sources: 0 }, firstActivation: { fullReads: 0, slices: 4, bytes: 35000 }, officialRequests: 0, countsBefore: counts(), countsAfter: counts(), renderedFeatures: 200, phases: ['bearing-360','pitch-0-target-0','pan-away-back'], fps: { averageFps: 60 }, activation: { worstFrameOrTaskGapMs: 25 }, errors: [] });
+test('lazy gate rejects activity during context-off navigation after a clean Folder open', () => {
+  const clean=measured();
+  assert.equal(harness.assessBrowserEvidence(clean).functional,'PASS');
+  for(const field of ['fullReads','slices','protocols','sources']) {
+    const early=measured(); early.preActivation[field]=1;
+    assert.equal(harness.assessBrowserEvidence(early).functional,'FAIL',`post-open early ${field} must fail`);
+  }
+  const absent=measured(); delete absent.preActivation;
+  assert.equal(harness.assessBrowserEvidence(absent).functional,'FAIL','missing immediate pre-activation measurement must fail');
+});
 test('C2 functional gates catch eager reads, official fallback and source reinstalls hidden by final layer counts', () => {
   assert.equal(typeof harness.assessBrowserEvidence, 'function');
   assert.equal(harness.assessBrowserEvidence(measured()).functional, 'PASS');
