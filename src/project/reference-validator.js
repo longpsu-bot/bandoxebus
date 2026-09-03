@@ -3,6 +3,9 @@ import { ProjectLoadError } from './project-error.js';
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 const FOCUS_FIELDS = new Set(['datasets', 'center', 'zoom', 'bounds']);
+const PMTILES_MEDIA_TYPE = 'application/vnd.pmtiles';
+const PMTILES_MAX_BYTES = 64 * 1024 * 1024;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const CAMERA_BOUNDS = Object.freeze({
   maxZoom: [0, 24],
   pitch: [0, 72],
@@ -63,6 +66,75 @@ function validateAttributionReferences(manifest) {
   }
   for (const [id, asset] of Object.entries(manifest.assets)) {
     validateAttributionList(asset.attribution, manifest.attribution, `$.assets.${id}.attribution`);
+  }
+}
+
+function validIsoInstant(value) {
+  if (typeof value !== 'string' || !value.endsWith('Z')) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  const normalized = value.includes('.') ? value : value.replace(/Z$/, '.000Z');
+  return new Date(parsed).toISOString() === normalized;
+}
+
+function validateSnapshotBounds(bounds, path) {
+  if (!Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(Number.isFinite)) {
+    fail(path, 'Snapshot bounds must contain exactly four finite numbers.');
+  }
+  const [minLon, minLat, maxLon, maxLat] = bounds;
+  if (minLon < -180 || minLon > 180 || maxLon < -180 || maxLon > 180) {
+    fail(path, 'Snapshot longitude bounds must be between -180 and 180.');
+  }
+  if (minLat < -90 || minLat > 90 || maxLat < -90 || maxLat > 90) {
+    fail(path, 'Snapshot latitude bounds must be between -90 and 90.');
+  }
+  if (minLon >= maxLon || minLat >= maxLat) {
+    fail(path, 'Snapshot bounds must be ordered minLon,minLat,maxLon,maxLat.');
+  }
+}
+
+function validateUrbanContextSnapshot(manifest) {
+  const index = manifest.capabilities.findIndex(({ id }) => id === 'urban-context-v1');
+  if (index < 0) return;
+  const settings = manifest.capabilities[index].settings ?? {};
+  const path = `$.capabilities[${index}].settings`;
+  const snapshot = settings.snapshot;
+
+  if (settings.buildingSource !== 'project-snapshot') {
+    if (snapshot !== undefined) fail(`${path}.snapshot`, 'Snapshot metadata is allowed only for project-snapshot building source.');
+    return;
+  }
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    fail(`${path}.snapshot`, 'Project snapshot building source requires snapshot metadata.');
+  }
+  if (typeof snapshot.asset !== 'string' || !ID_PATTERN.test(snapshot.asset)) {
+    fail(`${path}.snapshot.asset`, 'Snapshot asset must be a stable declared asset ID.');
+  }
+  const asset = manifest.assets[snapshot.asset];
+  if (!asset) fail(`${path}.snapshot.asset`, `Unknown snapshot asset ID: ${snapshot.asset}.`);
+  if (asset.type !== 'pmtiles') fail(`${path}.snapshot.asset`, 'Snapshot asset must reference a PMTiles asset.');
+  if (asset.mediaType !== PMTILES_MEDIA_TYPE) fail(`${path}.snapshot.asset`, 'Snapshot asset must use application/vnd.pmtiles.');
+  if (snapshot.theme !== 'buildings') fail(`${path}.snapshot.theme`, 'Snapshot theme must be buildings.');
+  validateSnapshotBounds(snapshot.bounds, `${path}.snapshot.bounds`);
+  if (typeof snapshot.sha256 !== 'string' || !SHA256_PATTERN.test(snapshot.sha256)) {
+    fail(`${path}.snapshot.sha256`, 'Snapshot SHA-256 must be 64 lowercase hexadecimal characters.');
+  }
+  if (!Number.isInteger(snapshot.byteLength) || snapshot.byteLength <= 0 || snapshot.byteLength > PMTILES_MAX_BYTES) {
+    fail(`${path}.snapshot.byteLength`, `Snapshot byteLength must be an integer between 1 and ${PMTILES_MAX_BYTES}.`);
+  }
+  if (snapshot.generator !== 'go-pmtiles') fail(`${path}.snapshot.generator`, 'Snapshot generator must be go-pmtiles.');
+  if (snapshot.generatorVersion !== '1.31.2') {
+    fail(`${path}.snapshot.generatorVersion`, 'Snapshot generatorVersion must be 1.31.2.');
+  }
+  if (!validIsoInstant(snapshot.generatedAt)) {
+    fail(`${path}.snapshot.generatedAt`, 'Snapshot generatedAt must be a canonical UTC ISO instant.');
+  }
+  if (snapshot.sourceContentLength !== undefined
+    && (!Number.isInteger(snapshot.sourceContentLength) || snapshot.sourceContentLength < 0)) {
+    fail(`${path}.snapshot.sourceContentLength`, 'sourceContentLength must be a non-negative integer.');
+  }
+  if (snapshot.sourceEtag !== undefined && typeof snapshot.sourceEtag !== 'string') {
+    fail(`${path}.snapshot.sourceEtag`, 'sourceEtag must be a string when present.');
   }
 }
 
@@ -148,6 +220,7 @@ export function validateManifestReferences(manifest) {
   validateProvenance(manifest.attribution);
   validatePrimaryStory(manifest.stories);
   validateAttributionReferences(manifest);
+  validateUrbanContextSnapshot(manifest);
   validateFocusStructures(manifest.focusTargets, manifest.datasets);
   return manifest;
 }
