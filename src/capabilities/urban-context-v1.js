@@ -41,8 +41,24 @@ export const URBAN_CONTEXT_V1_DESCRIPTOR = deepFreeze({
     additionalProperties: false,
     properties: {
       adapter: { type: 'string', enum: ['route-61-2-current'] },
-      buildingSource: { type: 'string', enum: ['overture-pmtiles', 'local-geojson'] },
-      overtureRelease: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.0$' }
+      buildingSource: { type: 'string', enum: ['overture-pmtiles', 'project-snapshot', 'local-geojson'] },
+      overtureRelease: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.0$' },
+      snapshot: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          asset: { type: 'string', pattern: '^[a-z][a-z0-9-]*$' },
+          theme: { type: 'string', const: 'buildings' },
+          bounds: { type: 'array', items: { type: 'number' } },
+          sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+          byteLength: { type: 'integer', minimum: 1, maximum: 67108864 },
+          generator: { type: 'string', const: 'go-pmtiles' },
+          generatorVersion: { type: 'string', const: '1.31.2' },
+          generatedAt: { type: 'string' },
+          sourceContentLength: { type: 'integer', minimum: 0 },
+          sourceEtag: { type: 'string' }
+        }
+      }
     }
   },
   gui: { group: 'Urban context' }
