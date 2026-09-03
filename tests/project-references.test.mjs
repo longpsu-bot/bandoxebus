@@ -23,6 +23,40 @@ function assertReferenceIssue(manifest, path, message = /./) {
   );
 }
 
+function snapshotMetadata() {
+  return {
+    asset: 'overture-buildings-snapshot',
+    theme: 'buildings',
+    bounds: [106.58, 11.10, 106.62, 11.15],
+    sha256: 'a'.repeat(64),
+    byteLength: 12_345_678,
+    generator: 'go-pmtiles',
+    generatorVersion: '1.31.2',
+    generatedAt: '2026-09-03T02:00:00Z'
+  };
+}
+
+async function snapshotManifest() {
+  const manifest = await validManifest();
+  manifest.assets['overture-buildings-snapshot'] = {
+    type: 'pmtiles',
+    src: './assets/context/overture-buildings.pmtiles',
+    mediaType: 'application/vnd.pmtiles',
+    required: true,
+    attribution: []
+  };
+  manifest.capabilities.push({
+    id: 'urban-context-v1',
+    settings: {
+      adapter: 'route-61-2-current',
+      buildingSource: 'project-snapshot',
+      overtureRelease: '2026-08-19.0',
+      snapshot: snapshotMetadata()
+    }
+  });
+  return manifest;
+}
+
 test('manifest structural references resolve to declared IDs', async () => {
   const manifest = await validManifest();
   assert.equal(validateProjectManifest(manifest), manifest);
@@ -135,6 +169,44 @@ test('all manifest registry keys use structurally valid IDs', async () => {
     delete manifest[registry][id];
     manifest[registry]['Invalid ID'] = value;
     assertReferenceIssue(manifest, `$.${registry}.Invalid ID`, /ID/i);
+  }
+});
+
+test('project-snapshot references one bounded declared PMTiles asset', async () => {
+  const valid = await snapshotManifest();
+  assert.equal(validateProjectManifest(valid), valid);
+  assert.equal(validateManifestReferences(valid), valid);
+
+  const capabilityIndex = valid.capabilities.findIndex(({ id }) => id === 'urban-context-v1');
+  const basePath = `$.capabilities[${capabilityIndex}].settings.snapshot`;
+
+  const cases = [
+    ['missing-snapshot', `${basePath}`, (manifest) => { delete manifest.capabilities[capabilityIndex].settings.snapshot; }],
+    ['missing-asset', `${basePath}.asset`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.asset = 'missing'; }],
+    ['image-asset', `${basePath}.asset`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.asset = 'site-photo'; }],
+    ['short-bounds', `${basePath}.bounds`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.bounds = [1, 2, 3]; }],
+    ['lon-range', `${basePath}.bounds`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.bounds = [-181, 10, 20, 30]; }],
+    ['lat-range', `${basePath}.bounds`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.bounds = [10, -91, 20, 30]; }],
+    ['bounds-order', `${basePath}.bounds`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.bounds = [20, 10, 10, 30]; }],
+    ['sha', `${basePath}.sha256`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.sha256 = 'ABC'; }],
+    ['zero-bytes', `${basePath}.byteLength`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.byteLength = 0; }],
+    ['too-large', `${basePath}.byteLength`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.byteLength = 67_108_865; }],
+    ['theme', `${basePath}.theme`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.theme = 'roads'; }],
+    ['generator', `${basePath}.generator`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.generator = 'custom'; }],
+    ['generator-version', `${basePath}.generatorVersion`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.generatorVersion = 'latest'; }],
+    ['generated-at', `${basePath}.generatedAt`, (manifest) => { manifest.capabilities[capabilityIndex].settings.snapshot.generatedAt = 'not-an-instant'; }]
+  ];
+
+  for (const [, path, mutate] of cases) {
+    const manifest = await snapshotManifest();
+    mutate(manifest);
+    assertReferenceIssue(manifest, path);
+  }
+
+  for (const buildingSource of ['overture-pmtiles', 'local-geojson']) {
+    const manifest = await snapshotManifest();
+    manifest.capabilities[capabilityIndex].settings.buildingSource = buildingSource;
+    assertReferenceIssue(manifest, basePath, /only/i);
   }
 });
 
