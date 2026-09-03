@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { createOverturePmtilesLayerDefinitions } from '../src/overture-pmtiles.js';
+import { createOverturePmtilesArchiveBinding, createOverturePmtilesLayerDefinitions } from '../src/overture-pmtiles.js';
 import { createUrbanContextController } from '../src/urban-context.js';
 
 const PROJECT_ROOT = new URL('../', import.meta.url);
@@ -74,8 +74,8 @@ test('online context remains unrequested until activation and reuses one protoco
   const controller = createController({
     map,
     buildingConfig: { buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0' },
-    ensureOnlineProtocol: async () => { protocolCalls += 1; },
-    createOnlineDefinitions: createOverturePmtilesLayerDefinitions,
+    ensureArchive: async (maplibregl, binding) => { protocolCalls += 1; return { archiveUrl: binding.url }; },
+    createPmtilesDefinitions: createOverturePmtilesLayerDefinitions,
     onStatus: (status) => statuses.push(status)
   });
 
@@ -119,7 +119,7 @@ test('online protocol failure is bounded and never installs local or synthetic f
       features: [{ type: 'Feature', properties: { render_height_m: 8.5 }, geometry: zone.geometry }]
     },
     buildingConfig: { buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0' },
-    ensureOnlineProtocol: async () => { throw new TypeError('network blocked'); },
+    ensureArchive: async () => { throw new TypeError('network blocked'); },
     onStatus: (status) => statuses.push(status)
   });
 
@@ -149,8 +149,8 @@ test('online layer rejection remains unavailable after the source becomes idle',
   const controller = createController({
     map,
     buildingConfig: { buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0' },
-    ensureOnlineProtocol: async () => {},
-    createOnlineDefinitions: createOverturePmtilesLayerDefinitions,
+    ensureArchive: async (maplibregl, binding) => ({ archiveUrl: binding.url }),
+    createPmtilesDefinitions: createOverturePmtilesLayerDefinitions,
     onStatus: (status) => statuses.push(status)
   });
 
@@ -181,4 +181,88 @@ test('local benchmark installs the checked-in 1,299-building collection explicit
   assert.deepEqual(statuses.at(-1), {
     status: 'local-benchmark', source: 'local-geojson', release: '2026-08-19.0', failureCategory: null
   });
+});
+
+for (const kind of ['url', 'file']) {
+  test(`${kind} snapshot uses the shared PMTiles lifecycle without touching fallback data`, async () => {
+    const map = createMap();
+    const statuses = [];
+    const url = new URL('https://r2.example.test/projects/route-61-2/a/overture-buildings.pmtiles');
+    const archiveBinding = createOverturePmtilesArchiveBinding({
+      settings: {
+        buildingSource: 'project-snapshot', overtureRelease: '2026-08-19.0',
+        snapshot: { asset: 'snapshot', sha256: 'a'.repeat(64), bounds: [106.59, 11.11, 106.61, 11.14] }
+      },
+      resources: new Map([['snapshot', { id: 'snapshot', descriptor: { type: 'pmtiles', mediaType: 'application/vnd.pmtiles' }, url }]]),
+      resolvePmtilesAssetFile: kind === 'file' ? () => new File(['snapshot'], 'overture-buildings.pmtiles') : undefined
+    });
+    let registrations = 0;
+    const archiveUrl = kind === 'url' ? url.href : `overture-buildings-${'a'.repeat(64)}.pmtiles`;
+    const controller = createController({
+      map,
+      buildingConfig: { buildingSource: 'project-snapshot', overtureRelease: '2026-08-19.0', archiveBinding },
+      ensureArchive: async (maplibregl, binding) => {
+        assert.equal(binding, archiveBinding);
+        registrations += 1;
+        return { archiveUrl };
+      },
+      onStatus: (status) => statuses.push(status)
+    });
+    assert.equal(registrations, 0);
+    await controller.setMode('industrial-context');
+    map.emit('sourcedata', { sourceId: 'overture-industrial-buildings' });
+    assert.deepEqual(statuses.at(-1), {
+      status: 'available', source: 'project-snapshot', release: '2026-08-19.0', failureCategory: null
+    });
+    assert.equal(map.sources.get('overture-industrial-buildings').url, `pmtiles://${archiveUrl}`);
+    assert.deepEqual(map.sources.get('overture-industrial-buildings').bounds, [106.59, 11.11, 106.61, 11.14]);
+    const source = map.sources.get('overture-industrial-buildings');
+    await controller.setMode('off');
+    assert.equal(map.layers.get('overture-industrial-buildings-3d').layout.visibility, 'none');
+    await controller.setMode('industrial-context');
+    map.emit('moveend');
+    map.emit('zoomend');
+    assert.equal(registrations, 1);
+    assert.equal(map.sources.get('overture-industrial-buildings'), source);
+    assert.equal(map.layers.size, 4);
+    assert.equal(map.layers.get('overture-industrial-buildings-flat').layout.visibility, 'visible');
+    assert.throws(() => controller.configureBuildings({
+      buildingSource: 'project-snapshot', overtureRelease: '2026-08-19.0',
+      archiveBinding: { ...archiveBinding, key: `snapshot:${'b'.repeat(64)}` }
+    }), /after initialization/);
+
+    map.emit('error', { sourceId: 'overture-industrial-buildings', error: new Error('Range request failed') });
+    await controller.setMode('off');
+    await controller.setMode('industrial-context');
+    assert.deepEqual(statuses.at(-1), {
+      status: 'unavailable', source: 'project-snapshot', release: '2026-08-19.0', failureCategory: 'range-request'
+    });
+    assert.equal(map.layers.get('overture-industrial-buildings-3d').layout.visibility, 'none');
+    assert.equal(map.layers.has('synthetic-industrial-infill'), false);
+    controller.destroy();
+    map.emit('error', { sourceId: 'overture-industrial-buildings', error: new Error('404') });
+    assert.equal(statuses.at(-1).failureCategory, 'range-request');
+  });
+}
+
+test('failed snapshot archive setup leaves Story layers usable and never installs fallback', async () => {
+  const map = createMap();
+  map.addLayer({ id: 'story-route', type: 'line', layout: { visibility: 'visible' } });
+  const controller = createController({
+    map,
+    buildingConfig: {
+      buildingSource: 'project-snapshot', overtureRelease: '2026-08-19.0',
+      archiveBinding: {
+        kind: 'file', source: 'project-snapshot', release: '2026-08-19.0', key: `snapshot:${'a'.repeat(64)}`,
+        file: new File(['invalid'], 'overture-buildings.pmtiles'), bounds: [106.59, 11.11, 106.61, 11.14]
+      }
+    },
+    ensureArchive: async () => { throw new Error('malformed PMTiles tile'); }
+  });
+  await controller.setMode('industrial-context');
+  assert.equal(controller.getDiagnostics().status, 'unavailable');
+  assert.equal(controller.getDiagnostics().source, 'project-snapshot');
+  assert.equal(map.layers.get('story-route').layout.visibility, 'visible');
+  assert.equal(map.sources.has('overture-industrial-buildings'), false);
+  assert.equal(map.layers.has('synthetic-industrial-infill'), false);
 });

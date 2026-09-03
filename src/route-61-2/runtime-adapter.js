@@ -211,7 +211,8 @@ export function createRoute612RuntimeAdapter(context = {}) {
   let urbanContextController = null; let urbanContextInitialization = null; let ready = Promise.resolve();
   let urbanContextConfig = Object.freeze({
     buildingSource: 'local-geojson',
-    overtureRelease: '2026-08-19.0'
+    overtureRelease: '2026-08-19.0',
+    archiveBinding: null
   });
   const raf = context.requestAnimationFrame ?? globalThis.requestAnimationFrame;
   const caf = context.cancelAnimationFrame ?? globalThis.cancelAnimationFrame;
@@ -309,8 +310,8 @@ export function createRoute612RuntimeAdapter(context = {}) {
         pois: poiRecords(poiResource),
         reducedMotion: context.reducedMotion ?? false,
         beforeLayerId: ids.differenceRemoved,
-        ensureOnlineProtocol: context.ensureOnlineProtocol,
-        createOnlineDefinitions: context.createOnlineDefinitions,
+        ensureArchive: context.ensureArchive,
+        createPmtilesDefinitions: context.createPmtilesDefinitions,
         onStatus: context.onUrbanContextStatus
       });
       applyContext(contextMode);
@@ -413,10 +414,10 @@ export function createRoute612RuntimeAdapter(context = {}) {
       if (destroyed) throw new TypeError('Cannot configure a destroyed Route 61-2 adapter.');
       const keys = next && typeof next === 'object' && !Array.isArray(next) ? Object.keys(next) : [];
       if (
-        keys.length !== 2
+        keys.some((key) => !['buildingSource', 'overtureRelease', 'archiveBinding'].includes(key))
         || !keys.includes('buildingSource')
         || !keys.includes('overtureRelease')
-        || !['overture-pmtiles', 'local-geojson'].includes(next.buildingSource)
+        || !['overture-pmtiles', 'project-snapshot', 'local-geojson'].includes(next.buildingSource)
         || typeof next.overtureRelease !== 'string'
         || !OVERTURE_PMTILES_RELEASE_PATTERN.test(next.overtureRelease)
       ) {
@@ -424,7 +425,8 @@ export function createRoute612RuntimeAdapter(context = {}) {
       }
       urbanContextConfig = Object.freeze({
         buildingSource: next.buildingSource,
-        overtureRelease: next.overtureRelease
+        overtureRelease: next.overtureRelease,
+        archiveBinding: next.archiveBinding ?? null
       });
       urbanContextController?.configureBuildings?.(urbanContextConfig);
       if (polygonFeature(areaResource)) ensureUrbanContextController();

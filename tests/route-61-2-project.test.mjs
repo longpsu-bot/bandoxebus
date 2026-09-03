@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import { INSTALLED_CAPABILITY_REGISTRY } from '../src/capabilities/installed-capabilities.js';
 import { loadProject } from '../src/project/project-loader.js';
+import { selectUrbanContextAdapter } from '../src/capabilities/urban-context-v1.js';
 import {
   existingRouteLatLng,
   proposedRouteLatLng,
@@ -50,6 +51,22 @@ test('Route 61-2 loads from project.json and preserves its Story 1.0 contract', 
   assert.equal(await readFile(STORY_URL, 'utf8'), before);
   assert.equal(project.capabilities.datasetRoles.filter(({ required }) => required).length, 2);
   assert.ok(project.capabilities.datasetRoles.some(({ role }) => role === 'stops.proposed'));
+  const settings = project.capabilities.settings['urban-context-v1'];
+  const sources = new Map();
+  const layers = new Map();
+  const container = { dataset: {} };
+  const adapter = await selectUrbanContextAdapter(settings, {
+    map: {
+      loaded: () => false, once() {}, getContainer: () => container,
+      getSource: (id) => sources.get(id), addSource: (id, source) => sources.set(id, source),
+      getLayer: (id) => layers.get(id), addLayer: (layer) => layers.set(layer.id, layer),
+      setLayoutProperty: (id, key, value) => { layers.get(id).layout[key] = value; }
+    }, resources: project.resources, settings
+  });
+  await adapter.ready;
+  assert.equal(adapter.state.urbanContextConfig.archiveBinding.url,
+    'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles');
+  assert.equal(adapter.state.urbanContextConfig.archiveBinding.bounds, null);
 });
 
 test('static Route 61-2 GeoJSON bridge exactly matches current JavaScript geometry', async () => {

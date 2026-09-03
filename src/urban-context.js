@@ -10,8 +10,9 @@ import {
   OVERTURE_BUILDING_SOURCE_ID
 } from './overture-buildings.js';
 import {
+  createOverturePmtilesArchiveBinding,
   createOverturePmtilesLayerDefinitions,
-  ensurePmtilesProtocol,
+  ensurePmtilesArchive,
   OVERTURE_PMTILES_FLAT_LAYER_ID,
   OVERTURE_PMTILES_RELEASE_PATTERN
 } from './overture-pmtiles.js';
@@ -28,8 +29,8 @@ function validateBuildingConfig(config) {
     !config
     || typeof config !== 'object'
     || Array.isArray(config)
-    || Object.keys(config).length !== 2
-    || !['overture-pmtiles', 'local-geojson'].includes(config.buildingSource)
+    || Object.keys(config).some((key) => !['buildingSource', 'overtureRelease', 'archiveBinding'].includes(key))
+    || !['overture-pmtiles', 'project-snapshot', 'local-geojson'].includes(config.buildingSource)
     || typeof config.overtureRelease !== 'string'
     || !OVERTURE_PMTILES_RELEASE_PATTERN.test(config.overtureRelease)
   ) {
@@ -37,7 +38,8 @@ function validateBuildingConfig(config) {
   }
   return Object.freeze({
     buildingSource: config.buildingSource,
-    overtureRelease: config.overtureRelease
+    overtureRelease: config.overtureRelease,
+    archiveBinding: config.archiveBinding ?? createOverturePmtilesArchiveBinding({ settings: config })
   });
 }
 
@@ -64,8 +66,8 @@ export function createUrbanContextController({
     buildingSource: 'local-geojson',
     overtureRelease: '2026-08-19.0'
   },
-  ensureOnlineProtocol = ensurePmtilesProtocol,
-  createOnlineDefinitions = createOverturePmtilesLayerDefinitions,
+  ensureArchive = ensurePmtilesArchive,
+  createPmtilesDefinitions = createOverturePmtilesLayerDefinitions,
   onStatus = () => {}
 }) {
   const mapElement = map.getContainer();
@@ -78,11 +80,11 @@ export function createUrbanContextController({
   let diagnostics = {};
   let fpsMeasurementStarted = false;
   let destroyed = false;
-  let onlineInstallPromise = null;
-  let onlineErrorHandler = null;
-  let onlineSourceHandler = null;
+  let pmtilesInstallPromise = null;
+  let pmtilesErrorHandler = null;
+  let pmtilesSourceHandler = null;
   const overtureInspection = inspectOvertureCollection(overtureBuildings);
-  let provider = buildingConfig.buildingSource === 'overture-pmtiles'
+  let provider = buildingConfig.buildingSource !== 'local-geojson'
     ? 'overture'
     : overtureInspection.usable ? 'overture' : 'synthetic-v2';
 
@@ -106,6 +108,7 @@ export function createUrbanContextController({
   }
 
   function setContextVisible(visible) {
+    if (buildingConfig.buildingSource !== 'local-geojson' && diagnostics.status === 'unavailable') visible = false;
     mapElement.dataset.urbanGroundState = visible ? 'visible' : 'hidden';
     [GROUND_FILL_LAYER_ID, GROUND_LINE_LAYER_ID].forEach((layerId) => {
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
@@ -191,38 +194,40 @@ export function createUrbanContextController({
     return true;
   }
 
-  function detachOnlineListeners() {
-    if (onlineErrorHandler) map.off?.('error', onlineErrorHandler);
-    if (onlineSourceHandler) map.off?.('sourcedata', onlineSourceHandler);
-    onlineErrorHandler = null;
-    onlineSourceHandler = null;
+  function detachPmtilesListeners() {
+    if (pmtilesErrorHandler) map.off?.('error', pmtilesErrorHandler);
+    if (pmtilesSourceHandler) map.off?.('sourcedata', pmtilesSourceHandler);
+    pmtilesErrorHandler = null;
+    pmtilesSourceHandler = null;
   }
 
-  function markOnlineAvailable() {
+  function markPmtilesAvailable() {
     if (destroyed || diagnostics.status !== 'loading') return;
     if (map.isSourceLoaded?.(OVERTURE_BUILDING_SOURCE_ID) === false) return;
     emitStatus('available');
   }
 
-  async function installOnlineContext() {
-    if (onlineInstallPromise) return onlineInstallPromise;
+  async function installPmtilesContext() {
+    if (pmtilesInstallPromise) return pmtilesInstallPromise;
     emitStatus('loading');
-    onlineInstallPromise = (async () => {
+    pmtilesInstallPromise = (async () => {
       try {
-        await ensureOnlineProtocol(maplibregl);
+        const { archiveUrl } = await ensureArchive(maplibregl, buildingConfig.archiveBinding);
         if (destroyed) return;
-        const definitions = createOnlineDefinitions({ release: buildingConfig.overtureRelease });
-        onlineErrorHandler = (event = {}) => {
+        const definitions = createPmtilesDefinitions({
+          release: buildingConfig.overtureRelease, archiveUrl, bounds: buildingConfig.archiveBinding.bounds
+        });
+        pmtilesErrorHandler = (event = {}) => {
           const message = String(event?.error?.message ?? event?.message ?? '');
           if (event.sourceId !== OVERTURE_BUILDING_SOURCE_ID && !/buildings\.pmtiles|pmtiles/i.test(message)) return;
           setContextVisible(false);
           emitStatus('unavailable', failureCategory(event.error ?? event));
         };
-        onlineSourceHandler = (event = {}) => {
-          if (event.sourceId === OVERTURE_BUILDING_SOURCE_ID) markOnlineAvailable();
+        pmtilesSourceHandler = (event = {}) => {
+          if (event.sourceId === OVERTURE_BUILDING_SOURCE_ID) markPmtilesAvailable();
         };
-        map.on?.('error', onlineErrorHandler);
-        map.on?.('sourcedata', onlineSourceHandler);
+        map.on?.('error', pmtilesErrorHandler);
+        map.on?.('sourcedata', pmtilesSourceHandler);
         if (!map.getSource(OVERTURE_BUILDING_SOURCE_ID)) map.addSource(OVERTURE_BUILDING_SOURCE_ID, definitions.source);
         const beforeId = map.getLayer(beforeLayerId) ? beforeLayerId : undefined;
         if (!map.getLayer(OVERTURE_PMTILES_FLAT_LAYER_ID)) map.addLayer(definitions.flat, beforeId);
@@ -236,14 +241,14 @@ export function createUrbanContextController({
         provider = 'overture';
         setContextVisible(desiredMode === INDUSTRIAL_CONTEXT_MODE);
         updateDiagnostics({ overtureRelease: buildingConfig.overtureRelease });
-        map.once?.('idle', markOnlineAvailable);
+        map.once?.('idle', markPmtilesAvailable);
       } catch (error) {
         prepared = false;
         setContextVisible(false);
         emitStatus('unavailable', failureCategory(error));
       }
     })();
-    return onlineInstallPromise;
+    return pmtilesInstallPromise;
   }
 
   function measureOvertureFps() {
@@ -267,7 +272,7 @@ export function createUrbanContextController({
 
   async function prepare() {
     idleHandler = null;
-    if (buildingConfig.buildingSource === 'overture-pmtiles') return installOnlineContext();
+    if (buildingConfig.buildingSource !== 'local-geojson') return installPmtilesContext();
     if (prepared || preparing) return;
     preparing = true;
     updateDiagnostics({});
@@ -338,22 +343,26 @@ export function createUrbanContextController({
       if (
         next.buildingSource === buildingConfig.buildingSource
         && next.overtureRelease === buildingConfig.overtureRelease
+        && next.archiveBinding?.key === buildingConfig.archiveBinding?.key
+        && next.archiveBinding?.kind === buildingConfig.archiveBinding?.kind
+        && next.archiveBinding?.url === buildingConfig.archiveBinding?.url
+        && next.archiveBinding?.file === buildingConfig.archiveBinding?.file
       ) return buildingConfig;
-      if (prepared || preparing || onlineInstallPromise || map.getSource(OVERTURE_BUILDING_SOURCE_ID)) {
+      if (prepared || preparing || pmtilesInstallPromise || map.getSource(OVERTURE_BUILDING_SOURCE_ID)) {
         throw new TypeError('Cannot reconfigure urban context buildings after initialization.');
       }
       buildingConfig = next;
-      provider = next.buildingSource === 'overture-pmtiles' ? 'overture' : 'synthetic-v2';
-      emitStatus(next.buildingSource === 'overture-pmtiles' ? 'not-requested' : 'local-benchmark');
+      provider = next.buildingSource !== 'local-geojson' ? 'overture' : 'synthetic-v2';
+      emitStatus(next.buildingSource !== 'local-geojson' ? 'not-requested' : 'local-benchmark');
       return buildingConfig;
     },
     setMode(mode) {
       desiredMode = mode === INDUSTRIAL_CONTEXT_MODE ? INDUSTRIAL_CONTEXT_MODE : 'off';
       setContextVisible(desiredMode === INDUSTRIAL_CONTEXT_MODE);
       updateDiagnostics({});
-      if (buildingConfig.buildingSource === 'overture-pmtiles') {
-        if (desiredMode === INDUSTRIAL_CONTEXT_MODE) return installOnlineContext();
-        return onlineInstallPromise ?? Promise.resolve();
+      if (buildingConfig.buildingSource !== 'local-geojson') {
+        if (desiredMode === INDUSTRIAL_CONTEXT_MODE) return installPmtilesContext();
+        return pmtilesInstallPromise ?? Promise.resolve();
       }
       if (prepared) {
         if (layer) layer.setEnabled(desiredMode === INDUSTRIAL_CONTEXT_MODE, { immediate: reducedMotion });
@@ -369,7 +378,7 @@ export function createUrbanContextController({
       if (destroyed) return;
       destroyed = true;
       if (idleHandler) map.off('idle', idleHandler);
-      detachOnlineListeners();
+      detachPmtilesListeners();
       if (removeLayer) {
         if (map.getLayer(SYNTHETIC_INDUSTRIAL_LAYER_ID)) map.removeLayer(SYNTHETIC_INDUSTRIAL_LAYER_ID);
         [OVERTURE_BUILDING_LAYER_ID, OVERTURE_PMTILES_FLAT_LAYER_ID, GROUND_LINE_LAYER_ID, GROUND_FILL_LAYER_ID].forEach((layerId) => {

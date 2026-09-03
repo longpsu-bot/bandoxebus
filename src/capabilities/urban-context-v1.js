@@ -1,6 +1,7 @@
 import { ProjectLoadError } from '../project/project-error.js';
 import { deepFreeze } from './descriptor-schema.js';
 import { createLegacyActionNormalizer } from './story-1.0-normalizer.js';
+import { createOverturePmtilesArchiveBinding } from '../overture-pmtiles.js';
 
 const MODES = ['off', 'industrial-context'];
 
@@ -92,9 +93,15 @@ export async function selectUrbanContextAdapter(
   if (settings?.adapter !== 'route-61-2-current') return null;
   const module = await loadAdapter();
   const adapter = module.getRoute612RuntimeAdapter(context);
+  const archiveBinding = createOverturePmtilesArchiveBinding({
+    settings,
+    resources: context.resources,
+    resolvePmtilesAssetFile: context.resolvePmtilesAssetFile
+  });
   adapter.configureUrbanContext({
     buildingSource: settings.buildingSource ?? 'local-geojson',
-    overtureRelease: settings.overtureRelease ?? '2026-08-19.0'
+    overtureRelease: settings.overtureRelease ?? '2026-08-19.0',
+    archiveBinding
   });
   return adapter;
 }

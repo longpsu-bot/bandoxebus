@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import * as overturePmtiles from '../src/overture-pmtiles.js';
 import {
   createOverturePmtilesLayerDefinitions,
   deriveOvertureBuildingsPmtilesUrl,
@@ -16,6 +17,160 @@ import {
 } from '../src/overture-buildings.js';
 
 const root = new URL('../', import.meta.url);
+
+const snapshot = Object.freeze({
+  asset: 'overture-buildings-snapshot',
+  bounds: Object.freeze([106.59, 11.11, 106.61, 11.14]),
+  sha256: 'a'.repeat(64)
+});
+const snapshotSettings = Object.freeze({
+  buildingSource: 'project-snapshot', overtureRelease: '2026-08-19.0', snapshot
+});
+const snapshotResource = Object.freeze({
+  id: 'overture-buildings-snapshot',
+  descriptor: Object.freeze({ type: 'pmtiles', mediaType: 'application/vnd.pmtiles' }),
+  url: new URL('https://r2.example.test/projects/route-61-2/a/overture-buildings.pmtiles')
+});
+const snapshotResources = new Map([[snapshotResource.id, snapshotResource]]);
+
+function fakePmtilesRuntime() {
+  const files = [];
+  const archives = [];
+  const added = [];
+  const registrations = [];
+  class FileSource {
+    constructor(file) { this.file = file; files.push(file); }
+    getKey() { return this.file.name; }
+  }
+  class PMTiles {
+    constructor(source) { this.source = source; archives.push(this); }
+  }
+  class Protocol {
+    tile() {}
+    add(archive) { added.push(archive); }
+  }
+  return {
+    files, archives, added, registrations,
+    maplibregl: { addProtocol(name, tile) { registrations.push({ name, tile }); } },
+    loadPmtiles: async () => ({ Protocol, FileSource, PMTiles })
+  };
+}
+
+test('URL archive uses the existing protocol without registering an eager archive', async () => {
+  const runtime = fakePmtilesRuntime();
+  const binding = overturePmtiles.createOverturePmtilesArchiveBinding({ settings: snapshotSettings, resources: snapshotResources });
+  const result = await overturePmtiles.ensurePmtilesArchive(runtime.maplibregl, binding, runtime);
+  assert.equal(result.archiveUrl, 'https://r2.example.test/projects/route-61-2/a/overture-buildings.pmtiles');
+  assert.equal(result.protocol, await ensurePmtilesProtocol(runtime.maplibregl, runtime));
+  assert.equal(runtime.registrations.length, 1);
+  assert.equal(runtime.added.length, 0);
+  assert.equal(runtime.archives.length, 0);
+});
+
+test('concurrent File archive registration is shared and uses the full snapshot hash', async () => {
+  const runtime = fakePmtilesRuntime();
+  const file = new File([new Uint8Array([80, 77, 84, 105, 108, 101, 115])], 'overture-buildings.pmtiles');
+  file.arrayBuffer = () => { throw new Error('must not read whole original file'); };
+  const binding = overturePmtiles.createOverturePmtilesArchiveBinding({
+    settings: snapshotSettings, resources: snapshotResources, resolvePmtilesAssetFile: () => file
+  });
+  const [first, second] = await Promise.all([
+    overturePmtiles.ensurePmtilesArchive(runtime.maplibregl, binding, runtime),
+    overturePmtiles.ensurePmtilesArchive(runtime.maplibregl, binding, runtime)
+  ]);
+  const third = await overturePmtiles.ensurePmtilesArchive(runtime.maplibregl, binding, runtime);
+  assert.equal(first.archiveUrl, `overture-buildings-${'a'.repeat(64)}.pmtiles`);
+  assert.deepEqual(second, first);
+  assert.deepEqual(third, first);
+  assert.equal(runtime.registrations.length, 1);
+  assert.equal(runtime.files.length, 1);
+  assert.equal(runtime.archives.length, 1);
+  assert.deepEqual(runtime.added, runtime.archives);
+  assert.notEqual(runtime.files[0], file);
+  assert.equal(runtime.files[0].type, 'application/vnd.pmtiles');
+  assert.deepEqual(new Uint8Array(await runtime.files[0].arrayBuffer()), new Uint8Array([80, 77, 84, 105, 108, 101, 115]));
+
+  const distinct = await overturePmtiles.ensurePmtilesArchive(runtime.maplibregl, {
+    ...binding, key: `snapshot:${'a'.repeat(63)}b`
+  }, runtime);
+  assert.equal(distinct.archiveUrl, `overture-buildings-${'a'.repeat(63)}b.pmtiles`);
+  assert.notEqual(distinct.archiveUrl, first.archiveUrl);
+  assert.equal(distinct.protocol, first.protocol);
+  assert.equal(runtime.added.length, 2);
+  assert.equal(runtime.registrations.length, 1);
+});
+
+test('snapshot definitions change only the archive address and copied source bounds', () => {
+  const snapshotDefinitions = createOverturePmtilesLayerDefinitions({
+    archiveUrl: `overture-buildings-${'a'.repeat(64)}.pmtiles`, bounds: snapshot.bounds
+  });
+  assert.deepEqual(snapshotDefinitions.source, {
+    type: 'vector', url: `pmtiles://overture-buildings-${'a'.repeat(64)}.pmtiles`,
+    attribution: '© <a href="https://overturemaps.org/">Overture Maps Foundation</a>',
+    bounds: [106.59, 11.11, 106.61, 11.14]
+  });
+  assert.notEqual(snapshotDefinitions.source.bounds, snapshot.bounds);
+  const official = createOverturePmtilesLayerDefinitions({ release: '2026-08-19.0' });
+  assert.deepEqual(snapshotDefinitions.flat, official.flat);
+  assert.deepEqual(snapshotDefinitions.extrusion, official.extrusion);
+});
+
+test('snapshot binding uses the resolved resource URL and immutable copied bounds', () => {
+  const binding = overturePmtiles.createOverturePmtilesArchiveBinding({
+    settings: { ...snapshotSettings, snapshot: { ...snapshot, url: 'https://untrusted.test/override.pmtiles' } },
+    resources: snapshotResources
+  });
+  assert.deepEqual(binding, {
+    kind: 'url', source: 'project-snapshot', release: '2026-08-19.0',
+    url: 'https://r2.example.test/projects/route-61-2/a/overture-buildings.pmtiles',
+    bounds: [106.59, 11.11, 106.61, 11.14], key: `snapshot:${'a'.repeat(64)}`
+  });
+  assert.notEqual(binding.bounds, snapshot.bounds);
+  assert.equal(Object.isFrozen(binding.bounds), true);
+  assert.equal(Object.isFrozen(binding), true);
+});
+
+test('snapshot binding prefers a resolved File without reading its bytes', () => {
+  const file = new File(['snapshot'], 'overture-buildings.pmtiles');
+  file.arrayBuffer = () => { throw new Error('must remain lazy'); };
+  const binding = overturePmtiles.createOverturePmtilesArchiveBinding({
+    settings: snapshotSettings, resources: snapshotResources,
+    resolvePmtilesAssetFile(url, metadata) {
+      assert.equal(url, snapshotResource.url);
+      assert.deepEqual(metadata, { id: snapshotResource.id, descriptor: snapshotResource.descriptor });
+      return file;
+    }
+  });
+  assert.deepEqual(binding, {
+    kind: 'file', source: 'project-snapshot', release: '2026-08-19.0', file,
+    bounds: [106.59, 11.11, 106.61, 11.14], key: `snapshot:${'a'.repeat(64)}`
+  });
+});
+
+test('archive binding preserves official release derivation and skips local GeoJSON', () => {
+  assert.equal(overturePmtiles.createOverturePmtilesArchiveBinding({ settings: { buildingSource: 'local-geojson' } }), null);
+  const binding = overturePmtiles.createOverturePmtilesArchiveBinding({
+    settings: { buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0', url: 'https://untrusted.test/' }
+  });
+  assert.equal(binding.kind, 'url');
+  assert.equal(binding.source, 'overture-pmtiles');
+  assert.equal(binding.url, 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles');
+  assert.equal(binding.bounds, null);
+  assert.throws(() => overturePmtiles.createOverturePmtilesArchiveBinding({
+    settings: { buildingSource: 'overture-pmtiles', overtureRelease: 'latest' }
+  }), /Overture release/);
+});
+
+test('snapshot binding rejects missing or non-PMTiles resources before invoking the resolver', () => {
+  for (const resources of [new Map(), new Map([[snapshot.asset, {
+    ...snapshotResource, descriptor: { type: 'geojson', mediaType: 'application/geo+json' }
+  }]])]) {
+    assert.throws(() => overturePmtiles.createOverturePmtilesArchiveBinding({
+      settings: snapshotSettings, resources,
+      resolvePmtilesAssetFile() { assert.fail('invalid resource must not reach resolver'); }
+    }), /PMTiles resource/);
+  }
+});
 
 function evaluateExpression(expression, properties, scope = new Map()) {
   if (!Array.isArray(expression)) return expression;
