@@ -153,7 +153,7 @@ function validCommand(data) {
   if (name === 'authoring-mode') return exactKeys(payload, ['mode']) && ['select', 'map'].includes(payload.mode);
   if (name === 'authoring-selection') return exactKeys(payload, ['id'])
     && (payload.id === null || (typeof payload.id === 'string' && /^[a-z][a-z0-9-]*$/.test(payload.id)));
-  if (name === 'restore-scene-camera') return exactKeys(payload, ['index'])
+  if (['restore-scene-camera', 'capture-scene-camera'].includes(name)) return exactKeys(payload, ['index'])
     && Number.isInteger(payload.index) && payload.index >= 0;
   if (name === 'locate-project-layer') return exactKeys(payload, ['datasetId'])
     && typeof payload.datasetId === 'string' && /^[a-z][a-z0-9-]*$/.test(payload.datasetId);
@@ -185,6 +185,67 @@ export function startEditorPreviewHost({
   let activeAuthoringAdapter = null;
   let selectedOverlayId = null;
   let authoringMode = 'select';
+  const cameraCaptures = new Set();
+
+  function cancelCameraCaptures() {
+    for (const controller of cameraCaptures) controller.abort(new Error('Preview replaced or disposed during camera capture.'));
+  }
+
+  async function captureSceneCamera(data) {
+    const controller = new AbortController();
+    cameraCaptures.add(controller);
+    const { signal } = controller;
+    const runtime = activeRuntime;
+    const map = runtime?.map;
+    try {
+      if (disposed || activeSnapshot?.revision !== data.revision || !runtime?.shell?.activateScene || !map) {
+        throw new Error('Production preview is not ready for camera capture.');
+      }
+      // Fit/focus actions must see the exact parent-selected viewport, not the old map size.
+      map.resize();
+      if (runtime.storyRuntime) {
+        const index = data.payload.payload.index;
+        if (!runtime.storyRuntime.definition.states[index]) throw new RangeError(`Unknown Scene index: ${index}.`);
+        // goTo is intentionally a no-op for the current Scene. Replay the production lifecycle
+        // from its authored initial camera so working pans and inherited actions cannot leak in.
+        runtime.storyRuntime.deactivate();
+        if (runtime.project?.map?.initialView) map.jumpTo(runtime.project.map.initialView);
+        for (let step = 0; step <= index; step += 1) runtime.shell.activateScene(step, { animate: false });
+      } else {
+        runtime.shell.activateScene(data.payload.payload.index, { animate: false });
+      }
+      map.resize();
+      await Promise.resolve();
+      signal.throwIfAborted();
+      if (map.isMoving?.()) {
+        await new Promise((resolve, reject) => {
+          const finish = (error) => {
+            clearTimeout(timer);
+            map.off('moveend', moved);
+            signal.removeEventListener('abort', aborted);
+            if (error) reject(error); else resolve();
+          };
+          const moved = () => finish();
+          const aborted = () => finish(signal.reason);
+          const timer = setTimeout(() => finish(new Error('Production camera settlement timed out.')), 10000);
+          map.on('moveend', moved);
+          signal.addEventListener('abort', aborted, { once: true });
+        });
+      }
+      signal.throwIfAborted();
+      const center = map.getCenter();
+      const bounds = map.getBounds();
+      post('freeze-camera', data.revision, {
+        index: data.payload.payload.index, center: [center.lng, center.lat],
+        zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(),
+        bounds: [[bounds.getSouthWest().lng, bounds.getSouthWest().lat], [bounds.getNorthEast().lng, bounds.getNorthEast().lat]]
+      }, data.requestId);
+    } catch (error) {
+      post('runtime-error', data.revision, toRuntimeErrorPayload(error), data.requestId);
+    } finally {
+      cameraCaptures.delete(controller);
+    }
+  }
 
   function post(type, revision = activeSnapshot?.revision ?? 0, payload = {}, requestId = null) {
     windowRef.parent?.postMessage({
@@ -299,6 +360,7 @@ export function startEditorPreviewHost({
   }
 
   function start(snapshot, requestId = null) {
+    cancelCameraCaptures();
     const requestedSnapshot = structuredClone(snapshot);
     latestRequestedSnapshot = requestedSnapshot;
     const operation = replacement.then(() => replace(requestedSnapshot, requestId));
@@ -339,6 +401,7 @@ export function startEditorPreviewHost({
       }
     }
     else if (name === 'restore-scene-camera') activeRuntime?.shell?.restoreSceneCamera?.(payload.index);
+    else if (name === 'capture-scene-camera') void captureSceneCamera(data);
     else if (name === 'locate-project-layer') {
       const resource = activeRuntime?.project?.resources?.get?.(payload.datasetId);
       if (!resource || resource.descriptor?.type !== 'geojson') {
@@ -403,6 +466,7 @@ export function startEditorPreviewHost({
 
   function dispose() {
     disposed = true;
+    cancelCameraCaptures();
     windowRef.removeEventListener('message', handleMessage);
     replacement = replacement.then(async () => {
       destroyAuthoringAdapter();

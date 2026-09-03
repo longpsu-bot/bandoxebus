@@ -1,7 +1,90 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { validatePreviewSnapshot } from '../editor/preview/bridge.js';
+import { createPreviewBridge, validatePreviewSnapshot } from '../editor/preview/bridge.js';
+
+function captureHarness(options = {}) {
+  const listeners = new Map();
+  const posted = [];
+  const iframe = { dataset: { previewSrc: '../?editorPreview=1' }, contentWindow: { postMessage: (message) => posted.push(message) },
+    addEventListener(type, listener) { listeners.set(`frame:${type}`, listener); }, removeEventListener() {} };
+  const bridge = createPreviewBridge({ iframe, origin: 'https://editor.example', windowRef: {
+    addEventListener(type, listener) { listeners.set(type, listener); }, removeEventListener() {}
+  }, ...options });
+  const start = (revision = 1) => bridge.start({ revision, snapshot: { revision, entries: [] } });
+  const emit = (type, payload, requestId, revision = 1) => listeners.get('message')({ source: iframe.contentWindow,
+    origin: 'https://editor.example', data: { protocol: 1, type: `editor-preview:${type}`, revision, requestId, payload } });
+  start();
+  emit('ready', {}, null);
+  emit('loaded', {}, posted.find(({ type }) => type === 'editor-preview:start').requestId);
+  return { bridge, posted, start, emit, listeners };
+}
+
+const camera = { index: 4, center: [106.6, 11.13], zoom: 13.6, pitch: 52, bearing: -10,
+  bounds: [[106.58, 11.11], [106.62, 11.15]] };
+
+test('camera capture resolves only the matching bounded request and current revision', async () => {
+  const { bridge, posted, emit } = captureHarness();
+  let resolved = false;
+  const promise = bridge.captureSceneCamera(4).then((value) => { resolved = true; return value; });
+  const request = posted.at(-1);
+  assert.equal(request.type, 'editor-preview:command');
+  assert.deepEqual(request.payload, { name: 'capture-scene-camera', payload: { index: 4 } });
+  emit('freeze-camera', camera, 'wrong');
+  emit('freeze-camera', camera, request.requestId, 0);
+  emit('freeze-camera', { ...camera, index: 3 }, request.requestId);
+  await Promise.resolve();
+  assert.equal(resolved, false);
+  emit('freeze-camera', camera, request.requestId);
+  assert.deepEqual(await promise, camera);
+  bridge.dispose();
+});
+
+test('pending camera captures reject promptly on replacement reset load disposal and command errors', async () => {
+  for (const action of ['replace', 'reset', 'load', 'dispose', 'error']) {
+    const harness = captureHarness();
+    const promise = harness.bridge.captureSceneCamera(4);
+    const rejected = assert.rejects(promise, /capture|replaced|reset|load|disposed|broken/i);
+    if (action === 'replace') harness.start(2);
+    if (action === 'reset') harness.bridge.reset();
+    if (action === 'load') harness.listeners.get('frame:load')();
+    if (action === 'dispose') harness.bridge.dispose();
+    if (action === 'error') harness.emit('runtime-error', { code: 'FREEZE_CAPTURE_FAILED', path: '$', message: 'broken camera' }, harness.posted.at(-1).requestId);
+    await rejected;
+    harness.bridge.dispose();
+  }
+});
+
+test('camera capture without a reply times out instead of leaving the Freeze UI busy', async () => {
+  const { bridge } = captureHarness({ cameraCaptureTimeoutMs: 5 });
+  await assert.rejects(bridge.captureSceneCamera(4), /timed out/i);
+  bridge.dispose();
+});
+
+test('camera capture waits for the requested preview runtime to load', async () => {
+  const { bridge, posted, start, emit } = captureHarness();
+  start(2);
+  const startId = posted.at(-1).requestId;
+  const promise = bridge.captureSceneCamera(4);
+  assert.equal(posted.at(-1).type, 'editor-preview:start');
+  emit('loaded', {}, startId, 2);
+  assert.equal(posted.at(-1).payload.name, 'capture-scene-camera');
+  emit('freeze-camera', camera, posted.at(-1).requestId, 2);
+  assert.deepEqual(await promise, camera);
+  bridge.dispose();
+});
+
+test('capture queued for an output-mode navigation survives its expected iframe load', async () => {
+  const { bridge, posted, listeners, emit } = captureHarness();
+  bridge.start({ revision: 1, snapshot: { revision: 1, entries: [] } }, { outputMode: 'presentation' });
+  const promise = bridge.captureSceneCamera(4);
+  listeners.get('frame:load')();
+  emit('ready', {}, posted.at(-1).requestId);
+  emit('loaded', {}, posted.at(-1).requestId);
+  emit('freeze-camera', camera, posted.at(-1).requestId);
+  assert.deepEqual(await promise, camera);
+  bridge.dispose();
+});
 
 function pmtilesEntry(file = new File(['PMTiles'], 'overture-buildings.pmtiles')) {
   return { path: 'assets/context/overture-buildings.pmtiles', file, mediaType: 'application/vnd.pmtiles', kind: 'asset' };

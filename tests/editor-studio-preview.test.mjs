@@ -11,8 +11,218 @@ import {
   presentUrbanContextSetting,
   resolveUrbanContextStatusText
 } from '../editor/editor.js';
+import { createEditor } from '../editor/editor.js';
+import { createNewProjectEntries } from '../editor/core/package-store.js';
+import { unzipSync } from '../vendor/fflate/0.8.3/fflate.esm.js';
+import { createStoryRuntime } from '../src/story-runtime.js';
+import { createGenericStoryExperience } from '../src/runtime/generic-shell.js';
+import { createSceneStateController } from '../src/scene/scene-state-controller.js';
 
 const encoder = new TextEncoder();
+
+function freezeEditorHarness() {
+  const element = () => ({ style: { width: '', height: '' }, dataset: {}, children: [], disabled: false, value: '',
+    listeners: new Map(), classList: { toggle() {}, add() {}, remove() {} },
+    addEventListener(type, fn) { this.listeners.set(type, fn); }, removeEventListener() {},
+    setAttribute(name, value) { this[name] = value; }, getAttribute(name) { return this[name]; },
+    append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children = children; },
+    remove() {}, click() { if (!this.disabled) return this.listeners.get('click')?.({ target: this }); },
+    showModal() { this.open = true; }, close() { this.open = false; } });
+  const ids = ['new-project', 'open-folder', 'import-zip', 'save-project', 'export-project-zip', 'validate-project',
+    'preview-story', 'present-story', 'preview-status', 'dirty-status', 'validation-status', 'validation-errors',
+    'project-locale', 'story-heading', 'production-preview', 'preview-frame', 'preview-paused', 'preview-desktop', 'preview-mobile',
+    'prepare-freeze', 'freeze-dialog', 'freeze-required-bounds', 'freeze-min-lon', 'freeze-min-lat', 'freeze-max-lon', 'freeze-max-lat',
+    'download-freeze-plan', 'cancel-freeze', 'freeze-error'];
+  const nodes = Object.fromEntries(ids.map((id) => [id, element()]));
+  nodes['prepare-freeze'].disabled = true;
+  const posted = [], captures = [], downloads = [], revoked = [];
+  const windowRef = fakeWindow();
+  const documentRef = { getElementById: (id) => nodes[id] ?? null, querySelector: () => null, body: element(),
+    createElement(tag) { const node = element(); if (tag === 'a') node.click = () => downloads.push({ name: node.download, url: node.href }); return node; } };
+  const blobs = new Map();
+  windowRef.URL = { createObjectURL(blob) { const url = `blob:${blobs.size}`; blobs.set(url, blob); return url; }, revokeObjectURL(url) { revoked.push(url); } };
+  const frame = nodes['production-preview'];
+  frame.dataset.previewSrc = '../?editorPreview=1';
+  let source = '';
+  Object.defineProperty(frame, 'src', { get: () => source, set(next) {
+    const previous = source; source = next;
+    if (previous && previous !== next) queueMicrotask(() => frame.listeners.get('load')?.());
+  } });
+  const reply = (request, type, payload) => windowRef.emit('message', { source: frame.contentWindow,
+    origin: windowRef.location.origin, data: envelope(type, request.revision, payload, request.requestId) });
+  let captureHandler;
+  frame.contentWindow = { postMessage(request) {
+    posted.push(request);
+    if (request.type === 'editor-preview:hello') queueMicrotask(() => reply(request, 'ready', {}));
+    if (request.type === 'editor-preview:start') queueMicrotask(() => reply(request, 'loaded', {}));
+    if (request.payload.name === 'capture-scene-camera') {
+      const size = { ...nodes['preview-frame'].style };
+      captures.push({ index: request.payload.payload.index, size });
+      if (captureHandler) { captureHandler(request, reply); return; }
+      const bounds = size.width === '1920px' ? [[106.58, 11.12], [106.62, 11.15]] : [[106.59, 11.11], [106.61, 11.16]];
+      queueMicrotask(() => reply(request, 'freeze-camera', { index: request.payload.payload.index,
+        center: [106.6, 11.13], zoom: 13.6, pitch: 52, bearing: -10, bounds }));
+    }
+  } };
+  const editor = createEditor({ documentRef, windowRef });
+  return { editor, nodes, posted, captures, downloads, revoked, blobs,
+    setCaptureHandler(fn) { captureHandler = fn; },
+    ready() { frame.listeners.get('load')?.(); } };
+}
+
+function freezeEntries({ active = true, source = 'overture-pmtiles', legacy = false } = {}) {
+  return createNewProjectEntries({ id: 'freeze-project' }).map((entry) => {
+    const value = JSON.parse(new TextDecoder().decode(entry.bytes));
+    if (entry.path === 'project.json') value.capabilities = [{ id: 'urban-context-v1', settings: {
+      buildingSource: source, overtureRelease: '2026-08-19.0'
+    } }];
+    else {
+      if (legacy) { value.schemaVersion = '1.0'; value.states = [{ id: 'opening', content: { layout: 'hero', blocks: [{ type: 'heading', text: 'Context' }] }, map: { enter: [], exit: [] } }]; }
+      value.states[0].map.enter = active ? [{ type: legacy ? 'map.urban-context' : 'context.set-mode', mode: 'industrial-context' }] : [];
+      const second = structuredClone(value.states[0]);
+      second.id = 'persistent'; second.map.enter = []; second.map.exit = [{ type: legacy ? 'map.urban-context' : 'context.set-mode', mode: 'off' }];
+      const third = structuredClone(second); third.id = 'off'; third.map.exit = [];
+      value.states.push(second, third);
+    }
+    return { ...entry, bytes: encoder.encode(JSON.stringify(value)) };
+  });
+}
+
+function freezeFolder(entries) {
+  const files = new Map(entries.map(({ path, bytes }) => [path, bytes.slice()]));
+  const writes = [];
+  const directory = (prefix = '') => ({ name: 'Freeze authoring project',
+    async getDirectoryHandle(name) { return directory(`${prefix}${name}/`); },
+    async getFileHandle(name) { const path = `${prefix}${name}`; return {
+      async getFile() { if (!files.has(path)) throw new DOMException('Missing', 'NotFoundError'); return new File([files.get(path)], name); },
+      async createWritable() { return { async write(bytes) { writes.push(path); files.set(path, bytes.slice()); }, async close() {} }; }
+    }; }
+  });
+  return { root: directory(), files, writes };
+}
+
+async function until(predicate) {
+  for (let i = 0; i < 100; i += 1) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 5)); }
+  assert.fail('Expected UI result did not settle.');
+}
+
+test('Prepare Freeze user flow captures exact profiles and downloads a transient union without package changes', async (t) => {
+  for (const legacy of [false, true]) {
+    const harness = freezeEditorHarness();
+    t.after(() => harness.editor.dispose());
+    const folder = freezeFolder(freezeEntries({ legacy }));
+    await harness.editor.openFolder(folder.root);
+    harness.ready();
+    assert.match(harness.nodes['validation-status'].textContent, /valid production/i);
+    assert.equal(harness.nodes['prepare-freeze'].disabled, false);
+    const before = unzipSync(await harness.editor.exportZip());
+    harness.editor.setViewport('mobile');
+    harness.nodes['preview-frame'].style.width = '731px';
+    harness.nodes['preview-frame'].style.height = '455px';
+    harness.nodes['prepare-freeze'].click();
+    await until(() => harness.nodes['freeze-dialog'].open);
+    assert.deepEqual(harness.captures.map(({ index, size }) => [index, size.width, size.height]), [
+      [0, '1920px', '1080px'], [1, '1920px', '1080px'], [0, '390px', '844px'], [1, '390px', '844px']
+    ]);
+    assert.equal(harness.nodes['preview-frame'].style.width, '731px');
+    assert.equal(harness.nodes['preview-frame'].style.height, '455px');
+    assert.equal(harness.nodes['preview-mobile']['aria-pressed'], 'true');
+    assert.deepEqual(harness.posted.filter(({ payload }) => payload.name === 'activate-scene').at(-1).payload.payload, { index: 0, animate: false });
+    assert.deepEqual(['freeze-min-lon', 'freeze-min-lat', 'freeze-max-lon', 'freeze-max-lat'].map((id) => Number(harness.nodes[id].value)), [106.58, 11.11, 106.62, 11.16]);
+    harness.nodes['freeze-min-lon'].value = '106.59';
+    harness.nodes['download-freeze-plan'].click();
+    await until(() => harness.nodes['freeze-error'].textContent);
+    assert.match(harness.nodes['freeze-error'].textContent, /must contain/i);
+    assert.equal(harness.downloads.length, 0);
+    harness.nodes['freeze-min-lon'].value = '106.5';
+    harness.nodes['download-freeze-plan'].click();
+    await until(() => harness.downloads.length);
+    const plan = JSON.parse(await harness.blobs.get(harness.downloads[0].url).text());
+    assert.equal(harness.downloads[0].name, 'freeze-project-overture-freeze-plan.json');
+    assert.deepEqual(plan.requiredBounds, [106.58, 11.11, 106.62, 11.16]);
+    assert.deepEqual(plan.finalBounds, [106.5, 11.11, 106.62, 11.16]);
+    assert.equal(plan.projectFingerprint.length, 64);
+    assert.equal(plan.overtureRelease, '2026-08-19.0');
+    assert.deepEqual(harness.revoked, [harness.downloads[0].url]);
+    assert.deepEqual(unzipSync(await harness.editor.exportZip()), before);
+    assert.deepEqual(folder.writes, []);
+    assert.equal(harness.nodes['dirty-status'].textContent, 'Saved');
+  }
+});
+
+test('Prepare Freeze gating rejects unsaved non-Folder invalid and context-inactive inputs', async (t) => {
+  const harness = freezeEditorHarness();
+  t.after(() => harness.editor.dispose());
+  await harness.editor.openEntries(freezeEntries());
+  assert.equal(harness.nodes['prepare-freeze'].disabled, true);
+  await harness.editor.openFolder(freezeFolder(freezeEntries({ active: false })).root);
+  assert.equal(harness.nodes['prepare-freeze'].disabled, true);
+  await harness.editor.openFolder(freezeFolder(freezeEntries({ source: 'local-geojson' })).root);
+  assert.equal(harness.nodes['prepare-freeze'].disabled, true);
+  await harness.editor.openFolder(freezeFolder(freezeEntries()).root);
+  assert.equal(harness.nodes['prepare-freeze'].disabled, false);
+  harness.nodes['project-locale'].value = '';
+  harness.nodes['project-locale'].listeners.get('input')();
+  assert.equal(harness.nodes['prepare-freeze'].disabled, true, 'dirty edits block Freeze before debounced validation');
+  harness.nodes['validate-project'].click();
+  await until(() => /invalid/i.test(harness.nodes['validation-status'].textContent));
+  assert.equal(harness.nodes['prepare-freeze'].disabled, true);
+});
+
+test('Freeze errors and project replacement restore frame and never download a stale plan', async (t) => {
+  for (const failure of ['capture', 'replace', 'dispose', 'edit-after-prepare']) {
+    const harness = freezeEditorHarness();
+    t.after(() => harness.editor.dispose());
+    await harness.editor.openFolder(freezeFolder(freezeEntries()).root);
+    harness.ready();
+    harness.editor.setViewport('mobile');
+    if (failure !== 'edit-after-prepare') harness.setCaptureHandler((request, reply) => {
+      if (failure === 'capture') queueMicrotask(() => reply(request, 'runtime-error', { code: 'CAPTURE', path: '$', message: 'Camera failed' }));
+    });
+    harness.nodes['prepare-freeze'].click();
+    if (failure !== 'edit-after-prepare') await until(() => harness.captures.length);
+    if (failure === 'replace') await harness.editor.openEntries(freezeEntries());
+    if (failure === 'dispose') harness.editor.dispose();
+    if (failure === 'edit-after-prepare') {
+      await until(() => harness.nodes['freeze-dialog'].open);
+      harness.nodes['project-locale'].value = 'vi-VN';
+      harness.nodes['project-locale'].listeners.get('input')();
+      harness.nodes['download-freeze-plan'].click();
+    }
+    await until(() => harness.nodes['preview-frame'].style.width === '');
+    assert.equal(harness.nodes['preview-frame'].style.height, '');
+    assert.equal(harness.nodes['preview-mobile']['aria-pressed'], 'true');
+    assert.equal(harness.downloads.length, 0);
+    if (failure === 'capture') assert.match(harness.nodes['validation-status'].textContent, /camera failed/i);
+  }
+});
+
+test('Freeze temporarily uses Explore and restores the prior output mode and selection after success or error', async (t) => {
+  for (const failCapture of [false, true]) {
+    const harness = freezeEditorHarness();
+    t.after(() => harness.editor.dispose());
+    await harness.editor.openFolder(freezeFolder(freezeEntries({ legacy: true })).root);
+    harness.ready();
+    harness.nodes['present-story'].click();
+    await until(() => harness.posted.filter(({ type }) => type === 'editor-preview:start').length === 1);
+    await new Promise((resolve) => setImmediate(resolve));
+    if (failCapture) harness.setCaptureHandler((request, reply) => queueMicrotask(() => reply(request, 'runtime-error', { code: 'CAPTURE', path: '$', message: 'Camera failed' })));
+    harness.nodes['prepare-freeze'].click();
+    await until(() => harness.posted.filter(({ type }) => type === 'editor-preview:start').length === 3);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.match(harness.nodes['production-preview'].src, /outputMode=presentation/);
+    const restoredStart = harness.posted.findLastIndex(({ type }) => type === 'editor-preview:start');
+    assert.equal(harness.posted.slice(restoredStart + 1).some(({ payload }) => payload.name === 'activate-scene' && payload.payload.index === 0), true,
+      'selection restoration must reach the restored runtime after it is loaded');
+    assert.equal(harness.nodes['preview-frame'].style.width, '');
+    assert.equal(harness.nodes['freeze-dialog'].open, !failCapture);
+    if (!failCapture) {
+      assert.deepEqual(harness.captures.map(({ size }) => size.width), ['1920px', '1920px', '390px', '390px']);
+      harness.nodes['cancel-freeze'].click();
+      assert.equal(harness.nodes['freeze-dialog'].open, false);
+    }
+  }
+});
 
 function jsonEntry(path, value, kind) {
   return { path, bytes: encoder.encode(`${JSON.stringify(value)}\n`), mediaType: 'application/json', kind };
@@ -161,6 +371,119 @@ test('preview host dispatches bounded Scene commands to the active generic shell
   ]);
   assert.equal(posted.some(({ type }) => type === 'editor-preview:runtime-error'), false);
   await host.dispose();
+});
+
+test('preview host captures the active production camera after Scene activation resize and move settlement', async () => {
+  const windowRef = fakeWindow();
+  const posted = [];
+  const calls = [];
+  const listeners = new Set();
+  let moving = true;
+  windowRef.parent = { postMessage(message) { posted.push(message); } };
+  const map = { loaded: () => true, resize: () => calls.push('resize'), isMoving: () => moving,
+    getCenter: () => ({ lng: 106.6, lat: 11.13 }), getZoom: () => 13.6, getPitch: () => 52, getBearing: () => -10,
+    getBounds: () => ({ getSouthWest: () => ({ lng: 106.58, lat: 11.11 }), getNorthEast: () => ({ lng: 106.62, lat: 11.15 }) }),
+    on(type, listener) { if (type === 'moveend') listeners.add(listener); }, off(type, listener) { listeners.delete(listener); } };
+  const host = startEditorPreviewHost({ windowRef,
+    createResolver() { return { manifestUrl: new URL('https://editor.example/project.json'), fetchImpl() {}, revoke() {} }; },
+    async startProductionApplication() { return { map, shell: { activateScene(index, options) { calls.push(['activate', index, options]); } }, destroy() {} }; }
+  });
+  await host.start({ revision: 4, entries: [] });
+  windowRef.emit('message', { source: windowRef.parent, origin: windowRef.location.origin,
+    data: envelope('command', 4, { name: 'capture-scene-camera', payload: { index: 4 } }, 'capture-4') });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ['resize', ['activate', 4, { animate: false }], 'resize']);
+  assert.equal(posted.some(({ type }) => type === 'editor-preview:freeze-camera'), false);
+  moving = false;
+  for (const listener of [...listeners]) listener();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(posted.find(({ type }) => type === 'editor-preview:freeze-camera'), envelope('freeze-camera', 4, {
+    index: 4, center: [106.6, 11.13], zoom: 13.6, pitch: 52, bearing: -10,
+    bounds: [[106.58, 11.11], [106.62, 11.15]]
+  }, 'capture-4'));
+  assert.equal(listeners.size, 1, 'capture move listener removed; normal camera telemetry remains');
+  await host.dispose();
+  assert.equal(listeners.size, 0);
+});
+
+test('capture replays real production lifecycle for already-selected panned and inherited-camera Scenes at the resized viewport', async () => {
+  for (const variant of ['scene12', 'inherited', 'initial-view']) {
+    const windowRef = fakeWindow();
+    const posted = [];
+    const calls = [];
+    let camera = { center: [1, 2], zoom: 3, pitch: 0, bearing: 0 };
+    let width = 700;
+    let mode = 'off';
+    const map = { loaded: () => true, isMoving: () => false,
+      resize() { width = 1920; calls.push('resize'); },
+      jumpTo(value) { camera = structuredClone(value); },
+      getCenter: () => ({ lng: camera.center[0], lat: camera.center[1] }), getZoom: () => camera.zoom,
+      getPitch: () => camera.pitch, getBearing: () => camera.bearing,
+      getBounds: () => ({ getSouthWest: () => ({ lng: 106.58, lat: 11.11 }), getNorthEast: () => ({ lng: 106.62, lat: 11.15 }) })
+    };
+    const definition = { schemaVersion: variant === 'scene12' ? '1.2' : '1.0', states: [
+      { id: 'opening', map: { enter: [{ type: 'context.set-mode', mode: 'industrial-context' }], exit: [],
+        camera: { center: [106.6, 11.13], zoom: 13.6, pitch: 52, bearing: -10 }, transition: { type: 'instant', durationMs: 0 } } }
+    ] };
+    if (variant === 'inherited') {
+      definition.states[0].map.enter.unshift({ type: 'map.focus' });
+      definition.states.push({ id: 'persistent', map: { enter: [], exit: [] } });
+    }
+    const sceneController = createSceneStateController({ map, layerRegistry: { applySnapshot() {} }, interactionPolicy: { apply() {} }, compositor: { render() {} } });
+    const runtime = createStoryRuntime({ definition, actionRunner: { run(actions) { for (const action of actions) {
+      if (action.type === 'context.set-mode') mode = action.mode;
+      if (action.type === 'map.focus') { calls.push(['focus', width]); map.jumpTo({ center: [106.6, 11.13], zoom: width === 1920 ? 13.6 : 7, pitch: 52, bearing: -10 }); }
+    } } }, lifecycle: variant === 'scene12' ? { beforeEnter: sceneController.beforeEnter, afterExit: sceneController.afterExit } : {} });
+    const shell = createGenericStoryExperience({ runtime, sceneController });
+    shell.activateScene(0, { animate: false });
+    const index = definition.states.length - 1;
+    shell.activateScene(index, { animate: false });
+    map.jumpTo({ center: [20, 30], zoom: 4, pitch: 0, bearing: 0 });
+    calls.length = 0;
+    windowRef.parent = { postMessage(message) { posted.push(message); } };
+    const host = startEditorPreviewHost({ windowRef,
+      createResolver() { return { manifestUrl: new URL('https://editor.example/project.json'), fetchImpl() {}, revoke() {} }; },
+      async startProductionApplication() { return { map, shell, storyRuntime: runtime,
+        project: { story: definition, map: { initialView: { center: [1, 2], zoom: 3, pitch: 0, bearing: 0 } } }, destroy() {} }; }
+    });
+    await host.start({ revision: 4, entries: [] });
+    windowRef.emit('message', { source: windowRef.parent, origin: windowRef.location.origin,
+      data: envelope('command', 4, { name: 'capture-scene-camera', payload: { index } }, 'capture') });
+    await new Promise((resolve) => setImmediate(resolve));
+    const result = posted.find(({ type }) => type === 'editor-preview:freeze-camera');
+    assert.deepEqual(result?.payload.center, variant === 'initial-view' ? [1, 2] : [106.6, 11.13]);
+    assert.equal(result.payload.zoom, variant === 'initial-view' ? 3 : 13.6);
+    assert.equal(mode, 'industrial-context');
+    if (variant === 'inherited') assert.deepEqual(calls.slice(0, 2), ['resize', ['focus', 1920]]);
+    await host.dispose();
+  }
+});
+
+test('preview host cancels unsettled captures on runtime replacement and disposal', async () => {
+  for (const action of ['replace', 'dispose']) {
+    const windowRef = fakeWindow();
+    const posted = [];
+    const listeners = new Set();
+    windowRef.parent = { postMessage(message) { posted.push(message); } };
+    const host = startEditorPreviewHost({ windowRef,
+      createResolver() { return { manifestUrl: new URL('https://editor.example/project.json'), fetchImpl() {}, revoke() {} }; },
+      async startProductionApplication() { return {
+        map: { loaded: () => true, resize() {}, isMoving: () => true, on(type, listener) { listeners.add(listener); }, off(type, listener) { listeners.delete(listener); } },
+        shell: { activateScene() {} }, destroy() {}
+      }; }
+    });
+    await host.start({ revision: 4, entries: [] });
+    windowRef.emit('message', { source: windowRef.parent, origin: windowRef.location.origin,
+      data: envelope('command', 4, { name: 'capture-scene-camera', payload: { index: 0 } }, 'capture-4') });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(listeners.size, 2);
+    if (action === 'replace') await host.start({ revision: 5, entries: [] });
+    else await host.dispose();
+    assert.equal(posted.some(({ type, requestId }) => type === 'editor-preview:runtime-error' && requestId === 'capture-4'), true);
+    assert.equal(posted.some(({ type }) => type === 'editor-preview:freeze-camera'), false);
+    await host.dispose();
+    assert.equal(listeners.size, 0);
+  }
 });
 
 test('preview host forwards one active-revision urban context status event and removes its listener', async () => {

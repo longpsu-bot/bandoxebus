@@ -6,6 +6,10 @@ import {
   createValidationNavigationIndex
 } from './core/validation.js';
 import { createPreviewBridge } from './preview/bridge.js';
+import {
+  FREEZE_VIEWPORT_PROFILES, contextActiveSceneIndices, unionBounds, validateFreezeBounds,
+  computeDeclaredPackageFingerprint, createOvertureFreezePlan
+} from './publish/freeze-plan.js';
 import { preflightDatasetCandidate, renderEntityInspector } from './ui/inspectors.js';
 import { createDataWorkbench } from './ui/data-workbench.js';
 import { createStoryEditor } from './ui/story-editor.js';
@@ -241,6 +245,13 @@ export function createEditor({
     validate: documentRef.getElementById('validate-project'),
     previewStory: documentRef.getElementById('preview-story'),
     presentStory: documentRef.getElementById('present-story'),
+    prepareFreeze: documentRef.getElementById('prepare-freeze'),
+    freezeDialog: documentRef.getElementById('freeze-dialog'),
+    freezeRequired: documentRef.getElementById('freeze-required-bounds'),
+    freezeFields: ['freeze-min-lon', 'freeze-min-lat', 'freeze-max-lon', 'freeze-max-lat'].map((id) => documentRef.getElementById(id)),
+    freezeDownload: documentRef.getElementById('download-freeze-plan'),
+    freezeCancel: documentRef.getElementById('cancel-freeze'),
+    freezeError: documentRef.getElementById('freeze-error'),
     previewStatus: documentRef.getElementById('preview-status'),
     dirtyStatus: documentRef.getElementById('dirty-status'),
     validityStatus: documentRef.getElementById('validity-status'),
@@ -282,8 +293,117 @@ export function createEditor({
   let outputPreviewStatus = null;
   let pendingStudioInsert = null;
   let dataWorkbench = null;
+  let freezeBusy = false;
+  let freezeDraft = null;
+  let restoreFreezeSelectionOnLoad = false;
+  let disposed = false;
+
+  function freezeInput() {
+    const lastValid = validation?.lastValid;
+    const project = lastValid?.project;
+    const settings = project?.manifest?.capabilities?.find(({ id }) => id === 'urban-context-v1')?.settings;
+    if (disposed || packageStore?.origin?.kind !== 'folder' || packageStore.dirty
+      || validation?.status !== 'valid' || !lastValid?.snapshot
+      || packageStore.revision !== lastValid.revision || settings?.buildingSource !== 'overture-pmtiles') return null;
+    const indices = contextActiveSceneIndices(project.story);
+    return indices.length ? { lastValid, project, settings, indices } : null;
+  }
+
+  function renderFreezeAvailability() {
+    if (elements.prepareFreeze) elements.prepareFreeze.disabled = freezeBusy || !freezeInput();
+  }
+
+  async function prepareFreeze() {
+    const input = freezeInput();
+    if (!input || freezeBusy) throw new TypeError('Freeze requires a saved, valid authoring Folder with context-active Scenes.');
+    const store = packageStore;
+    const { lastValid, project, settings, indices } = input;
+    const original = { width: elements.frame.style.width, height: elements.frame.style.height,
+      viewportPreset, stateSelection, outputMode: bridge.outputMode, inert: elements.layout?.inert };
+    const assertCurrent = () => {
+      if (store !== packageStore || freezeInput()?.lastValid !== lastValid) throw new Error('Freeze input changed. Prepare Freeze again.');
+    };
+    freezeBusy = true;
+    freezeDraft = null;
+    elements.freezeDialog.close();
+    elements.frame.classList.add('is-freeze-capture');
+    if (elements.layout) elements.layout.inert = true;
+    renderFreezeAvailability();
+    try {
+      if (original.outputMode !== 'explore') bridge.start(lastValid);
+      const profiles = [];
+      for (const profile of FREEZE_VIEWPORT_PROFILES) {
+        setViewport(profile.id);
+        elements.frame.style.width = `${profile.width}px`;
+        elements.frame.style.height = `${profile.height}px`;
+        const scenes = [];
+        for (const index of indices) {
+          const camera = await bridge.captureSceneCamera(index);
+          assertCurrent();
+          scenes.push({ index, id: project.story.states[index].id, bounds: [
+            camera.bounds[0][0], camera.bounds[0][1], camera.bounds[1][0], camera.bounds[1][1]
+          ] });
+        }
+        profiles.push({ ...profile, scenes });
+      }
+      const requiredBounds = unionBounds(profiles.flatMap(({ scenes }) => scenes.map(({ bounds }) => bounds)));
+      const projectFingerprint = await computeDeclaredPackageFingerprint(lastValid.snapshot);
+      assertCurrent();
+      freezeDraft = { store, lastValid, projectId: project.manifest.id, projectFingerprint,
+        overtureRelease: settings.overtureRelease ?? '2026-08-19.0', requiredBounds, profiles };
+      elements.freezeRequired.textContent = requiredBounds.join(', ');
+      elements.freezeFields.forEach((field, index) => { field.value = String(requiredBounds[index]); });
+      elements.freezeError.textContent = '';
+    } finally {
+      elements.frame.style.width = original.width;
+      elements.frame.style.height = original.height;
+      elements.frame.classList.remove('is-freeze-capture');
+      if (elements.layout) elements.layout.inert = original.inert;
+      setViewport(original.viewportPreset);
+      if (!disposed && store === packageStore) {
+        stateSelection = original.stateSelection;
+        if (original.outputMode !== 'explore') {
+          restoreFreezeSelectionOnLoad = true;
+          bridge.start(lastValid, { outputMode: original.outputMode });
+        } else bridge.command('activate-scene', { index: stateSelection, animate: false });
+      }
+      freezeBusy = false;
+      renderFreezeAvailability();
+    }
+    if (freezeDraft) elements.freezeDialog.showModal();
+  }
+
+  async function downloadFreezePlan() {
+    const prepared = freezeDraft;
+    const current = freezeInput();
+    if (!prepared || !current || prepared.store !== packageStore || prepared.lastValid !== current.lastValid) {
+      throw new Error('Freeze input changed. Prepare Freeze again.');
+    }
+    const finalBounds = elements.freezeFields.map((field) => field.value.trim() === '' ? NaN : Number(field.value));
+    validateFreezeBounds(prepared.requiredBounds, finalBounds);
+    const plan = await createOvertureFreezePlan({ ...prepared, finalBounds });
+    if (prepared !== freezeDraft || prepared.store !== packageStore || freezeInput()?.lastValid !== prepared.lastValid) {
+      throw new Error('Freeze input changed. Prepare Freeze again.');
+    }
+    const urlApi = windowRef.URL ?? globalThis.URL;
+    const url = urlApi.createObjectURL(new Blob([`${JSON.stringify(plan, null, 2)}\n`], { type: 'application/json' }));
+    const link = documentRef.createElement('a');
+    try {
+      link.href = url;
+      link.download = `${plan.projectId}-overture-freeze-plan.json`;
+      link.hidden = true;
+      documentRef.body.append(link);
+      link.click();
+    } finally {
+      link.remove();
+      urlApi.revokeObjectURL(url);
+    }
+    elements.freezeDialog.close();
+    freezeDraft = null;
+  }
 
   function launchOutputPreview(outputMode) {
+    if (freezeBusy) throw new Error('Wait for Freeze preparation to finish.');
     const launch = createOutputPreviewLaunch(validation, outputMode);
     outputPreviewStatus = launch.status;
     bridge.start(launch.lastValid, { outputMode: launch.outputMode });
@@ -1347,9 +1467,10 @@ export function createEditor({
       } else if (event.type === 'editor-preview:loaded') {
         elements.iframe.dataset.previewRevision = String(event.revision);
         elements.previewStatus.textContent = outputPreviewStatus ?? 'Explore preview ready';
-        if (primaryStory().story?.schemaVersion === '1.2') {
+        if (primaryStory().story?.schemaVersion === '1.2' || restoreFreezeSelectionOnLoad) {
           bridge.command('activate-scene', { index: stateSelection, animate: false });
           bridge.command('authoring-mode', { mode: getStudioAuthoringMode() });
+          restoreFreezeSelectionOnLoad = false;
         }
       } else if (event.type === 'editor-preview:runtime-error') {
         elements.previewStatus.textContent = 'Preview runtime error';
@@ -1374,6 +1495,7 @@ export function createEditor({
 
   function renderDirty() {
     elements.dirtyStatus.textContent = packageStore?.dirty ? 'Unsaved' : 'Saved';
+    renderFreezeAvailability();
   }
 
   function buildNavigationIndex() {
@@ -1576,6 +1698,9 @@ export function createEditor({
   }
 
   async function startEntries({ origin, capabilities, entries, adapter = null }) {
+    freezeDraft = null;
+    restoreFreezeSelectionOnLoad = false;
+    elements.freezeDialog?.close();
     validation?.dispose();
     resetStudioAuthoringSession();
     packageStore = createPackageStore({
@@ -1717,6 +1842,14 @@ export function createEditor({
     }).catch((error) => { elements.validationStatus.textContent = error.message; });
   });
   elements.validate.addEventListener('click', () => { void validation?.validateNow(); });
+  elements.prepareFreeze?.addEventListener('click', () => {
+    void prepareFreeze().catch((error) => { elements.validationStatus.textContent = error.message; });
+  });
+  elements.freezeDownload?.addEventListener('click', () => {
+    void downloadFreezePlan().catch((error) => { elements.freezeError.textContent = error.message; });
+  });
+  elements.freezeCancel?.addEventListener('click', () => { freezeDraft = null; elements.freezeDialog.close(); });
+  elements.freezeDialog?.addEventListener('cancel', () => { freezeDraft = null; });
   elements.previewStory.addEventListener('click', () => {
     try { launchOutputPreview('scroll'); }
     catch (error) { elements.previewStatus.textContent = error.message; }
@@ -1742,6 +1875,9 @@ export function createEditor({
   elements.mobile.addEventListener('click', () => setViewport('mobile'));
 
   function dispose() {
+    disposed = true;
+    freezeDraft = null;
+    elements.freezeDialog?.close();
     dataWorkbench?.close?.();
     validation?.dispose();
     bridge.dispose();

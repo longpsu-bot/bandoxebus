@@ -23,6 +23,7 @@
             <input id="import-zip" type="file" accept=".zip,application/zip">
           </label>
           <button id="export-project-zip" type="button" disabled>Export project ZIP</button>
+          <button id="prepare-freeze" type="button" disabled>Prepare Freeze</button>
           <button id="validate-project" type="button" disabled>Check project</button>
         </div>
       </details>
@@ -52,6 +53,21 @@
       <button id="chooser-import-zip" type="button">Import ZIP</button>
     </div>
     <form method="dialog"><button type="submit">Cancel</button></form>
+  </dialog>
+
+  <dialog id="freeze-dialog" aria-labelledby="freeze-heading">
+    <h2 id="freeze-heading">Prepare Overture Freeze</h2>
+    <p>Required bounds (read-only): <output id="freeze-required-bounds"></output></p>
+    <p>Final bounds may enlarge the required extent, but cannot shrink it.</p>
+    <div class="freeze-fields">
+      <label>Final min longitude <input id="freeze-min-lon" type="number" min="-180" max="180" step="any" required></label>
+      <label>Final min latitude <input id="freeze-min-lat" type="number" min="-90" max="90" step="any" required></label>
+      <label>Final max longitude <input id="freeze-max-lon" type="number" min="-180" max="180" step="any" required></label>
+      <label>Final max latitude <input id="freeze-max-lat" type="number" min="-90" max="90" step="any" required></label>
+    </div>
+    <p id="freeze-error" role="alert"></p>
+    <button id="download-freeze-plan" type="button">Download Freeze Plan</button>
+    <button id="cancel-freeze" type="button">Cancel</button>
   </dialog>
 
   <div class="editor-layout">
