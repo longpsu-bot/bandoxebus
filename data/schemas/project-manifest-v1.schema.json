@@ -126,9 +126,9 @@
         "type": "object",
         "required": ["type", "src", "mediaType"],
         "properties": {
-          "type": { "type": "string", "const": "image" },
+          "type": { "type": "string", "enum": ["image", "pmtiles"] },
           "src": { "type": "string" },
-          "mediaType": { "type": "string", "enum": ["image/avif", "image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/webp"] },
+          "mediaType": { "type": "string", "enum": ["image/avif", "image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/webp", "application/vnd.pmtiles"] },
           "required": { "type": "boolean" },
           "attribution": {
             "type": "array",
