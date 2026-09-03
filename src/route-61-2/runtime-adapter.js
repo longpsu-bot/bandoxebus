@@ -276,12 +276,13 @@ export function createRoute612RuntimeAdapter(context = {}) {
 
   function applyContext(nextMode) {
     contextMode = nextMode;
-    urbanContextController?.setMode(nextMode);
+    const activation = urbanContextController?.setMode(nextMode) ?? Promise.resolve();
     const mapElement = context.documentRef?.getElementById?.('map');
     mapElement?.setAttribute?.('data-urban-context', nextMode);
     mapElement?.setAttribute?.('data-urban-layer-visible', String(
       nextMode === 'industrial-context' && Boolean(urbanContextController)
     ));
+    return activation;
   }
 
   function applyPoiEmphasis(active) {
@@ -451,12 +452,11 @@ export function createRoute612RuntimeAdapter(context = {}) {
     setContextMode(nextMode) {
       if (!['off', 'industrial-context'].includes(nextMode)) throw new TypeError(`Unsupported urban context mode: ${nextMode}.`);
       if (delegates.setContextMode) delegates.setContextMode(nextMode);
-      else if (urbanContextController) applyContext(nextMode);
+      else if (urbanContextController) return applyContext(nextMode);
       else {
         contextMode = nextMode;
         const initialization = polygonFeature(areaResource) ? ensureUrbanContextController() : Promise.resolve();
-        initialization.then(() => applyContext(nextMode));
-        return initialization;
+        return initialization.then(() => applyContext(nextMode));
       }
       return Promise.resolve();
     },

@@ -53,6 +53,12 @@ function failureCategory(error) {
   return 'remote';
 }
 
+async function waitForSettledCamera(map) {
+  await Promise.resolve();
+  if (!map.isMoving?.()) return;
+  await new Promise((resolve) => map.once('moveend', resolve));
+}
+
 export function createUrbanContextController({
   map,
   maplibregl,
@@ -213,6 +219,8 @@ export function createUrbanContextController({
     pmtilesInstallPromise = (async () => {
       try {
         const { archiveUrl } = await ensureArchive(maplibregl, buildingConfig.archiveBinding);
+        if (destroyed) return;
+        await waitForSettledCamera(map);
         if (destroyed) return;
         const definitions = createPmtilesDefinitions({
           release: buildingConfig.overtureRelease, archiveUrl, bounds: buildingConfig.archiveBinding.bounds

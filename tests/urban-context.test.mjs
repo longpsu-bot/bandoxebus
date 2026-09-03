@@ -15,11 +15,13 @@ const zone = {
   }
 };
 
-function createMap() {
+function createMap({ moving = false } = {}) {
   const sources = new Map();
   const layers = new Map();
   const listeners = new Map();
   const container = { dataset: {} };
+  const addSourceCalls = [];
+  const addLayerCalls = [];
   const addListener = (type, listener, once) => {
     const entries = listeners.get(type) ?? [];
     entries.push({ listener, once });
@@ -29,12 +31,20 @@ function createMap() {
     sources,
     layers,
     container,
+    addSourceCalls,
+    addLayerCalls,
     getContainer: () => container,
     getSource: (id) => sources.get(id),
-    addSource(id, source) { sources.set(id, structuredClone(source)); },
+    addSource(id, source) {
+      addSourceCalls.push({ id, source });
+      sources.set(id, structuredClone(source));
+    },
     removeSource(id) { sources.delete(id); },
     getLayer: (id) => layers.get(id),
-    addLayer(layer) { layers.set(layer.id, structuredClone(layer)); },
+    addLayer(layer) {
+      addLayerCalls.push(layer);
+      layers.set(layer.id, structuredClone(layer));
+    },
     removeLayer(id) { layers.delete(id); },
     setLayoutProperty(id, property, value) {
       const layer = layers.get(id);
@@ -42,6 +52,8 @@ function createMap() {
     },
     getStyle: () => ({ layers: [...layers.values()] }),
     isSourceLoaded: (id) => sources.has(id),
+    isMoving: () => moving,
+    setMoving(value) { moving = value; },
     querySourceFeatures: () => [],
     once(type, listener) { addListener(type, listener, true); },
     on(type, listener) { addListener(type, listener, false); },
@@ -103,6 +115,88 @@ test('online context remains unrequested until activation and reuses one protoco
   assert.equal([...map.sources].filter(([id]) => id === 'overture-industrial-buildings').length, 1);
   assert.equal([...map.layers].filter(([id]) => id === 'overture-industrial-buildings-flat').length, 1);
   assert.equal([...map.layers].filter(([id]) => id === 'overture-industrial-buildings-3d').length, 1);
+});
+
+test('first PMTiles activation waits for a moving camera before installing source and layers', async () => {
+  const map = createMap({ moving: true });
+  let resolveArchive;
+  const controller = createController({
+    map,
+    buildingConfig: { buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0' },
+    ensureArchive: () => new Promise((resolve) => { resolveArchive = resolve; })
+  });
+  map.addSourceCalls.length = 0;
+  map.addLayerCalls.length = 0;
+
+  const activation = controller.setMode('industrial-context');
+  await Promise.resolve();
+  resolveArchive({ archiveUrl: 'https://example.test/buildings.pmtiles' });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(map.addSourceCalls.length, 0);
+  assert.equal(map.addLayerCalls.length, 0);
+
+  map.setMoving(false);
+  map.emit('moveend');
+  await activation;
+  assert.equal(map.addSourceCalls.length, 1);
+  assert.equal(map.addLayerCalls.length, 2);
+  assert.equal(map.addLayerCalls[0].id, 'overture-industrial-buildings-flat');
+  assert.equal(map.addLayerCalls[1].id, 'overture-industrial-buildings-3d');
+});
+
+test('first PMTiles activation installs without waiting when the camera is settled', async () => {
+  const map = createMap();
+  const controller = createController({
+    map,
+    buildingConfig: { buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0' },
+    ensureArchive: async () => ({ archiveUrl: 'https://example.test/buildings.pmtiles' })
+  });
+  map.addSourceCalls.length = 0;
+  map.addLayerCalls.length = 0;
+
+  await controller.setMode('industrial-context');
+
+  assert.equal(map.addSourceCalls.length, 1);
+  assert.equal(map.addLayerCalls.length, 2);
+});
+
+test('snapshot PMTiles context retains one runtime and layer set across visibility and camera motion', async () => {
+  const map = createMap();
+  let protocolInstallations = 0;
+  let archiveRegistrations = 0;
+  const controller = createController({
+    map,
+    buildingConfig: {
+      buildingSource: 'project-snapshot',
+      overtureRelease: '2026-08-19.0',
+      archiveBinding: {
+        kind: 'url', source: 'project-snapshot', release: '2026-08-19.0',
+        key: 'snapshot:test', url: 'https://example.test/snapshot.pmtiles', bounds: [106.59, 11.11, 106.61, 11.14]
+      }
+    },
+    ensureArchive: async () => {
+      protocolInstallations += 1;
+      archiveRegistrations += 1;
+      return { archiveUrl: 'https://example.test/snapshot.pmtiles' };
+    }
+  });
+  map.addSourceCalls.length = 0;
+  map.addLayerCalls.length = 0;
+
+  await controller.setMode('industrial-context');
+  await controller.setMode('off');
+  await controller.setMode('industrial-context');
+  map.emit('moveend', { cameraChange: 'pan' });
+  map.emit('moveend', { cameraChange: 'bearing' });
+  map.emit('moveend', { cameraChange: 'pitch' });
+
+  assert.equal(protocolInstallations, 1);
+  assert.equal(archiveRegistrations, 1);
+  assert.equal(map.addSourceCalls.length, 1);
+  assert.equal(map.addLayerCalls.filter(({ id }) => id === 'overture-industrial-buildings-flat').length, 1);
+  assert.equal(map.addLayerCalls.filter(({ id }) => id === 'overture-industrial-buildings-3d').length, 1);
 });
 
 test('online protocol failure is bounded and never installs local or synthetic fallback', async () => {
