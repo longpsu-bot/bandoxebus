@@ -65,13 +65,34 @@ async function safeOutput(fs, projectDir, requested, projectId) {
     || contains(projectDir, outputDir)) throw new Error('Unsafe output directory overlaps authoring, workspace, home, or a filesystem root.');
   if (stat) {
     let previous;
-    try { previous = JSON.parse(await fs.readFile(path.join(outputDir, 'project.json'), 'utf8')); }
-    catch { throw new Error('Existing output is not a prior frozen publication. Use a new output directory.'); }
-    if (previous.id !== projectId || previous.capabilities?.find(({ id }) => id === 'urban-context-v1')?.settings?.buildingSource !== 'project-snapshot') {
+    try { previous = (await validateFolder(fs, outputDir)).manifest; }
+    catch (error) { throw new Error(`Existing output is not a production-valid prior frozen publication: ${error.message}`, { cause: error }); }
+    if (previous.id !== projectId || previous.capabilities.find(({ id }) => id === 'urban-context-v1')?.settings?.buildingSource !== 'project-snapshot') {
       throw new Error('Existing output must be a same-project frozen publication.');
     }
+    await validatePublicationInventory(fs, outputDir, previous);
   }
   return { outputDir, parent, existed: Boolean(stat) };
+}
+
+async function validatePublicationInventory(fs, root, manifest) {
+  const files = new Set(['project.json', ...collectDeclaredPackageEntries(manifest).map(({ path: relative }) => relative)]);
+  const directories = new Set();
+  for (const file of files) {
+    const segments = file.split('/');
+    while (segments.length > 1) { segments.pop(); directories.add(segments.join('/')); }
+  }
+  async function inspect(relative = '') {
+    for (const entry of await fs.readdir(path.join(root, relative), { withFileTypes: true })) {
+      const child = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink()) throw new Error(`Existing output contains a link: ${child}`);
+      if (entry.isDirectory() && directories.has(child)) await inspect(child);
+      else if (entry.isFile() && files.has(child)) files.delete(child);
+      else throw new Error(`Existing output contains unmanaged or non-regular content: ${child}`);
+    }
+  }
+  await inspect();
+  if (files.size) throw new Error(`Existing output is missing declared inventory: ${[...files].join(', ')}`);
 }
 
 async function packageFile(fs, root, relative) {

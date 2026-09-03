@@ -5,8 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createOvertureFreezePlan, computeDeclaredPackageFingerprint } from '../editor/publish/freeze-plan.js';
+import { loadProject } from '../src/project/project-loader.js';
+import { INSTALLED_CAPABILITY_REGISTRY } from '../src/capabilities/installed-capabilities.js';
 import * as freeze from '../scripts/lib/freeze-project.mjs';
 
 const BOUNDS = [106.58, 11.1, 106.62, 11.15];
@@ -14,6 +16,7 @@ const SOURCE = 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com
 const METADATA = { name: 'Overture buildings', vector_layers: [{ id: 'building', fields: {} }, { id: 'building_part', fields: {} }] };
 const HEADER = { tile_compression: 'gzip', tile_type: 'mvt', minzoom: 0, maxzoom: 14, bounds: BOUNDS, center: [106.6, 11.125, 11] };
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const SNAPSHOT_PATH = 'assets/context/overture-buildings.pmtiles';
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'overture-freeze-test-'));
@@ -94,9 +97,28 @@ function nativeBoundary(f, options = {}) {
 async function previousPublication(f) {
   const prior = structuredClone(f.manifest);
   prior.capabilities[0].settings.buildingSource = 'project-snapshot';
-  await fs.mkdir(f.outputDir);
-  await fs.writeFile(path.join(f.outputDir, 'project.json'), JSON.stringify(prior));
-  await fs.writeFile(path.join(f.outputDir, 'previous.txt'), 'previous publication');
+  const archive = Buffer.from('previous publication');
+  prior.assets['overture-buildings-snapshot'] = { type: 'pmtiles', src: `./${SNAPSHOT_PATH}`,
+    mediaType: 'application/vnd.pmtiles', required: true, attribution: ['overture-maps'] };
+  prior.attribution['overture-maps'] = { name: 'Overture Maps Foundation — Buildings', license: 'ODbL-1.0' };
+  prior.capabilities[0].settings.snapshot = { asset: 'overture-buildings-snapshot', theme: 'buildings', bounds: BOUNDS,
+    sha256: digest(archive), byteLength: archive.length, generator: 'go-pmtiles', generatorVersion: '1.31.2',
+    generatedAt: '2026-09-03T00:00:00.000Z' };
+  f.previousEntries = [
+    ...f.entries.filter(({ path: relative }) => relative !== 'project.json'),
+    { path: 'project.json', bytes: Buffer.from(JSON.stringify(prior)) },
+    { path: SNAPSHOT_PATH, bytes: archive }
+  ];
+  for (const entry of f.previousEntries) {
+    await fs.mkdir(path.dirname(path.join(f.outputDir, entry.path)), { recursive: true });
+    await fs.writeFile(path.join(f.outputDir, entry.path), entry.bytes);
+  }
+  // Replacement/rollback fixtures themselves must be complete production-valid packages.
+  await loadProject(pathToFileURL(path.join(f.outputDir, 'project.json')), {
+    capabilityRegistry: INSTALLED_CAPABILITY_REGISTRY,
+    fetchImpl: async (url) => new Response(await fs.readFile(fileURLToPath(url)))
+  });
+  f.previousInventory = await directorySnapshot(f.outputDir);
 }
 
 async function updateManifest(f, mutate) {
@@ -108,7 +130,8 @@ async function updateManifest(f, mutate) {
 }
 
 async function assertPreserved(f) {
-  assert.equal(await fs.readFile(path.join(f.outputDir, 'previous.txt'), 'utf8'), 'previous publication');
+  for (const entry of f.previousEntries) assert.deepEqual(await fs.readFile(path.join(f.outputDir, entry.path)), entry.bytes);
+  assert.deepEqual(await directorySnapshot(f.outputDir), f.previousInventory);
   for (const entry of f.entries) assert.deepEqual(await fs.readFile(path.join(f.projectDir, entry.path)), entry.bytes);
   assert.deepEqual((await fs.readdir(f.root)).sort(), ['authoring', 'freeze-plan.json', 'frozen']);
 }
@@ -271,10 +294,15 @@ test('swap failure restores previous publication and removes staging', async (t)
   await previousPublication(f);
   let failed = false;
   const faultFs = { ...fs, async rename(from, to) {
-    if (to === f.outputDir && !failed) { failed = true; throw new Error('injected swap failure'); }
+    if (to === f.outputDir && !failed) {
+      failed = true;
+      // Real asynchronous filesystem failure, without moving the staged package.
+      return fs.rename(from, path.join(f.root, 'nonexistent-parent', 'output'));
+    }
     return fs.rename(from, to);
   } };
-  await assert.rejects(freeze.freezeProject({ ...f, ...nativeBoundary(f), fs: faultFs }), /swap failure/i);
+  await assert.rejects(freeze.freezeProject({ ...f, ...nativeBoundary(f), fs: faultFs }), { code: 'ENOENT' });
+  assert.equal(failed, true);
   await assertPreserved(f);
 });
 
@@ -286,11 +314,15 @@ test('successful replacement waits for production validation and never eagerly r
   const observeFs = { ...fs,
     async readFile(file, ...args) {
       assert.equal(String(file).endsWith('.pmtiles'), false, 'PMTiles must be streamed for hash, not read by production fileFetch');
-      if (String(file).endsWith(path.join('stories', 'main.story.json')) && !String(file).startsWith(f.projectDir)) {
+      if (String(file).endsWith(path.join('stories', 'main.story.json')) && String(file).startsWith(path.join(f.root, '.frozen.staging-'))) {
         stagedStoryRead = true;
-        assert.equal(await fs.readFile(path.join(f.outputDir, 'previous.txt'), 'utf8'), 'previous publication');
+        assert.equal(await fs.readFile(path.join(f.outputDir, SNAPSHOT_PATH), 'utf8'), 'previous publication');
       }
       return fs.readFile(file, ...args);
+    },
+    async open(file, ...args) {
+      assert.notEqual(file, path.join(f.outputDir, SNAPSHOT_PATH), 'Prior archive must not be rehashed for classification');
+      return fs.open(file, ...args);
     },
     async rename(from, to) {
       if (to === f.outputDir) { assert.equal(stagedStoryRead, true); published = true; }
@@ -299,7 +331,7 @@ test('successful replacement waits for production validation and never eagerly r
   };
   await freeze.freezeProject({ ...f, ...nativeBoundary(f), fs: observeFs });
   assert.equal(published, true);
-  await assert.rejects(fs.stat(path.join(f.outputDir, 'previous.txt')), { code: 'ENOENT' });
+  assert.equal(await fs.readFile(path.join(f.outputDir, SNAPSHOT_PATH), 'utf8'), 'verified snapshot bytes');
   assert.deepEqual((await fs.readdir(f.root)).sort(), ['authoring', 'freeze-plan.json', 'frozen']);
 });
 
@@ -522,7 +554,7 @@ test('prior publication changed into an authoring alias during extraction is not
   } });
   await assert.rejects(freeze.freezeProject({ ...f, ...native }), /output|publication|link|changed/i);
   assert.equal((await fs.lstat(f.outputDir)).isSymbolicLink(), true);
-  assert.equal(await fs.readFile(path.join(displaced, 'previous.txt'), 'utf8'), 'previous publication');
+  assert.equal(await fs.readFile(path.join(displaced, SNAPSHOT_PATH), 'utf8'), 'previous publication');
   for (const entry of f.entries) assert.deepEqual(await fs.readFile(path.join(f.projectDir, entry.path)), entry.bytes);
 });
 
@@ -540,9 +572,9 @@ for (const input of ['plan', 'retained archive']) test(`output cannot encompass 
     await fs.writeFile(sourceArchive, 'retained source');
     overrides = { sourceArchive, sourceSha256: digest('retained source') };
   }
-  await assert.rejects(freeze.freezeProject({ ...f, ...native, ...overrides }), /output.*(plan|source|archive)/i);
+  await assert.rejects(freeze.freezeProject({ ...f, ...native, ...overrides }), /output.*(plan|source|archive|unmanaged)/i);
   assert.equal(native.ensured, 0);
-  assert.equal(await fs.readFile(path.join(f.outputDir, 'previous.txt'), 'utf8'), 'previous publication');
+  assert.equal(await fs.readFile(path.join(f.outputDir, SNAPSHOT_PATH), 'utf8'), 'previous publication');
 });
 
 test('metadata object key order and absent vector_layers preserve native equality semantics', async (t) => {
@@ -569,4 +601,68 @@ test('omitted authoring release matches the existing C1 and Prepare Freeze defau
   assert.equal(frozen.capabilities[0].settings.overtureRelease, '2026-08-19.0');
   assert.equal(native.calls[0][1], SOURCE);
   assert.deepEqual(await fs.readFile(path.join(f.projectDir, 'project.json')), f.entries[0].bytes);
+});
+
+async function directorySnapshot(root, prefix = '') {
+  const entries = [];
+  for (const entry of await fs.readdir(path.join(root, prefix), { withFileTypes: true })) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const file = path.join(root, relative);
+    if (entry.isSymbolicLink()) entries.push([relative, 'link', await fs.readlink(file)]);
+    else if (entry.isDirectory()) entries.push([relative, 'directory'], ...await directorySnapshot(root, relative));
+    else entries.push([relative, 'file', await fs.readFile(file)]);
+  }
+  return entries.sort(([left], [right]) => left.localeCompare(right));
+}
+
+for (const invalid of ['marker-only', 'invalid snapshot', 'invalid Story', 'missing declared asset',
+  'unmanaged file', 'unmanaged directory', 'unmanaged link', 'declared directory link']) {
+  test(`prior output ${invalid} is preserved and rejected before tool setup`, async (t) => {
+    const f = await fixture(t);
+    if (invalid === 'marker-only') {
+      await fs.mkdir(f.outputDir);
+      await fs.writeFile(path.join(f.outputDir, 'project.json'), JSON.stringify({ id: f.manifest.id,
+        capabilities: [{ id: 'urban-context-v1', settings: { buildingSource: 'project-snapshot' } }] }));
+      await fs.writeFile(path.join(f.outputDir, 'unrelated.txt'), 'must survive');
+    } else {
+      await previousPublication(f);
+      if (invalid === 'invalid snapshot') {
+        const manifest = JSON.parse(await fs.readFile(path.join(f.outputDir, 'project.json')));
+        delete manifest.capabilities[0].settings.snapshot;
+        await fs.writeFile(path.join(f.outputDir, 'project.json'), JSON.stringify(manifest));
+      } else if (invalid === 'invalid Story') await fs.writeFile(path.join(f.outputDir, 'stories/main.story.json'), '{}');
+      else if (invalid === 'missing declared asset') await fs.unlink(path.join(f.outputDir, 'assets/photo.png'));
+      else if (invalid === 'unmanaged file') await fs.writeFile(path.join(f.outputDir, '.private-notes'), 'must survive');
+      else if (invalid === 'unmanaged directory') await fs.mkdir(path.join(f.outputDir, 'unrelated-empty'));
+      else if (invalid === 'unmanaged link') await fs.symlink(f.projectDir, path.join(f.outputDir, 'unrelated-link'), 'junction');
+      else {
+        await fs.rename(path.join(f.outputDir, 'assets'), path.join(f.root, 'linked-assets'));
+        await fs.symlink(path.join(f.root, 'linked-assets'), path.join(f.outputDir, 'assets'), 'junction');
+      }
+    }
+    const before = await directorySnapshot(f.outputDir);
+    const native = nativeBoundary(f);
+    await assert.rejects(freeze.freezeProject({ ...f, ...native }), /output|publication|inventory/i);
+    assert.equal(native.ensured, 0);
+    assert.equal(native.calls.length, 0);
+    assert.deepEqual(await directorySnapshot(f.outputDir), before);
+    for (const entry of f.entries) assert.deepEqual(await fs.readFile(path.join(f.projectDir, entry.path)), entry.bytes);
+  });
+}
+
+for (const change of ['unmanaged file', 'invalid Story']) test(`prior output ${change} introduced during extraction is preserved`, async (t) => {
+  const f = await fixture(t);
+  await previousPublication(f);
+  let before;
+  const native = nativeBoundary(f, { beforeCommand: async (args) => {
+    if (args[0] === 'extract' && !args.includes('--dry-run')) {
+      if (change === 'unmanaged file') await fs.writeFile(path.join(f.outputDir, 'do-not-delete.txt'), 'added during extraction');
+      else await fs.writeFile(path.join(f.outputDir, 'stories/main.story.json'), '{}');
+      before = await directorySnapshot(f.outputDir);
+    }
+  } });
+  await assert.rejects(freeze.freezeProject({ ...f, ...native }), /output|publication|inventory/i);
+  assert.equal(native.ensured, 1, 'initial production-valid output must pass the first classification');
+  assert.deepEqual(await directorySnapshot(f.outputDir), before);
+  assert.deepEqual((await fs.readdir(f.root)).sort(), ['authoring', 'freeze-plan.json', 'frozen']);
 });
