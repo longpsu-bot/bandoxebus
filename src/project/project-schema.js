@@ -4,6 +4,15 @@ import { projectError } from './project-error.js';
 import { validateManifestResourcePaths } from './path-resolver.js';
 
 const RESERVED_CAPABILITIES = new Set(['core-content-v1', 'core-map-v1']);
+const IMAGE_MEDIA_TYPES = new Set([
+  'image/avif',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/svg+xml',
+  'image/webp'
+]);
+const PMTILES_MEDIA_TYPE = 'application/vnd.pmtiles';
 
 function deepFreeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -53,12 +62,25 @@ function validateInitialView(map) {
   }
 }
 
+function validateAssetKinds(assets) {
+  for (const [id, asset] of Object.entries(assets)) {
+    const path = `$.assets.${id}`;
+    if (asset.type === 'image' && !IMAGE_MEDIA_TYPES.has(asset.mediaType)) {
+      fail(`${path}.mediaType`, 'Image asset media type is invalid.');
+    }
+    if (asset.type === 'pmtiles' && asset.mediaType !== PMTILES_MEDIA_TYPE) {
+      fail(`${path}.mediaType`, 'PMTiles asset media type must be application/vnd.pmtiles.');
+    }
+  }
+}
+
 export function validateProjectManifest(manifest) {
   const issues = validateSchema(manifest, PROJECT_MANIFEST_V1_SCHEMA);
   if (issues.length) throw projectError('PROJECT_MANIFEST_INVALID', issues[0]);
   validateStoryIds(manifest.stories.items);
   validateReservedCapabilities(manifest.capabilities);
   validateInitialView(manifest.map);
+  validateAssetKinds(manifest.assets);
   try {
     validateManifestResourcePaths(manifest);
   } catch (error) {
