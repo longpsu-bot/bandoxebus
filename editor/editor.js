@@ -522,10 +522,11 @@ export function createEditor({
       id,
       draftStore.get(descriptor.src.replace(/^\.\//, ''))
     ]));
-    const assetBytes = Object.fromEntries(Object.entries(manifest.assets ?? {}).map(([id, descriptor]) => [
-      id,
-      packageStore.get(descriptor.src.replace(/^\.\//, ''))?.currentBytes.slice()
-    ]));
+    const assetBytes = Object.fromEntries(Object.entries(manifest.assets ?? {}).flatMap(([id, descriptor]) => {
+      if (descriptor.type !== 'image') return [];
+      const bytes = packageStore.get(descriptor.src.replace(/^\.\//, ''))?.currentBytes;
+      return bytes instanceof Uint8Array ? [[id, bytes.slice()]] : [];
+    }));
     const stories = Object.fromEntries((manifest.stories?.items ?? []).map(({ id, src }) => [
       id,
       draftStore.get(src.replace(/^\.\//, ''))
