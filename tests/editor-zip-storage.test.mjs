@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 import { createPackageStore } from '../editor/core/package-store.js';
 import { exportPackageZip } from '../editor/editor.js';
-import { createZipStorageAdapter } from '../editor/storage/adapters.js';
+import { createZipStorageAdapter, exportProjectPackageZip } from '../editor/storage/adapters.js';
 import {
   Unzip,
   UnzipInflate,
@@ -63,6 +63,39 @@ function manifest({ story = './stories/main.story.json', assets = {} } = {}) {
 }
 
 const story = bytes('{"schemaVersion":"1.1","id":"main","title":"Main","states":[]}\n');
+
+test('explicit ZIP export materializes lazy PMTiles once and round-trips exact bytes', async () => {
+  const path = 'assets/context/overture-buildings.pmtiles';
+  const pmtilesBytes = new Uint8Array([80, 77, 84, 105, 108, 101, 115, 3, 0, 255, 128]);
+  let fullReads = 0;
+  const file = new File([pmtilesBytes], 'overture-buildings.pmtiles', { type: 'application/vnd.pmtiles' });
+  const originalArrayBuffer = file.arrayBuffer.bind(file);
+  file.arrayBuffer = () => { fullReads += 1; return originalArrayBuffer(); };
+  const store = createPackageStore({
+    origin: { kind: 'folder', label: 'Frozen folder' },
+    entries: [
+      { path: 'project.json', bytes: manifest({ assets: {
+        'overture-buildings-snapshot': { type: 'pmtiles', src: `./${path}`, mediaType: 'application/vnd.pmtiles' }
+      } }), mediaType: 'application/json', kind: 'manifest' },
+      { path: 'stories/main.story.json', bytes: story, mediaType: 'application/json', kind: 'story' },
+      { path, file, mediaType: 'application/vnd.pmtiles', kind: 'asset', managed: true }
+    ]
+  });
+  assert.equal(fullReads, 0);
+  const exporters = [exportProjectPackageZip, (value) => createZipStorageAdapter().export(value)];
+  for (const [index, exportZip] of exporters.entries()) {
+    const zipBytes = await exportZip(store);
+    assert.equal(fullReads, index + 1);
+    const opened = await createZipStorageAdapter({ zipBytes }).open();
+    const entry = opened.entries.find((entry) => entry.path === path);
+    assert.deepEqual(entry.bytes, pmtilesBytes);
+    assert.equal(entry.kind, 'asset');
+    assert.equal(entry.mediaType, 'application/vnd.pmtiles');
+    assert.equal(entry.file, undefined);
+    assert.equal(store.get(path).file, file);
+    assert.equal(store.dirty, false);
+  }
+});
 
 async function unzipForTest(zipBytes) {
   const result = Object.create(null);

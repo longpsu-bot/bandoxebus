@@ -10,6 +10,73 @@ permissions:
   contents: read
 
 jobs:
+  overture-pmtiles-c2-certification:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'RUN_MAP_STORY_BROWSER_GATE=c2')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact opted-in PR head without persisted credentials
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Check credential-free C2 harness behavior
+        run: node --test tests/overture-pmtiles-c2-certification.test.mjs
+      - name: Run real C2 Freeze and same-runner browser gates
+        shell: bash
+        env:
+          EXPECTED_C2_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/map-story-c2-evidence" "$RUNNER_TEMP/map-story-c2-tool-cache" .cache/map-story-tools
+          ln -s "$RUNNER_TEMP/map-story-c2-tool-cache" .cache/map-story-tools/pmtiles
+          python -m http.server 8080 --bind 127.0.0.1 >"$RUNNER_TEMP/map-story-c2-evidence/http.log" 2>&1 &
+          SERVER_PID=$!
+          BROWSER="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$BROWSER" ]; then
+            echo 'No Chromium-compatible browser found on runner.'
+            kill "$SERVER_PID" 2>/dev/null || true
+            exit 1
+          fi
+          "$BROWSER" \
+            --headless=new \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --enable-webgl \
+            --ignore-gpu-blocklist \
+            --use-gl=angle \
+            --use-angle=swiftshader \
+            --remote-debugging-address=127.0.0.1 \
+            --remote-debugging-port=9222 \
+            --remote-allow-origins='*' \
+            --user-data-dir="$RUNNER_TEMP/map-story-c2-profile" \
+            http://127.0.0.1:8080/ >"$RUNNER_TEMP/map-story-c2-evidence/chromium.log" 2>&1 &
+          BROWSER_PID=$!
+          trap 'kill "$BROWSER_PID" "$SERVER_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/ >/dev/null && curl --fail --silent http://127.0.0.1:9222/json/version >"$RUNNER_TEMP/map-story-c2-evidence/browser-version.json"; then
+              break
+            fi
+            sleep 0.5
+          done
+          curl --fail --silent http://127.0.0.1:9222/json/version >/dev/null
+          node scripts/overture-pmtiles-c2-runner.mjs 2>&1 | tee "$RUNNER_TEMP/map-story-c2-evidence/runner.log"
+      - name: Preserve C2 artifacts and failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: overture-pmtiles-c2-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/map-story-c2-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
   test:
     runs-on: ubuntu-latest
     steps:

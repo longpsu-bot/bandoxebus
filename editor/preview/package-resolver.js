@@ -1,4 +1,4 @@
-import { PREVIEW_PROTOCOL_VERSION, validatePreviewSnapshot } from './bridge.js';
+import { PREVIEW_PROTOCOL_VERSION, PREVIEW_CAMERA_SETTLEMENT_TIMEOUT_MS, validatePreviewSnapshot } from './bridge.js';
 import { createSceneAuthoringAdapter } from '../../src/scene/scene-authoring-adapter.js';
 import { geoJsonBounds } from '../../src/map/focus-registry.js';
 
@@ -11,7 +11,7 @@ export function createPackageFetch(snapshot, {
   const packageBase = new URL(baseUrl);
   const entries = new Map(snapshot.entries.map((entry) => [entry.path, {
     ...entry,
-    bytes: entry.bytes.slice()
+    bytes: entry.bytes?.slice()
   }]));
   const manifestUrl = new URL('project.json', packageBase);
 
@@ -27,7 +27,7 @@ export function createPackageFetch(snapshot, {
     const path = decodeURIComponent(url.pathname.slice(basePath.length));
     const entry = entries.get(path);
     if (!entry) return new Response('Not found', { status: 404 });
-    return new Response(entry.bytes.slice(), {
+    return new Response(entry.bytes?.slice() ?? entry.file, {
       status: 200,
       headers: { 'content-type': entry.mediaType }
     });
@@ -51,7 +51,7 @@ export function createPreviewPackageResolver(snapshot, {
 } = {}) {
   const transport = createPackageFetch(snapshot, baseUrl === undefined ? {} : { baseUrl });
   const packageBase = new URL('.', transport.manifestUrl);
-  const entries = new Map(snapshot.entries.map((entry) => [entry.path, entry]));
+  const entries = new Map(snapshot.entries.map((entry) => [entry.path, { ...entry, bytes: entry.bytes?.slice() }]));
   const objectUrls = new Map();
   let revoked = false;
 
@@ -80,6 +80,25 @@ export function createPreviewPackageResolver(snapshot, {
     return objectUrl;
   }
 
+  function resolvePmtilesAssetFile(url, { id, descriptor } = {}) {
+    if (revoked) throw new Error('Preview PMTiles File resolver has been revoked.');
+    const resolved = new URL(url, transport.manifestUrl);
+    if (resolved.origin !== packageBase.origin || !resolved.pathname.startsWith(packageBase.pathname)) {
+      throw new TypeError(`Asset ${id ?? ''} is outside the preview package.`);
+    }
+    const path = decodeURIComponent(resolved.pathname.slice(packageBase.pathname.length));
+    const entry = entries.get(path);
+    if (!entry) throw new TypeError(`Asset ${id ?? path} is absent from the preview package.`);
+    if (entry.kind !== 'asset' || descriptor?.type !== 'pmtiles'
+      || entry.mediaType !== 'application/vnd.pmtiles') {
+      throw new TypeError(`Preview asset ${id ?? path} must be a declared PMTiles asset.`);
+    }
+    if (descriptor.mediaType !== entry.mediaType) {
+      throw new TypeError(`Preview asset ${id ?? path} media type does not match its declared media type.`);
+    }
+    return entry.file ?? new File([entry.bytes], path.split('/').at(-1), { type: entry.mediaType });
+  }
+
   function revoke() {
     if (revoked) return;
     revoked = true;
@@ -87,7 +106,7 @@ export function createPreviewPackageResolver(snapshot, {
     objectUrls.clear();
   }
 
-  return { ...transport, resolveAssetUrl, revoke };
+  return { ...transport, resolveAssetUrl, resolvePmtilesAssetFile, revoke };
 }
 
 function boundedText(value, fallback, maxLength) {
@@ -134,7 +153,7 @@ function validCommand(data) {
   if (name === 'authoring-mode') return exactKeys(payload, ['mode']) && ['select', 'map'].includes(payload.mode);
   if (name === 'authoring-selection') return exactKeys(payload, ['id'])
     && (payload.id === null || (typeof payload.id === 'string' && /^[a-z][a-z0-9-]*$/.test(payload.id)));
-  if (name === 'restore-scene-camera') return exactKeys(payload, ['index'])
+  if (['restore-scene-camera', 'capture-scene-camera'].includes(name)) return exactKeys(payload, ['index'])
     && Number.isInteger(payload.index) && payload.index >= 0;
   if (name === 'locate-project-layer') return exactKeys(payload, ['datasetId'])
     && typeof payload.datasetId === 'string' && /^[a-z][a-z0-9-]*$/.test(payload.datasetId);
@@ -166,6 +185,78 @@ export function startEditorPreviewHost({
   let activeAuthoringAdapter = null;
   let selectedOverlayId = null;
   let authoringMode = 'select';
+  const cameraCaptures = new Set();
+
+  function cancelCameraCaptures() {
+    for (const controller of cameraCaptures) controller.abort(new Error('Preview replaced or disposed during camera capture.'));
+  }
+
+  async function settleCamera(map, signal) {
+    await Promise.resolve();
+    signal.throwIfAborted();
+    if (map.isMoving?.()) {
+      await new Promise((resolve, reject) => {
+        const finish = (error) => {
+          clearTimeout(timer);
+          map.off('moveend', moved);
+          signal.removeEventListener('abort', aborted);
+          if (error) reject(error); else resolve();
+        };
+        const moved = () => finish();
+        const aborted = () => finish(signal.reason);
+        const timer = setTimeout(() => finish(new Error('Production camera settlement timed out.')), PREVIEW_CAMERA_SETTLEMENT_TIMEOUT_MS);
+        map.on('moveend', moved);
+        signal.addEventListener('abort', aborted, { once: true });
+      });
+    }
+    signal.throwIfAborted();
+  }
+
+  async function captureSceneCamera(data) {
+    const controller = new AbortController();
+    cameraCaptures.add(controller);
+    const { signal } = controller;
+    const runtime = activeRuntime;
+    const map = runtime?.map;
+    try {
+      if (disposed || activeSnapshot?.revision !== data.revision || !runtime?.shell?.activateScene || !map) {
+        throw new Error('Production preview is not ready for camera capture.');
+      }
+      // Fit/focus actions must see the exact parent-selected viewport, not the old map size.
+      map.resize();
+      if (runtime.storyRuntime) {
+        const index = data.payload.payload.index;
+        if (!runtime.storyRuntime.definition.states[index]) throw new RangeError(`Unknown Scene index: ${index}.`);
+        // goTo is intentionally a no-op for the current Scene. Replay the production lifecycle
+        // from its authored initial camera so working pans and inherited actions cannot leak in.
+        runtime.storyRuntime.deactivate();
+        if (runtime.project?.map?.initialView) map.jumpTo(runtime.project.map.initialView);
+        for (let step = 0; step <= index; step += 1) {
+          signal.throwIfAborted();
+          runtime.shell.activateScene(step, { animate: false });
+          if (step === index) map.resize();
+          // Legacy map.focus can still animate and inherit omitted fields from its predecessor.
+          await settleCamera(map, signal);
+        }
+      } else {
+        runtime.shell.activateScene(data.payload.payload.index, { animate: false });
+        map.resize();
+        await settleCamera(map, signal);
+      }
+      signal.throwIfAborted();
+      const center = map.getCenter();
+      const bounds = map.getBounds();
+      post('freeze-camera', data.revision, {
+        index: data.payload.payload.index, center: [center.lng, center.lat],
+        zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(),
+        bounds: [[bounds.getSouthWest().lng, bounds.getSouthWest().lat], [bounds.getNorthEast().lng, bounds.getNorthEast().lat]]
+      }, data.requestId);
+    } catch (error) {
+      post('runtime-error', data.revision, toRuntimeErrorPayload(error), data.requestId);
+    } finally {
+      cameraCaptures.delete(controller);
+    }
+  }
 
   function post(type, revision = activeSnapshot?.revision ?? 0, payload = {}, requestId = null) {
     windowRef.parent?.postMessage({
@@ -211,7 +302,13 @@ export function startEditorPreviewHost({
       const runtime = await startProductionApplication({
         manifestUrl: resolver.manifestUrl,
         fetchImpl: resolver.fetchImpl,
-        resolveAssetUrl: resolver.resolveAssetUrl,
+        resolveAssetUrl(url, context) {
+          // Keep archive URLs package-relative; runtime reads them through the File seam.
+          if (context?.descriptor?.type === 'pmtiles'
+            && context.descriptor.mediaType === 'application/vnd.pmtiles') return url;
+          return resolver.resolveAssetUrl(url, context);
+        },
+        resolvePmtilesAssetFile: resolver.resolvePmtilesAssetFile,
         owner,
         replaceExisting: true
       });
@@ -274,6 +371,7 @@ export function startEditorPreviewHost({
   }
 
   function start(snapshot, requestId = null) {
+    cancelCameraCaptures();
     const requestedSnapshot = structuredClone(snapshot);
     latestRequestedSnapshot = requestedSnapshot;
     const operation = replacement.then(() => replace(requestedSnapshot, requestId));
@@ -314,6 +412,7 @@ export function startEditorPreviewHost({
       }
     }
     else if (name === 'restore-scene-camera') activeRuntime?.shell?.restoreSceneCamera?.(payload.index);
+    else if (name === 'capture-scene-camera') void captureSceneCamera(data);
     else if (name === 'locate-project-layer') {
       const resource = activeRuntime?.project?.resources?.get?.(payload.datasetId);
       if (!resource || resource.descriptor?.type !== 'geojson') {
@@ -378,6 +477,7 @@ export function startEditorPreviewHost({
 
   function dispose() {
     disposed = true;
+    cancelCameraCaptures();
     windowRef.removeEventListener('message', handleMessage);
     replacement = replacement.then(async () => {
       destroyAuthoringAdapter();

@@ -87,7 +87,7 @@ test('trusted installed code loads Route 61-2 adapter only for the explicit sett
   assert.equal(await selectUrbanContextAdapter({ adapter: 'other' }, context(), loadAdapter), null);
   assert.equal(await selectUrbanContextAdapter({ adapter: 'route-61-2-current' }, context(), loadAdapter), adapter);
   assert.deepEqual(loads, ['load', 'load']);
-  assert.deepEqual(configured, [{ buildingSource: 'local-geojson', overtureRelease: '2026-08-19.0' }]);
+  assert.deepEqual(configured, [{ buildingSource: 'local-geojson', overtureRelease: '2026-08-19.0', archiveBinding: null }]);
 });
 
 test('route-first and urban-first capability connections preserve one configured adapter per map', async () => {
@@ -115,9 +115,47 @@ test('route-first and urban-first capability connections preserve one configured
     assert.equal(routeAdapter, getRoute612RuntimeAdapter({ map }), order);
     assert.deepEqual(routeAdapter.state.urbanContextConfig, {
       buildingSource: 'overture-pmtiles',
-      overtureRelease: '2026-08-19.0'
+      overtureRelease: '2026-08-19.0',
+      archiveBinding: {
+        kind: 'url', source: 'overture-pmtiles', release: '2026-08-19.0', bounds: null,
+        url: 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles',
+        key: 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles'
+      }
     });
   }
+});
+
+test('snapshot capability resolves the File binding while route reconnection preserves delegates and settings', async () => {
+  const events = [];
+  const map = { loaded: () => false, once() {}, getLayer() { return false; } };
+  const file = new File(['snapshot'], 'overture-buildings.pmtiles');
+  const settings = Object.freeze({
+    adapter: 'route-61-2-current', buildingSource: 'project-snapshot', overtureRelease: '2026-08-19.0',
+    snapshot: Object.freeze({ asset: 'snapshot', sha256: 'a'.repeat(64), bounds: Object.freeze([106.59, 11.11, 106.61, 11.14]) })
+  });
+  const urbanContext = context({
+    map, settings,
+    resources: new Map([['snapshot', Object.freeze({
+      id: 'snapshot', descriptor: Object.freeze({ type: 'pmtiles', mediaType: 'application/vnd.pmtiles' }),
+      url: new URL('https://r2.example.test/snapshot.pmtiles')
+    })]]),
+    resolvePmtilesAssetFile: () => file,
+    setContextMode: (mode) => events.push(['urban', mode])
+  });
+  const urbanAdapter = await selectUrbanContextAdapter(settings, urbanContext);
+  const binding = urbanAdapter.state.urbanContextConfig.archiveBinding;
+  assert.equal(binding.kind, 'file');
+  assert.equal(binding.file, file);
+  assert.deepEqual(binding.bounds, [106.59, 11.11, 106.61, 11.14]);
+  const routeAdapter = await selectRouteComparisonAdapter({ adapter: 'route-61-2-current' }, context({
+    map, setMode: (mode) => events.push(['route', mode])
+  }));
+  assert.equal(routeAdapter, urbanAdapter);
+  assert.equal(routeAdapter.state.urbanContextConfig.archiveBinding, binding);
+  routeAdapter.setMode('compare');
+  routeAdapter.setContextMode('industrial-context');
+  assert.deepEqual(events, [['route', 'compare'], ['urban', 'industrial-context']]);
+  assert.equal(urbanContext.settings, settings);
 });
 
 test('urban context configuration is closed and unavailable after adapter destruction', () => {
@@ -134,44 +172,71 @@ test('urban context configuration is closed and unavailable after adapter destru
   }), /destroyed/i);
 });
 
-test('online adapter configuration does not fetch the local benchmark', async () => {
-  let localFetches = 0;
-  const sources = new Map();
-  const layers = new Map();
-  const mapElement = { dataset: {}, setAttribute() {} };
-  const map = {
-    loaded: () => true,
-    getContainer: () => mapElement,
-    getSource: (id) => sources.get(id),
-    addSource(id, source) { sources.set(id, source); },
-    getLayer: (id) => layers.get(id),
-    addLayer(layer) { layers.set(layer.id, layer); },
-    setLayoutProperty(id, property, value) { layers.get(id).layout = { ...layers.get(id).layout, [property]: value }; },
-    setPaintProperty() {},
-    getStyle: () => ({ layers: [...layers.values()] }),
-    isSourceLoaded: () => true,
-    querySourceFeatures: () => [],
-    once() {},
-    on() {},
-    off() {}
-  };
-  const resources = new Map([
-    ['existing-route', { descriptor: { role: 'route.existing' }, value: line([[106.6, 11], [106.61, 11.01]]) }],
-    ['proposed-route', { descriptor: { role: 'route.proposed' }, value: line([[106.6, 11], [106.62, 11.02]]) }],
-    ['industrial-zone', { descriptor: { role: 'context.area' }, value: { type: 'FeatureCollection', features: [zoneFeature()] } }]
-  ]);
-  const adapter = createRoute612RuntimeAdapter({
-    map,
-    resources,
-    documentRef: { getElementById: () => mapElement },
-    trustedFetch: async () => { localFetches += 1; return { ok: true, async json() { return null; } }; }
-  });
-  adapter.configureUrbanContext({ buildingSource: 'overture-pmtiles', overtureRelease: '2026-08-19.0' });
-  await adapter.ready;
+for (const buildingSource of ['overture-pmtiles', 'project-snapshot']) {
+  test(`${buildingSource} adapter forwards its binding through activation without fetching the local benchmark`, async () => {
+    let localFetches = 0;
+    const sources = new Map();
+    const layers = new Map();
+    const mapElement = { dataset: {}, setAttribute() {} };
+    const map = {
+      loaded: () => true,
+      getContainer: () => mapElement,
+      getSource: (id) => sources.get(id),
+      addSource(id, source) { sources.set(id, source); },
+      getLayer: (id) => layers.get(id),
+      addLayer(layer) { layers.set(layer.id, layer); },
+      setLayoutProperty(id, property, value) { layers.get(id).layout = { ...layers.get(id).layout, [property]: value }; },
+      setPaintProperty() {},
+      getStyle: () => ({ layers: [...layers.values()] }),
+      isSourceLoaded: () => true,
+      querySourceFeatures: () => [],
+      once() {},
+      on() {},
+      off() {}
+    };
+    const resources = new Map([
+      ['existing-route', { descriptor: { role: 'route.existing' }, value: line([[106.6, 11], [106.61, 11.01]]) }],
+      ['proposed-route', { descriptor: { role: 'route.proposed' }, value: line([[106.6, 11], [106.62, 11.02]]) }],
+      ['industrial-zone', { descriptor: { role: 'context.area' }, value: { type: 'FeatureCollection', features: [zoneFeature()] } }]
+    ]);
+    const file = new File(['snapshot'], 'overture-buildings.pmtiles');
+    const settings = { adapter: 'route-61-2-current', buildingSource, overtureRelease: '2026-08-19.0' };
+    if (buildingSource === 'project-snapshot') {
+      settings.snapshot = { asset: 'snapshot', bounds: [106.59, 11.11, 106.61, 11.14], sha256: 'a'.repeat(64) };
+      resources.set('snapshot', {
+        id: 'snapshot', descriptor: { type: 'pmtiles', mediaType: 'application/vnd.pmtiles' },
+        url: new URL('https://r2.example.test/snapshot.pmtiles')
+      });
+    }
+    const archiveUrl = buildingSource === 'project-snapshot'
+      ? `overture-buildings-${'a'.repeat(64)}.pmtiles`
+      : 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles';
+    const adapter = await selectUrbanContextAdapter(settings, {
+      map,
+      resources,
+      resolvePmtilesAssetFile: () => file,
+      ensureArchive: async (maplibregl, binding) => {
+        assert.equal(binding.source, buildingSource);
+        if (buildingSource === 'project-snapshot') assert.equal(binding.file, file);
+        else assert.equal(binding.url, archiveUrl);
+        return { archiveUrl };
+      },
+      documentRef: { getElementById: () => mapElement },
+      trustedFetch: async () => { localFetches += 1; return { ok: true, async json() { return null; } }; }
+    });
+    await adapter.ready;
 
-  assert.equal(localFetches, 0);
-  assert.equal(sources.has('overture-industrial-buildings'), false);
-});
+    assert.equal(localFetches, 0);
+    assert.equal(sources.has('overture-industrial-buildings'), false);
+    await adapter.setContextMode('industrial-context');
+    assert.equal(sources.get('overture-industrial-buildings').url, `pmtiles://${archiveUrl}`);
+    assert.equal(layers.get('overture-industrial-buildings-3d').layout.visibility, 'visible');
+    if (buildingSource === 'project-snapshot') {
+      assert.deepEqual(sources.get('overture-industrial-buildings').bounds, [106.59, 11.11, 106.61, 11.14]);
+    }
+    assert.equal(localFetches, 0);
+  });
+}
 
 test('trusted Route controls mount mode, reveal, POI, urban, and simulation behavior into a neutral host', () => {
   class Element {

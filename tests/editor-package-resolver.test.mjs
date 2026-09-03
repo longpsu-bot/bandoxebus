@@ -71,3 +71,62 @@ test('package fetch honors abort signals', async () => {
     (error) => error.name === 'AbortError'
   );
 });
+
+const pmtilesPath = 'assets/context/overture-buildings.pmtiles';
+const pmtilesContext = {
+  id: 'overture-buildings-snapshot', descriptor: { type: 'pmtiles', mediaType: 'application/vnd.pmtiles' }
+};
+
+test('preview PMTiles resolver preserves Folder Files without full reads or image object URLs', async () => {
+  const payload = new Uint8Array([80, 77, 84, 105, 108, 101, 115, 3]);
+  const sourceFile = new File([payload], 'overture-buildings.pmtiles', { type: 'application/vnd.pmtiles' });
+  sourceFile.arrayBuffer = () => { throw new Error('PMTiles File must stay lazy.'); };
+  const snapshot = snapshotWithImage();
+  snapshot.entries.push({ path: pmtilesPath, file: sourceFile, mediaType: 'application/vnd.pmtiles', kind: 'asset' });
+  const urlApi = fakeUrlApi();
+  const resolver = createPreviewPackageResolver(snapshot, { urlApi });
+  const url = new URL(pmtilesPath, resolver.manifestUrl);
+  const file = resolver.resolvePmtilesAssetFile(url, pmtilesContext);
+  assert.equal(file, sourceFile);
+  assert.equal(file.size, payload.length);
+  assert.deepEqual(new Uint8Array(await file.slice(0, 3).arrayBuffer()), new Uint8Array([80, 77, 84]));
+  assert.deepEqual(urlApi.created, []);
+  assert.throws(() => resolver.resolveAssetUrl(url, pmtilesContext), /image/i);
+  const response = await resolver.fetchImpl(url);
+  assert.equal(response.headers.get('content-type'), 'application/vnd.pmtiles');
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), payload);
+  resolver.revoke();
+  assert.throws(() => resolver.resolvePmtilesAssetFile(url, pmtilesContext), /revoked/i);
+});
+
+test('preview converts ZIP PMTiles bytes into an immutable File with exact bytes', async () => {
+  const payload = new Uint8Array([80, 77, 84, 105, 108, 101, 115, 3, 255]);
+  const snapshot = snapshotWithImage();
+  snapshot.entries.push({ path: pmtilesPath, bytes: payload, mediaType: 'application/vnd.pmtiles', kind: 'asset' });
+  const resolver = createPreviewPackageResolver(snapshot, { urlApi: fakeUrlApi() });
+  payload.fill(0);
+  const file = resolver.resolvePmtilesAssetFile(new URL(pmtilesPath, resolver.manifestUrl), pmtilesContext);
+  assert.ok(file instanceof File);
+  assert.equal(file.name, 'overture-buildings.pmtiles');
+  assert.equal(file.type, 'application/vnd.pmtiles');
+  assert.deepEqual(new Uint8Array(await file.arrayBuffer()), new Uint8Array([80, 77, 84, 105, 108, 101, 115, 3, 255]));
+});
+
+test('preview PMTiles resolver enforces containment and declared asset type/media type', () => {
+  const snapshot = snapshotWithImage();
+  snapshot.entries.push({ path: pmtilesPath, bytes: new Uint8Array([80]), mediaType: 'application/vnd.pmtiles', kind: 'asset' });
+  snapshot.entries.push({ path: 'data/not-an-asset.pmtiles', bytes: new Uint8Array([80]), mediaType: 'application/vnd.pmtiles', kind: 'dataset' });
+  const resolver = createPreviewPackageResolver(snapshot, { urlApi: fakeUrlApi() });
+  for (const [src, context] of [
+    ['https://other.example/archive.pmtiles', pmtilesContext],
+    ['../overture-buildings.pmtiles', pmtilesContext],
+    ['missing.pmtiles', pmtilesContext],
+    ['data/not-an-asset.pmtiles', pmtilesContext],
+    ['assets/photo.png', pmtilesContext],
+    [pmtilesPath, { descriptor: { type: 'image', mediaType: 'application/vnd.pmtiles' } }],
+    [pmtilesPath, { descriptor: { type: 'pmtiles', mediaType: 'image/png' } }],
+    [pmtilesPath, {}]
+  ]) {
+    assert.throws(() => resolver.resolvePmtilesAssetFile(new URL(src, resolver.manifestUrl), context), /outside|absent|declared PMTiles|media type/i);
+  }
+});

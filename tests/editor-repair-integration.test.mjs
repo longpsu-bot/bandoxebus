@@ -213,6 +213,116 @@ function malformedEntries(path, text) {
   ));
 }
 
+test('Studio image insertion lists only images from a mixed image and PMTiles project', async (t) => {
+  const harness = editorHarness();
+  t.after(() => harness.editor.dispose());
+  const entries = createNewProjectEntries().map((entry) => {
+    if (entry.path !== 'project.json') return entry;
+    const manifest = JSON.parse(decoder.decode(entry.bytes));
+    manifest.assets = {
+      'overture-buildings-snapshot': {
+        type: 'pmtiles', src: './assets/context/overture-buildings.pmtiles',
+        mediaType: 'application/vnd.pmtiles', required: true, attribution: []
+      },
+      'site-photo': {
+        type: 'image', src: './assets/site.svg', label: 'Site photo',
+        mediaType: 'image/svg+xml', required: true, attribution: []
+      },
+      'route-photo': {
+        type: 'image', src: './assets/route.svg',
+        mediaType: 'image/svg+xml', required: true, attribution: []
+      }
+    };
+    return { ...entry, bytes: encoder.encode(JSON.stringify(manifest)) };
+  });
+  entries.push(
+    { path: 'assets/context/overture-buildings.pmtiles', bytes: new Uint8Array([1, 2, 3]), mediaType: 'application/vnd.pmtiles', kind: 'asset' },
+    ...['site', 'route'].map((name) => ({
+      path: `assets/${name}.svg`, bytes: encoder.encode('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+      mediaType: 'image/svg+xml', kind: 'asset'
+    }))
+  );
+  await harness.editor.openEntries(entries);
+  findButton(harness.documentRef, 'Image').click();
+  const chooser = harness.documentRef.getElementById('studio-insert-image-resource');
+  assert.equal(chooser.tagName, 'SELECT');
+  assert.deepEqual(chooser.children.map(({ value, textContent }) => [value, textContent]), [
+    ['site-photo', 'Site photo'],
+    ['route-photo', 'route-photo']
+  ]);
+});
+
+test('Studio inspectors open a lazy PMTiles Folder and retain image previews without full archive reads', async (t) => {
+  const harness = editorHarness();
+  t.after(() => harness.editor.dispose());
+  const pmtilesPath = 'assets/context/overture-buildings.pmtiles';
+  const imageBytes = encoder.encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
+  const entries = createNewProjectEntries({ title: 'Frozen project' });
+  const manifest = JSON.parse(decoder.decode(entries[0].bytes));
+  manifest.assets = {
+    'overture-buildings-snapshot': { type: 'pmtiles', src: `./${pmtilesPath}`, mediaType: 'application/vnd.pmtiles' },
+    photo: { type: 'image', src: './assets/photo.svg', mediaType: 'image/svg+xml' }
+  };
+  entries[0].bytes = encoder.encode(JSON.stringify(manifest));
+  entries.push(
+    { path: pmtilesPath, bytes: encoder.encode('PMTiles') },
+    { path: 'assets/photo.svg', bytes: imageBytes }
+  );
+  const fullReads = new Map();
+  const files = new Map(entries.map(({ path, bytes }) => {
+    const file = new File([bytes], path.split('/').at(-1));
+    const read = file.arrayBuffer.bind(file);
+    file.arrayBuffer = () => {
+      fullReads.set(path, (fullReads.get(path) ?? 0) + 1);
+      return read();
+    };
+    return [path, file];
+  }));
+  function directory(prefix = '') {
+    return {
+      name: 'Frozen folder',
+      async getDirectoryHandle(segment) {
+        const next = `${prefix}${segment}/`;
+        if (![...files.keys()].some((path) => path.startsWith(next))) throw new DOMException('Missing directory', 'NotFoundError');
+        return directory(next);
+      },
+      async getFileHandle(name) {
+        const file = files.get(`${prefix}${name}`);
+        if (!file) throw new DOMException('Missing file', 'NotFoundError');
+        return { async getFile() { return file; } };
+      }
+    };
+  }
+  await harness.editor.openFolder(directory());
+  assert.match(harness.documentRef.getElementById('validation-status').textContent, /valid/i);
+  assert.doesNotMatch(harness.documentRef.getElementById('validation-status').textContent, /invalid/i);
+  assert.equal(fullReads.get(pmtilesPath) ?? 0, 0);
+  harness.editor.inspect('project', {
+    container: harness.documentRef.querySelector('.editor-inspector'),
+    documentRef: harness.documentRef
+  });
+  assert.equal(harness.documentRef.getElementById('author-project-title').value, 'Frozen project');
+  assert.equal(harness.editor.inspect('dataset').kind, 'dataset');
+  const blobs = [];
+  const revoked = [];
+  const assets = harness.editor.inspect('asset', { urlApi: {
+    createObjectURL(blob) { blobs.push(blob); return 'blob:photo'; },
+    revokeObjectURL(url) { revoked.push(url); }
+  } });
+  t.after(() => assets.dispose());
+  assert.equal(assets.entity('photo').thumbnailUrl(), 'blob:photo');
+  assert.deepEqual(new Uint8Array(await blobs[0].arrayBuffer()), imageBytes);
+  assert.throws(() => assets.entity('overture-buildings-snapshot').thumbnailUrl(), /image bytes are unavailable/i);
+  assert.equal(fullReads.get(pmtilesPath) ?? 0, 0);
+  assert.equal(blobs.length, 1);
+  assets.dispose();
+  assert.deepEqual(revoked, ['blob:photo']);
+  await harness.editor.openEntries(entries);
+  const byteBackedAssets = harness.editor.inspect('asset');
+  t.after(() => byteBackedAssets.dispose());
+  assert.throws(() => byteBackedAssets.entity('overture-buildings-snapshot').thumbnailUrl(), /image bytes are unavailable/i);
+});
+
 for (const [label, path] of [
   ['project manifest', 'project.json'],
   ['primary Story', 'stories/main.story.json']

@@ -1,6 +1,7 @@
 import { ProjectLoadError } from '../project/project-error.js';
 import { deepFreeze } from './descriptor-schema.js';
 import { createLegacyActionNormalizer } from './story-1.0-normalizer.js';
+import { createOverturePmtilesArchiveBinding } from '../overture-pmtiles.js';
 
 const MODES = ['off', 'industrial-context'];
 
@@ -41,8 +42,24 @@ export const URBAN_CONTEXT_V1_DESCRIPTOR = deepFreeze({
     additionalProperties: false,
     properties: {
       adapter: { type: 'string', enum: ['route-61-2-current'] },
-      buildingSource: { type: 'string', enum: ['overture-pmtiles', 'local-geojson'] },
-      overtureRelease: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.0$' }
+      buildingSource: { type: 'string', enum: ['overture-pmtiles', 'project-snapshot', 'local-geojson'] },
+      overtureRelease: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.0$' },
+      snapshot: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          asset: { type: 'string', pattern: '^[a-z][a-z0-9-]*$' },
+          theme: { type: 'string', const: 'buildings' },
+          bounds: { type: 'array', items: { type: 'number' } },
+          sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+          byteLength: { type: 'integer', minimum: 1, maximum: 67108864 },
+          generator: { type: 'string', const: 'go-pmtiles' },
+          generatorVersion: { type: 'string', const: '1.31.2' },
+          generatedAt: { type: 'string' },
+          sourceContentLength: { type: 'integer', minimum: 0 },
+          sourceEtag: { type: 'string' }
+        }
+      }
     }
   },
   gui: { group: 'Urban context' }
@@ -76,9 +93,15 @@ export async function selectUrbanContextAdapter(
   if (settings?.adapter !== 'route-61-2-current') return null;
   const module = await loadAdapter();
   const adapter = module.getRoute612RuntimeAdapter(context);
+  const archiveBinding = createOverturePmtilesArchiveBinding({
+    settings,
+    resources: context.resources,
+    resolvePmtilesAssetFile: context.resolvePmtilesAssetFile
+  });
   adapter.configureUrbanContext({
     buildingSource: settings.buildingSource ?? 'local-geojson',
-    overtureRelease: settings.overtureRelease ?? '2026-08-19.0'
+    overtureRelease: settings.overtureRelease ?? '2026-08-19.0',
+    archiveBinding
   });
   return adapter;
 }

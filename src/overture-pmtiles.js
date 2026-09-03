@@ -6,6 +6,7 @@ import {
 const OVERTURE_HOST = 'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com';
 const PMTILES_VENDOR_URL = new URL('../vendor/pmtiles/4.5.0/pmtiles.js', import.meta.url);
 const protocolByMapLibre = new WeakMap();
+const archivesByProtocol = new WeakMap();
 let pmtilesLoadPromise;
 
 export const OVERTURE_PMTILES_RELEASE_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}\.0$/;
@@ -58,6 +59,29 @@ export function deriveOvertureBuildingsPmtilesUrl(release) {
     throw new TypeError(`Invalid Overture release: ${release}.`);
   }
   return `${OVERTURE_HOST}/tiles/${release}/buildings.pmtiles`;
+}
+
+export function createOverturePmtilesArchiveBinding({ settings, resources, resolvePmtilesAssetFile }) {
+  const source = settings?.buildingSource ?? 'local-geojson';
+  if (source === 'local-geojson') return null;
+  const release = settings.overtureRelease ?? '2026-08-19.0';
+  if (source === 'overture-pmtiles') {
+    const url = deriveOvertureBuildingsPmtilesUrl(release);
+    return Object.freeze({ kind: 'url', source, release, url, bounds: null, key: url });
+  }
+  if (source !== 'project-snapshot') throw new TypeError('Invalid urban context building source.');
+  const snapshot = settings.snapshot;
+  const resource = resources?.get(snapshot?.asset);
+  if (resource?.descriptor?.type !== 'pmtiles' || resource.descriptor.mediaType !== 'application/vnd.pmtiles') {
+    throw new TypeError('A validated PMTiles resource is required for the project snapshot.');
+  }
+  const bounds = Object.freeze([...snapshot.bounds]);
+  const key = `snapshot:${snapshot.sha256}`;
+  const file = resolvePmtilesAssetFile?.(resource.url, { id: resource.id, descriptor: resource.descriptor });
+  if (typeof File === 'function' && file instanceof File) {
+    return Object.freeze({ kind: 'file', source, release, file, bounds, key });
+  }
+  return Object.freeze({ kind: 'url', source, release, url: String(resource.url), bounds, key });
 }
 
 export async function loadPmtilesBrowser({
@@ -117,12 +141,38 @@ export async function ensurePmtilesProtocol(maplibregl, {
   }
 }
 
-export function createOverturePmtilesLayerDefinitions({ release }) {
+export async function ensurePmtilesArchive(maplibregl, binding, {
+  loadPmtiles = loadPmtilesBrowser
+} = {}) {
+  const protocol = await ensurePmtilesProtocol(maplibregl, { loadPmtiles });
+  if (binding.kind === 'url') return { protocol, archiveUrl: binding.url };
+  let archives = archivesByProtocol.get(protocol);
+  if (!archives) {
+    archives = new Map();
+    archivesByProtocol.set(protocol, archives);
+  }
+  if (!archives.has(binding.key)) {
+    archives.set(binding.key, (async () => {
+      const pmtiles = await loadPmtiles();
+      const alias = new File([binding.file], `overture-buildings-${binding.key.slice('snapshot:'.length)}.pmtiles`, {
+        type: 'application/vnd.pmtiles'
+      });
+      const archive = new pmtiles.PMTiles(new pmtiles.FileSource(alias));
+      protocol.add(archive);
+      return archive.source.getKey();
+    })());
+  }
+  return { protocol, archiveUrl: await archives.get(binding.key) };
+}
+
+export function createOverturePmtilesLayerDefinitions({ release, archiveUrl, bounds } = {}) {
+  const resolvedArchiveUrl = archiveUrl ?? deriveOvertureBuildingsPmtilesUrl(release);
   return {
     source: {
       type: 'vector',
-      url: `pmtiles://${deriveOvertureBuildingsPmtilesUrl(release)}`,
-      attribution: '© <a href="https://overturemaps.org/">Overture Maps Foundation</a>'
+      url: `pmtiles://${resolvedArchiveUrl}`,
+      attribution: '© <a href="https://overturemaps.org/">Overture Maps Foundation</a>',
+      ...(bounds ? { bounds: [...bounds] } : {})
     },
     flat: {
       id: OVERTURE_PMTILES_FLAT_LAYER_ID,

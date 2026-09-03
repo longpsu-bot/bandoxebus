@@ -6,6 +6,8 @@ import { createCapabilityRegistry } from '../src/capabilities/capability-registr
 import { CORE_CONTENT_V1_DESCRIPTOR, createCoreContentCapability } from '../src/capabilities/core-content-v1.js';
 import { CORE_MAP_V1_DESCRIPTOR, createCoreMapCapability } from '../src/capabilities/core-map-v1.js';
 import { loadProject } from '../src/project/project-loader.js';
+import { INSTALLED_CAPABILITY_REGISTRY } from '../src/capabilities/installed-capabilities.js';
+import { selectUrbanContextAdapter } from '../src/capabilities/urban-context-v1.js';
 
 const FIXTURE_ROOT = new URL('./fixtures/project-loader/minimal/', import.meta.url);
 const MANIFEST = JSON.parse(await readFile(new URL('project.json', FIXTURE_ROOT), 'utf8'));
@@ -118,7 +120,7 @@ test('asset URL hook receives validated URLs and changes only asset resource rec
 
   assert.deepEqual(calls, [{
     url: 'https://host/demo/assets/photo.png',
-    context: { id: 'photo', descriptor: manifest.assets.photo }
+    context: { id: 'photo', descriptor: manifest.assets.photo, manifest }
   }]);
   assert.equal(project.resources.get('photo').url, 'blob:preview/photo');
   assert.equal(project.resources.get('route').url.href, 'https://host/demo/data/route.geojson');
@@ -137,4 +139,66 @@ test('omitting the asset URL hook preserves the existing production URL exactly'
   });
 
   assert.equal(project.resources.get('photo').url.href, 'https://host/demo/assets/photo.png');
+});
+
+test('asset URL hook receives the frozen manifest context without loading a PMTiles archive', async () => {
+  const manifest = structuredClone(MANIFEST);
+  manifest.assets['overture-buildings-snapshot'] = {
+    type: 'pmtiles', src: './assets/overture-buildings.pmtiles', mediaType: 'application/vnd.pmtiles'
+  };
+  manifest.capabilities.push({
+    id: 'urban-context-v1', settings: {
+      adapter: 'route-61-2-current', buildingSource: 'project-snapshot', overtureRelease: '2026-08-19.0',
+      snapshot: {
+        asset: 'overture-buildings-snapshot', theme: 'buildings', bounds: [106.59, 11.11, 106.61, 11.14],
+        sha256: 'a'.repeat(64), byteLength: 128, generator: 'go-pmtiles', generatorVersion: '1.31.2',
+        generatedAt: '2026-09-03T00:00:00Z', sourceContentLength: 1024
+      }
+    }
+  });
+  let receivedManifest;
+  const project = await loadProject('https://host/demo/project.json', {
+    fetchImpl: fixtureFetch({ 'https://host/demo/project.json': manifest }),
+    capabilityRegistry: INSTALLED_CAPABILITY_REGISTRY,
+    resolveAssetUrl(url, context) {
+      receivedManifest = context.manifest;
+      return url;
+    }
+  });
+  assert.equal(receivedManifest, project.manifest);
+  assert.equal(Object.isFrozen(receivedManifest), true);
+  assert.equal(project.resources.get('overture-buildings-snapshot').url.href, 'https://host/demo/assets/overture-buildings.pmtiles');
+});
+
+test('loaded frozen PMTiles resources bind to the runtime without fetching the archive', async () => {
+  const manifest = structuredClone(MANIFEST);
+  manifest.assets['overture-buildings-snapshot'] = {
+    type: 'pmtiles', src: './assets/overture-buildings.pmtiles', mediaType: 'application/vnd.pmtiles'
+  };
+  manifest.capabilities.push({
+    id: 'urban-context-v1', settings: {
+      adapter: 'route-61-2-current', buildingSource: 'project-snapshot', overtureRelease: '2026-08-19.0',
+      snapshot: {
+        asset: 'overture-buildings-snapshot', theme: 'buildings', bounds: [106.59, 11.11, 106.61, 11.14],
+        sha256: 'a'.repeat(64), byteLength: 128, generator: 'go-pmtiles', generatorVersion: '1.31.2',
+        generatedAt: '2026-09-03T00:00:00Z', sourceContentLength: 1024
+      }
+    }
+  });
+  const fetched = [];
+  const fetchFixture = fixtureFetch({ 'https://host/demo/project.json': manifest });
+  const project = await loadProject('https://host/demo/project.json', {
+    capabilityRegistry: INSTALLED_CAPABILITY_REGISTRY,
+    fetchImpl: (url) => { fetched.push(String(url)); return fetchFixture(url); }
+  });
+  const settings = project.capabilities.settings['urban-context-v1'];
+  const adapter = await selectUrbanContextAdapter(settings, {
+    map: { loaded: () => false, once() {}, getLayer() { return false; } },
+    resources: project.resources, settings
+  });
+  assert.equal(adapter.state.urbanContextConfig.archiveBinding.url, 'https://host/demo/assets/overture-buildings.pmtiles');
+  assert.deepEqual(adapter.state.urbanContextConfig.archiveBinding.bounds, [106.59, 11.11, 106.61, 11.14]);
+  assert.equal(fetched.some((url) => url.endsWith('.pmtiles')), false);
+  assert.equal(Object.isFrozen(project.resources.get('overture-buildings-snapshot')), true);
+  assert.equal(project.story.id, 'main');
 });

@@ -35,7 +35,7 @@ function manifestBytes(paths = {}) {
       initialView: { center: [0, 0], zoom: 2, pitch: 0, bearing: 0 }
     },
     datasets,
-    assets: {},
+    assets: paths.assets ?? {},
     focusTargets: {},
     capabilities: [],
     attribution: {}
@@ -59,6 +59,7 @@ function fakeDirectory(initialFiles, { failWrites = [] } = {}) {
     }
   }
   const reads = [];
+  const arrayBufferReads = new Map();
   const writes = [];
   const directoryRequests = [];
   const fileRequests = [];
@@ -90,7 +91,13 @@ function fakeDirectory(initialFiles, { failWrites = [] } = {}) {
           async getFile() {
             reads.push(path);
             const current = fileData.get(path);
-            return { size: current.length, async arrayBuffer() { return current.slice().buffer; } };
+            const file = new File([current], segment);
+            return Object.assign(file, {
+              async arrayBuffer() {
+                arrayBufferReads.set(path, (arrayBufferReads.get(path) ?? 0) + 1);
+                return current.slice().buffer;
+              }
+            });
           },
           async createWritable() {
             if (failWrites.includes(path)) throw new DOMException(`Denied ${path}`, 'NotAllowedError');
@@ -113,6 +120,7 @@ function fakeDirectory(initialFiles, { failWrites = [] } = {}) {
   return {
     root: directory(),
     reads,
+    arrayBufferReads,
     writes,
     directoryRequests,
     fileRequests,
@@ -143,6 +151,63 @@ test('Folder Open reads project.json and declared resources without enumeration'
   assert.equal(fs.fileRequests.every(({ create }) => create === false), true);
   assert.equal(fs.enumerationCalls, 0);
   assert.equal(fs.reads.includes('secret.txt'), false);
+});
+
+test('Folder Open and project-only Save never materialize or rewrite a declared PMTiles file', async () => {
+  const path = 'assets/context/overture-buildings.pmtiles';
+  const pmtilesBytes = new Uint8Array([80, 77, 84, 105, 108, 101, 115, 3]);
+  const fs = fakeDirectory({
+    'project.json': manifestBytes({ assets: {
+      'overture-buildings-snapshot': { type: 'pmtiles', src: `./${path}`, mediaType: 'application/vnd.pmtiles' }
+    } }),
+    'stories/main.story.json': storyBytes(),
+    [path]: pmtilesBytes
+  });
+  const adapter = createFolderStorageAdapter({ directoryHandle: fs.root });
+  const opened = await adapter.open();
+  const entry = opened.entries.find((entry) => entry.path === path);
+  assert.equal(entry.mediaType, 'application/vnd.pmtiles');
+  assert.equal(entry.kind, 'asset');
+  assert.equal(entry.bytes, undefined);
+  assert.equal(entry.file.size, pmtilesBytes.length);
+  assert.equal(fs.arrayBufferReads.get(path) ?? 0, 0);
+
+  const store = createPackageStore(opened);
+  const draft = createDraftStore({ packageStore: store });
+  assert.equal(store.get(path).file, entry.file);
+  assert.equal(store.get(path).byteLength, pmtilesBytes.length);
+  assert.equal(store.dirty, false);
+  assert.deepEqual(store.snapshot().entries.find((entry) => entry.path === path), {
+    path, file: entry.file, mediaType: 'application/vnd.pmtiles', kind: 'asset'
+  });
+  assert.throws(() => store.setCurrentBytes(path, pmtilesBytes), { name: 'TypeError', message: /lazy|file-backed/i });
+  draft.mutate('project.json', (manifest) => { manifest.title = 'Updated title'; });
+  const saved = await savePackageChanges({ adapter, packageStore: store, validation: { status: 'valid' } });
+  assert.deepEqual(saved.written, ['project.json']);
+  assert.deepEqual(fs.writes, ['project.json']);
+  assert.equal(fs.arrayBufferReads.get(path) ?? 0, 0);
+  store.markWritten([path]);
+  assert.equal(store.get(path).file, entry.file);
+  assert.equal(store.dirty, false);
+  assert.equal(store.removeManaged(path), true);
+  assert.equal(store.get(path), undefined);
+});
+
+test('package store rejects mixed bytes/files and non-PMTiles lazy entries', () => {
+  const entry = {
+    path: 'assets/context/overture-buildings.pmtiles',
+    file: new File(['PMTiles'], 'overture-buildings.pmtiles'),
+    mediaType: 'application/vnd.pmtiles', kind: 'asset', managed: true
+  };
+  for (const invalid of [
+    ...['bytes', 'currentBytes', 'originalBytes'].map((key) => ({ ...entry, [key]: new Uint8Array() })),
+    { ...entry, mediaType: 'image/png' },
+    { ...entry, kind: 'dataset' },
+    { ...entry, managed: false },
+    { ...entry, file: { size: Infinity } }
+  ]) {
+    assert.throws(() => createPackageStore({ entries: [invalid] }), TypeError);
+  }
 });
 
 test('Folder Open walks nested declared paths one segment at a time and retains invalid JSON bytes', async () => {

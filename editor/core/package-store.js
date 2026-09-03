@@ -77,6 +77,24 @@ export function createPackageStore({ origin, entries = [] }) {
   for (const input of entries) {
     const path = normalizePackagePath(input.path);
     if (records.has(path)) throw new TypeError(`Duplicate package path: ${path}`);
+    if (input.file !== undefined) {
+      if (['bytes', 'originalBytes', 'currentBytes'].some((key) => input[key] !== undefined)
+        || input.mediaType !== 'application/vnd.pmtiles' || input.kind !== 'asset'
+        || input.managed === false || !(input.file instanceof File)
+        || !Number.isFinite(input.file.size) || input.file.size < 0) {
+        throw new TypeError('Lazy file-backed package entries must be managed PMTiles assets without byte fields.');
+      }
+      records.set(path, {
+        path,
+        file: input.file,
+        byteLength: input.file.size,
+        mediaType: input.mediaType,
+        kind: input.kind,
+        managed: true,
+        persisted: true
+      });
+      continue;
+    }
     const originalBytes = bytes(input.originalBytes ?? input.currentBytes ?? input.bytes);
     const currentBytes = bytes(input.currentBytes ?? input.bytes ?? originalBytes);
     records.set(path, {
@@ -101,6 +119,7 @@ export function createPackageStore({ origin, entries = [] }) {
   function setCurrentBytes(path, value) {
     const entry = get(path);
     if (!entry) throw new TypeError(`Unknown package path: ${path}`);
+    if (entry.file) throw new TypeError('Cannot edit bytes of a lazy file-backed PMTiles entry.');
     const next = bytes(value);
     if (!equalBytes(entry.currentBytes, next)) {
       entry.currentBytes = next;
@@ -152,7 +171,7 @@ export function createPackageStore({ origin, entries = [] }) {
         .filter((entry) => !managedOnly || entry.managed)
         .map((entry) => ({
           path: entry.path,
-          bytes: entry.currentBytes.slice(),
+          ...(entry.file ? { file: entry.file } : { bytes: entry.currentBytes.slice() }),
           mediaType: entry.mediaType,
           kind: entry.kind
         }))
@@ -160,13 +179,14 @@ export function createPackageStore({ origin, entries = [] }) {
   }
 
   function changeSet() {
-    return list().filter((entry) => !entry.persisted || !equalBytes(entry.originalBytes, entry.currentBytes));
+    return list().filter((entry) => !entry.persisted
+      || (!entry.file && !equalBytes(entry.originalBytes, entry.currentBytes)));
   }
 
   function markWritten(paths) {
     for (const path of paths) {
       const entry = records.get(normalizePackagePath(path));
-      if (entry) {
+      if (entry && !entry.file) {
         entry.originalBytes = entry.currentBytes.slice();
         entry.persisted = true;
       }

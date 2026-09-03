@@ -76,6 +76,9 @@ async function getWritableFileHandle(directoryHandle, path) {
 async function readEntry(directoryHandle, descriptor) {
   const handle = await getFileHandle(directoryHandle, descriptor.path);
   const file = await handle.getFile();
+  if (descriptor.mediaType === 'application/vnd.pmtiles') {
+    return { ...descriptor, file, byteLength: file.size, managed: true };
+  }
   return {
     ...descriptor,
     bytes: new Uint8Array(await file.arrayBuffer()),
@@ -197,12 +200,14 @@ function isPrivateExportPath(path) {
     || /^(?:editor|src|scripts|tests|review|vendor)\//.test(path);
 }
 
-export function exportProjectPackageZip(packageStore) {
+export async function exportProjectPackageZip(packageStore) {
   const includePassThrough = packageStore.origin?.kind === 'zip';
   const staged = Object.create(null);
   for (const entry of packageStore.list()) {
     if ((!entry.managed && !includePassThrough) || isPrivateExportPath(entry.path)) continue;
-    staged[entry.path] = entry.currentBytes.slice();
+    staged[entry.path] = entry.currentBytes
+      ? entry.currentBytes.slice()
+      : new Uint8Array(await entry.file.arrayBuffer());
   }
   if (!Object.hasOwn(staged, 'project.json')) {
     throw new TypeError('Project ZIP export requires root project.json.');
@@ -224,7 +229,7 @@ export function createZipStorageAdapter({ zipBytes, label = 'Project ZIP' } = {}
       return { origin: { ...origin }, capabilities, entries };
     },
     async export(packageStore) {
-      return exportProjectPackageZip(packageStore);
+      return await exportProjectPackageZip(packageStore);
     },
     describeOrigin() { return { ...origin }; }
   });

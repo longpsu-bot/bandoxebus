@@ -1,4 +1,5 @@
 export const PREVIEW_PROTOCOL_VERSION = 1;
+export const PREVIEW_CAMERA_SETTLEMENT_TIMEOUT_MS = 10000;
 export const PREVIEW_PACKAGE_MAX_BYTES = 256 * 1024 * 1024;
 export const PREVIEW_OUTPUT_MODES = Object.freeze(['explore', 'scroll', 'presentation']);
 
@@ -15,6 +16,7 @@ const EVENT_TYPES = new Set([
   'editor-preview:runtime-error',
   'editor-preview:state',
   'editor-preview:camera',
+  'editor-preview:freeze-camera',
   'editor-preview:locate-result',
   'editor-preview:urban-context-status',
   ...AUTHORING_EVENT_TYPES
@@ -89,6 +91,14 @@ function validEventPayload(data) {
   if (data.type === 'editor-preview:camera') {
     return hasExactKeys(data.payload, ['center', 'zoom', 'pitch', 'bearing', 'bounds']);
   }
+  if (data.type === 'editor-preview:freeze-camera') {
+    const value = data.payload;
+    const pair = (point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite);
+    return hasExactKeys(value, ['index', 'center', 'zoom', 'pitch', 'bearing', 'bounds'])
+      && Number.isInteger(value.index) && value.index >= 0 && pair(value.center)
+      && [value.zoom, value.pitch, value.bearing].every(Number.isFinite)
+      && Array.isArray(value.bounds) && value.bounds.length === 2 && value.bounds.every(pair);
+  }
   if (data.type === 'editor-preview:locate-result') {
     return hasExactKeys(data.payload, ['datasetId', 'status', 'message'])
       && validOverlayId(data.payload.datasetId)
@@ -122,7 +132,7 @@ function validEventPayload(data) {
 export function isPreviewPackageWithinLimit(entries, maxBytes = PREVIEW_PACKAGE_MAX_BYTES) {
   let total = 0;
   for (const entry of entries ?? []) {
-    const length = entry?.bytes?.byteLength;
+    const length = entry?.bytes?.byteLength ?? entry?.file?.size;
     if (!Number.isSafeInteger(length) || length < 0) return false;
     total += length;
     if (total > maxBytes) return false;
@@ -135,9 +145,11 @@ export function validatePreviewSnapshot(snapshot) {
     || !Number.isInteger(snapshot.revision) || snapshot.revision < 0
     || !Array.isArray(snapshot.entries)
     || !snapshot.entries.every((entry) => (
-      hasExactKeys(entry, ['path', 'bytes', 'mediaType', 'kind'])
+      ((hasExactKeys(entry, ['path', 'bytes', 'mediaType', 'kind']) && entry.bytes instanceof Uint8Array)
+        || (hasExactKeys(entry, ['path', 'file', 'mediaType', 'kind'])
+          && entry.file instanceof File && Number.isFinite(entry.file.size)
+          && entry.kind === 'asset' && entry.mediaType === 'application/vnd.pmtiles'))
       && typeof entry.path === 'string'
-      && entry.bytes instanceof Uint8Array
       && typeof entry.mediaType === 'string'
       && typeof entry.kind === 'string'
     ))
@@ -182,7 +194,7 @@ function validCommandPayload(payload) {
     && ['select', 'map'].includes(payload.payload.mode);
   if (payload.name === 'authoring-selection') return hasExactKeys(payload.payload, ['id'])
     && (payload.payload.id === null || validOverlayId(payload.payload.id));
-  if (payload.name === 'restore-scene-camera') return hasExactKeys(payload.payload, ['index'])
+  if (['restore-scene-camera', 'capture-scene-camera'].includes(payload.name)) return hasExactKeys(payload.payload, ['index'])
     && Number.isInteger(payload.payload.index) && payload.payload.index >= 0;
   if (payload.name === 'locate-project-layer') return hasExactKeys(payload.payload, ['datasetId'])
     && validOverlayId(payload.payload.datasetId);
@@ -224,7 +236,8 @@ export function createPreviewBridge({
   iframe,
   origin = globalThis.location?.origin,
   onEvent = () => {},
-  windowRef = globalThis.window
+  windowRef = globalThis.window,
+  cameraCaptureTimeoutMs = 15000
 }) {
   let currentRevision = -1;
   let requestNumber = 0;
@@ -236,6 +249,20 @@ export function createPreviewBridge({
   let queuedStart = null;
   let activeSource = iframe.dataset?.previewSrc ?? iframe.src ?? null;
   let currentOutputMode = 'explore';
+  let loaded = false;
+  let disposed = false;
+  const pendingCameraCaptures = new Map();
+
+  function cancelCameraCaptures(message) {
+    for (const capture of pendingCameraCaptures.values()) capture.reject(new Error(message));
+  }
+
+  function flushCameraCaptures() {
+    if (!loaded) return;
+    for (const capture of pendingCameraCaptures.values()) {
+      if (!capture.sent) { capture.sent = true; post(capture.message); }
+    }
+  }
 
   function post(message) {
     iframe.contentWindow?.postMessage(message, origin);
@@ -266,12 +293,34 @@ export function createPreviewBridge({
       return;
     }
     if (data.revision !== currentRevision) return;
+    if (data.type === 'editor-preview:freeze-camera') {
+      const capture = pendingCameraCaptures.get(data.requestId);
+      if (!capture || capture.index !== data.payload.index) return;
+      capture.resolve(data.payload);
+      return;
+    }
+    if (data.type === 'editor-preview:runtime-error' && pendingCameraCaptures.has(data.requestId)) {
+      pendingCameraCaptures.get(data.requestId).reject(new Error(data.payload.message));
+      return;
+    }
     if (START_RESPONSE_TYPES.has(data.type) && data.requestId !== currentStartRequestId) return;
+    if (data.type === 'editor-preview:loaded') {
+      loaded = true;
+      // Let editor restore normal authoring chrome before a waiting Freeze capture activates its Scene.
+      onEvent(data);
+      flushCameraCaptures();
+      return;
+    }
+    if (data.type === 'editor-preview:runtime-error') cancelCameraCaptures(data.payload.message);
     if (AUTHORING_EVENT_TYPES.has(data.type)) publishAuthoringEvent(data);
     onEvent(data);
   }
 
   function handleLoad() {
+    loaded = false;
+    for (const capture of pendingCameraCaptures.values()) {
+      if (capture.sent || !queuedStart) capture.reject(new Error('Preview frame loaded during camera capture.'));
+    }
     ready = false;
     canRetryReadyHandshake = true;
     readyRequestId = `request-${++requestNumber}`;
@@ -283,6 +332,8 @@ export function createPreviewBridge({
   if (iframe.contentDocument?.readyState === 'complete') handleLoad();
 
   function clearSession() {
+    loaded = false;
+    cancelCameraCaptures('Preview reset during camera capture.');
     currentRevision = -1;
     currentStartRequestId = null;
     readyRequestId = null;
@@ -307,6 +358,8 @@ export function createPreviewBridge({
     if (lastValid.revision !== lastValid.snapshot.revision) {
       throw new TypeError('Preview snapshot revision does not match last-valid revision.');
     }
+    loaded = false;
+    cancelCameraCaptures('Preview replaced during camera capture.');
     currentOutputMode = resolveStartOutputMode(options);
     selectSnapshotSource(currentOutputMode);
     currentRevision = lastValid.revision;
@@ -334,6 +387,8 @@ export function createPreviewBridge({
   }
 
   function dispose() {
+    disposed = true;
+    cancelCameraCaptures('Preview disposed during camera capture.');
     windowRef.removeEventListener('message', handleMessage);
     iframe.removeEventListener?.('load', handleLoad);
     queuedStart = null;
@@ -343,6 +398,31 @@ export function createPreviewBridge({
     start,
     reset,
     command,
+    captureSceneCamera(index) {
+      if (disposed || currentRevision < 0) return Promise.reject(new Error('Camera capture requires an active preview.'));
+      const payload = { name: 'capture-scene-camera', payload: { index } };
+      if (!validCommandPayload(payload) || !Number.isSafeInteger(index)) return Promise.reject(new TypeError('Invalid camera capture Scene index.'));
+      // The base deadline includes the target Scene and readiness margin; every predecessor
+      // can also require a full production settlement before inherited camera fields are safe.
+      const timeoutMs = cameraCaptureTimeoutMs + index * PREVIEW_CAMERA_SETTLEMENT_TIMEOUT_MS;
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2147483647) {
+        return Promise.reject(new TypeError('Camera capture index exceeds the supported replay deadline.'));
+      }
+      const requestId = `request-${++requestNumber}`;
+      return new Promise((resolve, reject) => {
+        const finish = (callback, value) => {
+          clearTimeout(timer);
+          pendingCameraCaptures.delete(requestId);
+          callback(value);
+        };
+        const timer = setTimeout(() => finish(reject, new Error('Preview camera capture timed out.')), timeoutMs);
+        pendingCameraCaptures.set(requestId, {
+          index, message: envelope('editor-preview:command', currentRevision, requestId, payload), sent: false,
+          resolve: (value) => finish(resolve, value), reject: (error) => finish(reject, error)
+        });
+        flushCameraCaptures();
+      });
+    },
     dispose,
     get revision() { return currentRevision; },
     get outputMode() { return currentOutputMode; }
