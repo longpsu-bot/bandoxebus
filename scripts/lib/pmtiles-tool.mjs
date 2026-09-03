@@ -55,7 +55,7 @@ async function runChecked(run, command, args, message) {
 
 function zipExecutable(bytes, name) {
   const entries = unzipSync(bytes);
-  const matches = Object.entries(entries).filter(([entry]) => path.basename(entry) === name);
+  const matches = Object.entries(entries).filter(([entry]) => !entry.endsWith('/') && path.basename(entry) === name);
   if (matches.length !== 1) throw new Error(`go-pmtiles ZIP must contain exactly one ${name} executable.`);
   return Buffer.from(matches[0][1]);
 }
@@ -96,6 +96,10 @@ async function optionalFile(fs, pathname) {
     if (error?.code === 'ENOENT') return null;
     throw error;
   }
+}
+
+function publishedCacheExists(error) {
+  return ['EEXIST', 'ENOTEMPTY', 'EPERM'].includes(error?.code);
 }
 
 async function cachedExecutable({ fs, run, archivePath, executablePath, artifact, platform, verifyRoot }) {
@@ -159,11 +163,17 @@ export async function ensurePmtilesTool(options = {}) {
     await fs.writeFile(temporaryExecutable, material);
     if (platform !== 'win32') await fs.chmod(temporaryExecutable, 0o755);
     await verifyVersion(run, temporaryExecutable);
-    await fs.rm(cacheDirectory, { recursive: true, force: true });
-    await fs.rename(temporaryDirectory, cacheDirectory);
+    try {
+      await fs.rename(temporaryDirectory, cacheDirectory);
+    } catch (error) {
+      if (!publishedCacheExists(error)) throw error;
+      const winner = await cachedExecutable({ fs, run, archivePath, executablePath, artifact, platform, verifyRoot });
+      if (!winner) throw new Error('A concurrent go-pmtiles cache publication left no verified cache; refusing to replace it.');
+    }
   } catch (error) {
     await fs.rm(temporaryDirectory, { recursive: true, force: true });
     throw error;
   }
+  await fs.rm(temporaryDirectory, { recursive: true, force: true });
   return executablePath;
 }

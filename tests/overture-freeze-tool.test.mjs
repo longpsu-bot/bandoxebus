@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import * as nativeFs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { zipSync } from '../vendor/fflate/0.8.3/fflate.esm.js';
 import { ensurePmtilesTool } from '../scripts/lib/pmtiles-tool.mjs';
@@ -118,6 +120,14 @@ test('rejects a downloaded executable whose version output is not 1.31.2', async
   })), /pmtiles 1\.31\.2/i);
 });
 
+test('rejects a ZIP directory entry named like the executable', async () => {
+  const archive = zipTool('pmtiles.exe/', new Uint8Array());
+  await assert.rejects(ensurePmtilesTool(options({ lock: lockFor(archive), fs: memoryFilesystem(),
+    fetch: async () => ({ ok: true, arrayBuffer: async () => archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.byteLength) }),
+    run: async () => ({ code: 0, stdout: 'pmtiles 1.31.2, test' })
+  })), /exactly one pmtiles\.exe executable/i);
+});
+
 test('rejects unsupported platform and architecture without downloading', async () => {
   let downloaded = false;
   await assert.rejects(ensurePmtilesTool(options({ platform: 'freebsd', arch: 'riscv64', fs: memoryFilesystem(),
@@ -152,4 +162,44 @@ test('invokes only the verified absolute executable and never a PATH pmtiles com
   }));
   assert.deepEqual(calls, [[path.join(path.dirname(path.dirname(executable)), '.win32-x64.tmp-test', 'pmtiles.exe'), ['version']]]);
   assert.notEqual(calls[0][0], 'pmtiles');
+});
+
+test('concurrent installers preserve the winning verified cache directory', async () => {
+  const archive = zipTool();
+  const lock = lockFor(archive);
+  const root = await nativeFs.mkdtemp(path.join(tmpdir(), 'pmtiles-tool-concurrent-'));
+  let arrived = 0;
+  let releaseRenames;
+  const bothRenamesReady = new Promise((resolve) => { releaseRenames = resolve; });
+  const fs = {
+    mkdir: nativeFs.mkdir,
+    readFile: nativeFs.readFile,
+    writeFile: nativeFs.writeFile,
+    rm: nativeFs.rm,
+    chmod: nativeFs.chmod,
+    async rename(from, to) {
+      arrived += 1;
+      if (arrived === 2) releaseRenames();
+      else await bothRenamesReady;
+      return nativeFs.rename(from, to);
+    }
+  };
+  const fetch = async () => ({ ok: true, arrayBuffer: async () => archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.byteLength) });
+  const run = async () => ({ code: 0, stdout: 'pmtiles 1.31.2, test' });
+  try {
+    const [first, second] = await Promise.all([
+      ensurePmtilesTool(options({ lock, fs, fetch, run, cacheRoot: root, randomId: () => 'first' })),
+      ensurePmtilesTool(options({ lock, fs, fetch, run, cacheRoot: root, randomId: () => 'second' }))
+    ]);
+    const cached = cachedPaths(root, lock.artifacts['win32-x64'].name);
+    assert.equal(first, cached.executable);
+    assert.equal(second, cached.executable);
+    assert.deepEqual(await nativeFs.readFile(cached.archive), Buffer.from(archive));
+    assert.deepEqual(await nativeFs.readFile(cached.executable), Buffer.from(bytes('verified pmtiles executable')));
+    assert.deepEqual(await nativeFs.readdir(path.join(root, '1.31.2')), ['win32-x64']);
+    assert.equal(await ensurePmtilesTool(options({ lock, fs: nativeFs, cacheRoot: root, randomId: () => 'recheck',
+      fetch: async () => { throw new Error('a winning cache must be reused'); }, run })), cached.executable);
+  } finally {
+    await nativeFs.rm(root, { recursive: true, force: true });
+  }
 });
