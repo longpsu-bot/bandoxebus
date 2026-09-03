@@ -132,13 +132,26 @@ test('ZIP import success accepts exactly Valid and rejects Invalid', () => {
 test('only the deliberately injected C1 archive failure is excluded from console evidence', () => {
   assert.equal(typeof harness.isExpectedInjectedArchiveFailure, 'function');
   const archive='https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles';
-  const expected={kind:'log',url:archive,text:'Failed to load resource: net::ERR_FAILED'};
+  const expected={kind:'log',url:archive,text:'Failed to load resource: net::ERR_FAILED',phase:'remote-failure',requestId:'network-7'};
   const failure={url:archive,requestId:'network-7',fetchRequestId:'fetch-7',phase:'remote-failure-injection',networkErrorText:'net::ERR_FAILED'};
   assert.equal(harness.isExpectedInjectedArchiveFailure(expected,failure),true);
-  for(const change of [(issue)=>issue.url='https://other.example/failure',(issue)=>issue.kind='runtime',(issue)=>issue.text='Uncaught Error: map failure',(_issue,record)=>record.phase='normal',(_issue,record)=>record.networkErrorText='net::ERR_CONNECTION_RESET']) {
+  for(const change of [(issue)=>issue.url='https://other.example/failure',(issue)=>issue.kind='runtime',(issue)=>issue.text='Uncaught Error: map failure',(issue)=>issue.phase='normal',(issue)=>issue.requestId='network-other',(_issue,record)=>record.phase='normal',(_issue,record)=>record.networkErrorText='net::ERR_CONNECTION_RESET']) {
     const issue={...expected}; const record={...failure}; change(issue,record);
     assert.equal(harness.isExpectedInjectedArchiveFailure(issue,record),false);
   }
+});
+
+test('C1 archive attribution is phase-bound and consumes each injected failure once', () => {
+  assert.equal(typeof harness.partitionC1ConsoleIssues, 'function');
+  const archive='https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles';
+  const expected={kind:'log',url:archive,text:'Failed to load resource: net::ERR_FAILED',phase:'remote-failure',requestId:'network-7'};
+  const failure={url:archive,requestId:'network-7',fetchRequestId:'fetch-7',phase:'remote-failure-injection',networkErrorText:'net::ERR_FAILED'};
+  const preInjection=harness.partitionC1ConsoleIssues([{...expected,phase:'normal'},expected],[failure]);
+  assert.deepEqual(preInjection.consoleIssues,[{...expected,phase:'normal'}]);
+  assert.equal(preInjection.expectedInjectedArchiveFailures.length,1);
+  const duplicate=harness.partitionC1ConsoleIssues([expected,{...expected}],[failure]);
+  assert.equal(duplicate.expectedInjectedArchiveFailures.length,1);
+  assert.deepEqual(duplicate.consoleIssues,[expected]);
 });
 
 test('duplicate deletion requires exact owned targets and equal artifact bytes, preserving the retained output', async () => {

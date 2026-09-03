@@ -120,8 +120,22 @@ export function isValidZipImportStatus(status) { return status==='Valid'; }
 // this precise archive, and only after CDP confirms its corresponding network error.
 export function isExpectedInjectedArchiveFailure(issue, failure) {
   return issue?.kind==='log' && issue?.text==='Failed to load resource: net::ERR_FAILED'
-    && issue?.url===failure?.url && failure?.phase==='remote-failure-injection'
-    && failure?.networkErrorText==='net::ERR_FAILED';
+    && issue?.phase==='remote-failure' && issue?.url===failure?.url
+    && failure?.phase==='remote-failure-injection' && failure?.networkErrorText==='net::ERR_FAILED'
+    && (!issue?.requestId || !failure?.requestId || issue.requestId===failure.requestId);
+}
+
+export function partitionC1ConsoleIssues(observations, failures) {
+  const remaining=[...failures]; const consoleIssues=[]; const expectedInjectedArchiveFailures=[];
+  for(const issue of observations) {
+    const index=remaining.findIndex(failure=>isExpectedInjectedArchiveFailure(issue,failure));
+    if(index<0)consoleIssues.push(issue);
+    else {
+      const [failure]=remaining.splice(index,1);
+      expectedInjectedArchiveFailures.push({...failure,text:issue.text,consoleUrl:issue.url,consoleRequestId:issue.requestId??null,consolePhase:issue.phase});
+    }
+  }
+  return {consoleIssues,expectedInjectedArchiveFailures};
 }
 
 // Only observes real constructors, mutations and reads; no camera/source behavior is replaced.
@@ -299,15 +313,12 @@ export async function certifyC1Functional({url}) {
     await wait(`(()=>{const map=window.__C1F_MAPS__?.[0],status=document.getElementById('runtime-status')?.textContent??'';return document.readyState==='complete'&&window.__C1F_MAPS__?.length===1&&/Scene 1 of 7/.test(status)&&map?.loaded?.()?true:false;})()`,'C1 application startup');
   };
   const finalizeConsoleIssues=()=>{
-    evidence.consoleIssues=[]; evidence.expectedInjectedArchiveFailures=[];
-    for(const issue of evidence.consoleObservations) {
-      const failure=evidence.injectedArchiveFailures.find(candidate=>isExpectedInjectedArchiveFailure(issue,candidate));
-      if(failure)evidence.expectedInjectedArchiveFailures.push({...failure,text:issue.text,consoleUrl:issue.url});
-      else evidence.consoleIssues.push(issue);
-    }
+    const partition=partitionC1ConsoleIssues(evidence.consoleObservations,evidence.injectedArchiveFailures);
+    evidence.consoleIssues=partition.consoleIssues;
+    evidence.expectedInjectedArchiveFailures=partition.expectedInjectedArchiveFailures;
   };
   client.on('Runtime.exceptionThrown',({exceptionDetails})=>evidence.consoleObservations.push({kind:'runtime',url:null,text:exceptionDetails.exception?.description??exceptionDetails.text,phase:failArchive?'remote-failure':'normal'}));
-  client.on('Log.entryAdded',({entry})=>{if(entry.level==='error'&&!/favicon\.ico/i.test(`${entry.url??''} ${entry.text}`))evidence.consoleObservations.push({kind:'log',url:entry.url??null,text:entry.text??'',phase:failArchive?'remote-failure':'normal'});});
+  client.on('Log.entryAdded',({entry})=>{if(entry.level==='error'&&!/favicon\.ico/i.test(`${entry.url??''} ${entry.text}`))evidence.consoleObservations.push({kind:'log',url:entry.url??null,text:entry.text??'',phase:failArchive?'remote-failure':'normal',requestId:entry.networkRequestId??null});});
   client.on('Network.requestWillBeSent',({requestId,request})=>{if(request.url===C1_ARCHIVE)records.set(requestId,{range:headerRange(request.headers),status:null});});
   client.on('Network.responseReceived',({requestId,response})=>{const record=records.get(requestId);if(record)record.status=response.status;});
   client.on('Network.loadingFailed',({requestId,errorText})=>{const failure=injectedFailuresByRequestId.get(requestId);if(failure)failure.networkErrorText=errorText;});
@@ -330,7 +341,20 @@ export async function certifyC1Functional({url}) {
     finalizeConsoleIssues();
     evidence.assessment=assessC1FunctionalEvidence(evidence); return evidence;
   } catch(error) { evidence.error=error.stack??String(error); finalizeConsoleIssues(); evidence.assessment=assessC1FunctionalEvidence(evidence); return evidence; }
-  finally { evidence.finishedAt=new Date().toISOString(); if(instrumentationId)await client.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:instrumentationId}).catch(()=>{}); client.close(); }
+  finally {
+    evidence.finishedAt=new Date().toISOString();
+    if(instrumentationId) {
+      try {
+        await client.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:instrumentationId});
+        evidence.instrumentationCleanup={status:'removed',identifier:instrumentationId};
+      } catch(error) {
+        evidence.instrumentationCleanup={status:'failed',identifier:instrumentationId,error:error.stack??String(error)};
+        evidence.consoleIssues.push({kind:'instrumentation-cleanup',url:null,text:evidence.instrumentationCleanup.error,phase:'cleanup'});
+        evidence.assessment=assessC1FunctionalEvidence(evidence);
+      }
+    } else evidence.instrumentationCleanup={status:'not-installed'};
+    client.close();
+  }
 }
 
 async function closeBrowser(client) {
