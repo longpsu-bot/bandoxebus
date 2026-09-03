@@ -87,7 +87,7 @@ test('existing non-addable declaration is editable but absent from Add Capabilit
   assert.deepEqual(ui.settingsControls('route-comparison-v1').controls.map(({ path }) => path), ['$.settings.adapter']);
 });
 
-test('installed urban context declaration authors source and release without a URL setting', () => {
+test('installed urban context declaration authors trusted source, release, and snapshot fields without a URL setting', () => {
   const { ui, manifest } = harness({ declarations: [{
     id: 'urban-context-v1',
     settings: {
@@ -100,8 +100,20 @@ test('installed urban context declaration authors source and release without a U
   assert.deepEqual(ui.settingsControls('urban-context-v1').controls.map(({ path }) => path), [
     '$.settings.adapter',
     '$.settings.buildingSource',
-    '$.settings.overtureRelease'
+    '$.settings.overtureRelease',
+    '$.settings.snapshot.asset',
+    '$.settings.snapshot.theme',
+    '$.settings.snapshot.bounds',
+    '$.settings.snapshot.sha256',
+    '$.settings.snapshot.byteLength',
+    '$.settings.snapshot.generator',
+    '$.settings.snapshot.generatorVersion',
+    '$.settings.snapshot.generatedAt',
+    '$.settings.snapshot.sourceContentLength',
+    '$.settings.snapshot.sourceEtag'
   ]);
+  ui.settingsControl('urban-context-v1', 'buildingSource').set('project-snapshot');
+  assert.equal(manifest.capabilities[0].settings.buildingSource, 'project-snapshot');
   ui.settingsControl('urban-context-v1', 'buildingSource').set('overture-pmtiles');
   ui.settingsControl('urban-context-v1', 'overtureRelease').set('2026-09-16.0');
   assert.deepEqual(manifest.capabilities[0].settings, {
