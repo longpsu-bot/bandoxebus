@@ -118,3 +118,31 @@ test('manifest minZoom and maxZoom must contain the initial zoom', async () => {
     assertManifestIssue(manifest, path, /zoom/i);
   }
 });
+
+test('manifest accepts the bounded PMTiles asset kind and enforces exact media pairing', async () => {
+  const valid = await loadFixture();
+  valid.assets['overture-buildings-snapshot'] = {
+    type: 'pmtiles',
+    src: './assets/context/overture-buildings.pmtiles',
+    mediaType: 'application/vnd.pmtiles',
+    required: true,
+    attribution: []
+  };
+  assert.equal(validateProjectManifest(valid), valid);
+
+  for (const [type, mediaType] of [
+    ['image', 'application/vnd.pmtiles'],
+    ['pmtiles', 'image/png'],
+    ['pmtiles', 'application/octet-stream']
+  ]) {
+    const manifest = await loadFixture();
+    manifest.assets['bad-asset'] = {
+      type,
+      src: './assets/bad-asset.bin',
+      mediaType,
+      required: true,
+      attribution: []
+    };
+    assertManifestIssue(manifest, '$.assets.bad-asset.mediaType', /media|allowed|enum/i);
+  }
+});
